@@ -5,6 +5,7 @@ import com.music.bitchord.data.SongListStore
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.lyrics.SidecarLyrics
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.remote.FileName
 import com.music.bitchord.data.remote.RemoteTagStore
 import com.music.bitchord.data.remote.RemoteTags
 import com.music.bitchord.data.settings.AppSettings
@@ -65,9 +66,51 @@ object WebDavRepository {
     /** Files read / files to read while tags are being fetched, else null. */
     val tagProgress: StateFlow<Pair<Int, Int>?> = _tagProgress.asStateFlow()
 
+    @Volatile
+    private var lyricsIndexFile: File? = null
+
     fun init(context: Context) {
         savedFile = File(context.filesDir, "remote_library/webdav.json")
+        lyricsIndexFile = File(context.filesDir, "remote_library/lyrics_index.txt")
         RemoteTagStore.init(context)
+        LibraryFolders.init(context)
+        // The lyrics folders' file list as last seen, so lyrics are found
+        // before the library has been opened this session.
+        runCatching { lyricsIndexFile?.takeIf { it.isFile }?.readLines()?.filter { it.isNotBlank() } }
+            .getOrNull()?.let(SidecarLyrics::index)
+        // And refreshed in the background, lyrics-only folders included.
+        scope.launch { refreshLyricsOnly() }
+    }
+
+    /** Lists just the folders that hold only lyrics — cheap, one flat folder is the usual case. */
+    private suspend fun refreshLyricsOnly() {
+        if (!isConfigured()) return
+        val folders = LibraryFolders.folders.value.filter { it.enabled && it.kind == LibraryFolders.Kind.LYRICS }
+        if (folders.isEmpty()) return
+        val u = AppSettings.webdavUsername.value
+        val p = AppSettings.webdavPassword.value
+        val found = folders.mapNotNull { WebDavClient.listLibrary(it.url, u, p).getOrNull() }
+        if (found.isEmpty()) return
+        // Merged with what the music folders last contributed, kept in the file.
+        val known = runCatching { lyricsIndexFile?.takeIf { it.isFile }?.readLines() }.getOrNull().orEmpty()
+        publishLyrics((found.flatMap { it.lyrics.map { e -> e.url } } + known).distinct())
+        found.flatMap { it.tables }.forEach { readAliasTable(it.url, u, p) }
+    }
+
+    private fun publishLyrics(urls: List<String>) {
+        SidecarLyrics.index(urls)
+        runCatching {
+            lyricsIndexFile?.let { f ->
+                f.parentFile?.mkdirs()
+                f.writeText(urls.joinToString("\n"))
+            }
+        }
+    }
+
+    /** A romaji list (`japanese_title`/`romanized_title` columns) becomes lyric aliases. */
+    private suspend fun readAliasTable(url: String, username: String, password: String) {
+        val text = WebDavClient.readText(url, username, password, 4 * 1024 * 1024).getOrNull() ?: return
+        com.music.bitchord.data.lyrics.LyricAliases.importCsv(text)
     }
 
     fun isConfigured(): Boolean =
@@ -98,14 +141,28 @@ object WebDavRepository {
         if (!WebDavConfig.isConfigured(url)) return@withContext emptyList()
         val username = AppSettings.webdavUsername.value
         val password = AppSettings.webdavPassword.value
-        val listing = WebDavClient.listLibrary(
-            baseUrl = url,
-            username = username,
-            password = password,
-        ).getOrNull() ?: return@withContext emptyList()
+        // Every enabled folder (several, with BitChord Audio's folder list);
+        // a setup from before folders existed is its one URL.
+        val folders = LibraryFolders.folders.value.filter { it.enabled }
+            .ifEmpty { listOf(LibraryFolders.Folder("legacy", "", url, true, LibraryFolders.Kind.BOTH)) }
+        val listed = folders.mapNotNull { folder ->
+            WebDavClient.listLibrary(folder.url, username, password, maxFiles = 50_000).getOrNull()?.let { folder to it }
+        }
+        if (listed.isEmpty()) return@withContext emptyList()
+        roots = listed.filter { it.first.hasMusic }.map { WebDavConfig.normalizeUrl(it.first.url).trimEnd('/') + "/" }
+        val music = listed.filter { it.first.hasMusic }.map { it.second }
+        val listing = WebDavClient.Listing(
+            audio = music.flatMap { it.audio }.distinctBy { it.url },
+            images = music.flatMap { it.images }.distinctBy { it.url },
+            // Lyrics from every folder, music and lyrics alike, first folder first.
+            lyrics = listed.flatMap { it.second.lyrics }.distinctBy { it.url },
+            tables = listed.flatMap { it.second.tables }.distinctBy { it.url },
+        )
         lastListing = listing
+        listing.tables.forEach { readAliasTable(it.url, username, password) }
         val songs = songsOf(listing)
         registerLyrics(listing)
+        publishLyrics(listing.lyrics.map { it.url })
         inMemory = songs
         savedFile?.let { SongListStore.save(it, songs) }
         readMissingTags(listing.audio, username, password)
@@ -115,11 +172,20 @@ object WebDavRepository {
     @Volatile
     private var lastListing: WebDavClient.Listing? = null
 
+    /** The music folders' roots, so a file's artist folder can be told apart. */
+    @Volatile
+    private var roots: List<String> = emptyList()
+
     private fun songsOf(listing: WebDavClient.Listing): List<Song> {
         val artByDir = listing.images.groupBy { dirKey(it.url) }
         return listing.audio.map { entry ->
-            val base = entry.toSong(artworkFor(entry.url, artByDir[dirKey(entry.url)].orEmpty()))
-            RemoteTagStore.get(entry.url, stamp(entry))?.let { base.withTags(it) } ?: base
+            val tags = RemoteTagStore.get(entry.url, stamp(entry))
+            val named = entry.toSong()
+            val song = tags?.let { named.withTags(it) } ?: named
+            // Covers: "cover - <Album>.jpg" beside the file or one folder up
+            // (your layout files them in the artist folder), else any cover.
+            val nearby = artByDir[dirKey(entry.url)].orEmpty() + artByDir[parentDirKey(entry.url)].orEmpty()
+            song.copy(thumbnailUrl = artworkFor(entry.url, nearby, song.albumName))
         }
     }
 
@@ -142,33 +208,65 @@ object WebDavRepository {
         password: String,
     ): Result<Unit> = WebDavClient.testConnection(url, username, password)
 
+    /**
+     * A file's best guess from its name and place, for before (or without)
+     * its tags. Reads the layouts a collection grows into:
+     * `Artist/Album/01 Title.mp3`, `Artist - Title.mp3`, `Title - Artist.mp3`,
+     * and `01. Title - Artist - Album - Year.mp3` — including the romanized
+     * and original title side by side (`Natsu No Ringo - 夏の林檎 - Kalafina - …`),
+     * whose spare names go to [fileNameAliases]. The artist folder (the first
+     * folder under a music folder) decides which part is the artist.
+     */
     fun WebDavClient.Entry.toSong(artworkUrl: String? = null): Song {
-        val album = parentFolderName(url)
-        return WebDavConfig.songFor(url, albumName = album).copy(
-            // Prefer the server's display name over the URL-decoded guess when
-            // it carries one.
-            title = displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
-                ?.let { splitTitle(it).second } ?: WebDavConfig.songFor(url).title,
-            artist = splitTitle(displayName.substringBeforeLast('.')).first
-                ?: WebDavConfig.songFor(url, album).artist,
+        val fileName = displayName.ifBlank { decodedLast(url) }
+        val parsed = FileName.parse(fileName, artistFolder(url), parentFolderName(url))
+        fileNameAliases[WebDavConfig.idFor(url)] = parsed.alternatives
+        return WebDavConfig.songFor(url, albumName = parsed.album ?: parentFolderName(url)).copy(
+            title = parsed.title,
+            artist = parsed.artist ?: WebDavConfig.songFor(url).artist,
+            trackNumber = parsed.track,
             thumbnailUrl = artworkUrl,
         )
     }
 
+    /** Spare names a file's own name gave for its song (a romaji title beside the original). */
+    private val fileNameAliases = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+
     /** [this] with whatever its file's tags say, keeping the guesses where they say nothing. */
-    private fun Song.withTags(t: RemoteTags.Tags): Song = copy(
-        title = t.title ?: title,
-        artist = t.artist ?: t.albumArtist ?: artist,
-        albumName = t.album ?: albumName,
-        trackNumber = t.trackNumber ?: trackNumber,
-        durationText = t.durationMs?.let(::formatDuration) ?: durationText,
-        sourceQuality = t.qualityLabel ?: sourceQuality,
-        sourceHiRes = t.hiRes,
-    ).also { song ->
-        if (t.altTitles.isNotEmpty() || t.altArtists.isNotEmpty()) {
-            com.music.bitchord.data.lyrics.LyricAliases.fromTags(song.videoId, t.altTitles, t.altArtists)
+    private fun Song.withTags(t: RemoteTags.Tags): Song {
+        val guessed = this
+        val song = copy(
+            title = t.title ?: title,
+            artist = t.artist ?: t.albumArtist ?: artist,
+            albumName = t.album ?: albumName,
+            trackNumber = t.trackNumber ?: trackNumber,
+            durationText = t.durationMs?.let(::formatDuration) ?: durationText,
+            sourceQuality = t.qualityLabel ?: sourceQuality,
+            sourceHiRes = t.hiRes,
+        )
+        // Every other name this song goes by: the tags' own alternatives, the
+        // file name's spare titles, and the file name's title when the tags
+        // chose another (the romaji one, usually, against a Japanese tag).
+        val alts = (t.altTitles + fileNameAliases[videoId].orEmpty() + listOf(guessed.title))
+            .filter { FileName.key(it) != FileName.key(song.title) && FileName.key(it).isNotEmpty() }
+            .distinctBy(FileName::key)
+        if (alts.isNotEmpty() || t.altArtists.isNotEmpty()) {
+            com.music.bitchord.data.lyrics.LyricAliases.fromTags(song.videoId, alts, t.altArtists)
         }
+        return song
     }
+
+    /** The first folder under the music folder this file is in: the artist, in an artist-first layout. */
+    private fun artistFolder(fileUrl: String): String? {
+        val root = roots.firstOrNull { fileUrl.startsWith(it) } ?: return null
+        val rel = fileUrl.removePrefix(root).split('/').filter { it.isNotEmpty() }
+        if (rel.size < 2) return null
+        return runCatching { URLDecoder.decode(rel[0], "UTF-8") }.getOrNull()
+    }
+
+    private fun decodedLast(url: String): String =
+        runCatching { URLDecoder.decode(url.trimEnd('/').substringAfterLast('/'), "UTF-8") }
+            .getOrDefault(url.substringAfterLast('/'))
 
     private fun formatDuration(ms: Long): String {
         val total = ms / 1000
@@ -243,8 +341,23 @@ object WebDavRepository {
      * inside the audio itself are not read — that would be a ranged fetch per
      * track at list time. See [RemoteArtwork][com.music.bitchord.data.remote.RemoteArtwork].
      */
-    fun artworkFor(fileUrl: String, siblings: List<WebDavClient.Entry>): String? =
-        com.music.bitchord.data.remote.RemoteArtwork.pick(siblings.map { it.url })
+    fun artworkFor(fileUrl: String, siblings: List<WebDavClient.Entry>, album: String? = null): String? {
+        if (siblings.isEmpty()) return null
+        // "cover - <Album>.jpg" (or any picture named after the album) first.
+        val albumKey = album?.let(FileName::key)?.takeIf { it.isNotEmpty() }
+        if (albumKey != null) {
+            siblings.firstOrNull { pic ->
+                val stem = FileName.key(decodedLast(pic.url).substringBeforeLast('.').removePrefix("cover - ").removePrefix("Cover - "))
+                stem == albumKey
+            }?.let { return it.url }
+        }
+        // Otherwise only pictures in the file's own folder: one up holds every
+        // album's cover, and any of them would be a guess.
+        val own = siblings.filter { dirKey(it.url) == dirKey(fileUrl) }
+        return com.music.bitchord.data.remote.RemoteArtwork.pick(own.map { it.url })
+    }
+
+    private fun parentDirKey(fileUrl: String): String = dirKey(dirKey(fileUrl).let { "https://$it" })
 
     private fun dirKey(fileUrl: String): String = runCatching {
         val uri = java.net.URI(fileUrl)

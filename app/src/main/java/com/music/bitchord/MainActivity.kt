@@ -660,6 +660,7 @@ private fun BitChordApp(
     var showLastfmLogin by remember { mutableStateOf(false) }
     var showWebDavEditor by remember { mutableStateOf(false) }
     var showPcloudEditor by remember { mutableStateOf(false) }
+    var sourceChoiceSong by remember { mutableStateOf<Song?>(null) }
     var showSmbEditor by remember { mutableStateOf(false) }
     // Discord Rich Presence: its own page under Account & integrations (a
     // route), its own full-screen sign-in, and one slot for whichever of its
@@ -4502,6 +4503,17 @@ private fun BitChordApp(
                 // idea of the song from the first second, and a wrong
                 // match sounds like a wrong match whether or not anything
                 // announced itself. See [Song.hasYouTubeOriginal].
+                // BitChord Audio: a song the merged library has in several places.
+                onChooseSource = com.music.bitchord.data.MergedLibrary.versionsOf(song)
+                    .takeIf { it.size > 1 }
+                    ?.let {
+                        {
+                            songActions = null
+                            sourceChoiceSong = song
+                        }
+                    },
+                chooseSourceValue = com.music.bitchord.data.MergedLibrary.versionsOf(song)
+                    .firstOrNull { it.song.videoId == song.videoId }?.origin?.label,
                 onRollbackToOriginal = if (fromPlayer &&
                     song.hasYouTubeOriginal() &&
                     // Nothing to revert *from*: the listener is hearing a
@@ -5594,6 +5606,18 @@ private fun BitChordApp(
             )
         }
 
+        // BitChord Audio: which copy of a song plays, from its menu.
+        sourceChoiceSong?.let { song ->
+            com.music.bitchord.ui.components.SourceChoiceDialog(
+                song = song,
+                onPicked = {
+                    sourceChoiceSong = null
+                    viewModel.reloadLocalDetail(com.music.bitchord.data.MergedLibrary.BROWSE_ID)
+                },
+                onDismiss = { sourceChoiceSong = null },
+            )
+        }
+
         // BitChord Audio: other names for a song's lyrics, raised from the player.
         val aliasSong by com.music.bitchord.ui.components.LyricAliasEditor.song.collectAsStateWithLifecycle()
         aliasSong?.let { song ->
@@ -5656,7 +5680,9 @@ private fun BitChordApp(
                 onSave = { (email, password, folder) ->
                     AppSettings.setWebDavUsername(email.trim())
                     AppSettings.setWebDavPassword(password)
-                    AppSettings.setWebDavUrl(com.music.bitchord.data.webdav.PcloudPreset.urlFor(pcloudHost, folder))
+                    val pcloudFolderUrl = com.music.bitchord.data.webdav.PcloudPreset.urlFor(pcloudHost, folder)
+                    AppSettings.setWebDavUrl(pcloudFolderUrl)
+                    com.music.bitchord.data.webdav.LibraryFolders.replacePrimary(pcloudFolderUrl)
                     showPcloudEditor = false
                 },
                 onDismiss = { showPcloudEditor = false },

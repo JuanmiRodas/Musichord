@@ -495,6 +495,16 @@ object AppSettings {
     /** BitChord Audio: romanized lyrics as the main line, fetched as soon as lyrics load. */
     val romajiFirstLyrics = MutableStateFlow(false)
 
+    /** BitChord Audio: your own lyrics files (.lrc/.lrcx/.txt) before the online providers. */
+    val ownLyricsFirst = MutableStateFlow(true)
+
+    /**
+     * BitChord Audio: which copy plays when a song is in several places — see
+     * [com.music.bitchord.data.MergedLibrary]. One of [SOURCE_BEST],
+     * [SOURCE_OWN_FIRST], [SOURCE_YOUTUBE_FIRST].
+     */
+    val sourcePreference = MutableStateFlow(SOURCE_BEST)
+
     /** BitChord Audio: with [romajiFirstLyrics], the original line stays small underneath. */
     val romajiShowOriginal = MutableStateFlow(true)
 
@@ -1003,6 +1013,8 @@ object AppSettings {
         progressiveBlur.value = prefs.getBoolean(KEY_PROGRESSIVE_BLUR, false)
         lyricsBlur.value = prefs.getBoolean(KEY_LYRICS_BLUR, true)
         romajiFirstLyrics.value = prefs.getBoolean(KEY_ROMAJI_FIRST, false)
+        ownLyricsFirst.value = prefs.getBoolean(KEY_OWN_LYRICS_FIRST, true)
+        sourcePreference.value = prefs.getString(KEY_SOURCE_PREFERENCE, SOURCE_BEST) ?: SOURCE_BEST
         romajiShowOriginal.value = prefs.getBoolean(KEY_ROMAJI_SHOW_ORIGINAL, true)
         lyricsOffsetMs.value = prefs.getInt(KEY_LYRICS_OFFSET_MS, 0)
             .coerceIn(MIN_LYRICS_OFFSET_MS, MAX_LYRICS_OFFSET_MS)
@@ -1456,6 +1468,16 @@ object AppSettings {
         val normalized = normalizePerformanceRefreshRate(value)
         performanceRefreshRate.value = normalized
         prefs.edit().putInt(KEY_PERFORMANCE_REFRESH_RATE, normalized).apply()
+    }
+
+    fun setOwnLyricsFirst(value: Boolean) {
+        ownLyricsFirst.value = value
+        prefs.edit().putBoolean(KEY_OWN_LYRICS_FIRST, value).apply()
+    }
+
+    fun setSourcePreference(value: String) {
+        sourcePreference.value = value
+        prefs.edit().putString(KEY_SOURCE_PREFERENCE, value).apply()
     }
 
     fun setRomajiFirstLyrics(value: Boolean) {
@@ -2218,6 +2240,11 @@ object AppSettings {
     private const val KEY_PROGRESSIVE_BLUR = "progressive_blur"
     private const val KEY_LYRICS_BLUR = "lyrics_blur"
     private const val KEY_ROMAJI_FIRST = "romaji_first_lyrics"
+    private const val KEY_OWN_LYRICS_FIRST = "own_lyrics_first"
+    private const val KEY_SOURCE_PREFERENCE = "source_preference"
+    const val SOURCE_BEST = "best"
+    const val SOURCE_OWN_FIRST = "own_first"
+    const val SOURCE_YOUTUBE_FIRST = "youtube_first"
     private const val KEY_ROMAJI_SHOW_ORIGINAL = "romaji_show_original"
     private const val KEY_LYRICS_OFFSET_MS = "lyrics_offset_ms"
     private const val KEY_TRANSLATION_LANGUAGE = "translation_language"

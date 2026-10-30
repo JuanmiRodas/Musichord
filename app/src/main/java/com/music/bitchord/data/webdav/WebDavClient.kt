@@ -77,8 +77,10 @@ object WebDavClient {
     data class Listing(
         val audio: List<Entry>,
         val images: List<Entry>,
-        /** BitChord Audio: `.lrc` files, matched to the audio beside them by name. */
+        /** BitChord Audio: lyrics files (`.lrc`, `.lrcx`, `.txt`). */
         val lyrics: List<Entry> = emptyList(),
+        /** BitChord Audio: `.csv` files — a romaji list among them is read for title aliases. */
+        val tables: List<Entry> = emptyList(),
     )
 
     suspend fun listLibrary(
@@ -93,6 +95,7 @@ object WebDavClient {
             val foundAudio = LinkedHashMap<String, Entry>()
             val foundImages = LinkedHashMap<String, Entry>()
             val foundLyrics = LinkedHashMap<String, Entry>()
+            val foundTables = LinkedHashMap<String, Entry>()
             val dirs = ArrayDeque<String>()
             dirs.add(root)
             val visited = HashSet<String>()
@@ -108,12 +111,20 @@ object WebDavClient {
                         when {
                             WebDavConfig.isAudioFile(name) -> foundAudio.putIfAbsent(entry.url, entry)
                             isImageFile(name) -> foundImages.putIfAbsent(entry.url, entry)
-                            name.endsWith(".lrc", ignoreCase = true) -> foundLyrics.putIfAbsent(entry.url, entry)
+                            name.substringAfterLast('.', "").lowercase(Locale.ROOT) in
+                                com.music.bitchord.data.lyrics.SidecarLyrics.EXTENSIONS ->
+                                foundLyrics.putIfAbsent(entry.url, entry)
+                            name.endsWith(".csv", ignoreCase = true) -> foundTables.putIfAbsent(entry.url, entry)
                         }
                     }
                 }
             }
-            Listing(foundAudio.values.toList(), foundImages.values.toList(), foundLyrics.values.toList())
+            Listing(
+                foundAudio.values.toList(),
+                foundImages.values.toList(),
+                foundLyrics.values.toList(),
+                foundTables.values.toList(),
+            )
         }
     }
 

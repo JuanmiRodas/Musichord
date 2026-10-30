@@ -42,6 +42,13 @@ object LyricAliases {
     private val user = ConcurrentHashMap<String, Names>()
     private val tags = ConcurrentHashMap<String, Names>()
 
+    /**
+     * Title → every name it goes by, from a romaji list ([importCsv]): keyed
+     * by letters and digits only, so "Rokutousei no Yoru (六等星の夜)",
+     * "Rokutousei no Yoru" and "六等星の夜" all find each other.
+     */
+    private val titleNames = ConcurrentHashMap<String, Set<String>>()
+
     private val _version = MutableStateFlow(0)
 
     /** Bumped when the listener's names change, so the open lyrics can look again. */
@@ -109,12 +116,87 @@ object LyricAliases {
         add(mine.titles, listOf(artist))
         out += Query(title, artist)
         add(fromFile.titles, fromFile.artists.ifEmpty { listOf(artist) })
+        add(titleNames[titleKey(title)].orEmpty().filter { titleKey(it) != titleKey(title) }, listOf(artist))
         add(fromFile.titles, listOf(artist))
         add(listOf(title), fromFile.artists)
         return out.filter { it.title.isNotBlank() }.take(MAX_QUERIES)
     }
 
     private const val MAX_QUERIES = 6
+
+    private fun titleKey(s: String): String =
+        Normalizer.normalize(s, Normalizer.Form.NFKC).lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+
+    /**
+     * Reads a romaji list — a CSV with `japanese_title` and `romanized_title`
+     * columns (others ignored) — into [titleNames]. Each row's names, and the
+     * halves of "Romaji (原題)", become one set of names for the same title.
+     */
+    fun importCsv(text: String) {
+        val rows = parseCsv(text)
+        val header = rows.firstOrNull()?.map { it.trim().lowercase(Locale.ROOT) } ?: return
+        val jp = header.indexOf("japanese_title")
+        val ro = header.indexOf("romanized_title")
+        if (jp < 0 || ro < 0) return
+        var added = 0
+        for (row in rows.drop(1)) {
+            val names = listOfNotNull(row.getOrNull(jp), row.getOrNull(ro))
+                .flatMap(::halves)
+                .map(String::trim)
+                .filter { it.isNotEmpty() }
+                .distinctBy(::titleKey)
+            if (names.size < 2) continue
+            val set = names.toSet()
+            names.forEach { n ->
+                val k = titleKey(n)
+                if (k.isNotEmpty()) titleNames[k] = titleNames[k].orEmpty() + set
+            }
+            added++
+        }
+        if (added > 0) _version.value += 1
+    }
+
+    private val HALVES = Regex("""^(.*?)\s*[(（](.+)[)）]\s*$""")
+
+    /** "Rokutousei no Yoru (六等星の夜)" → itself, "Rokutousei no Yoru", "六等星の夜". */
+    private fun halves(name: String): List<String> {
+        val m = HALVES.find(name) ?: return listOf(name)
+        return listOf(name, m.groupValues[1], m.groupValues[2])
+    }
+
+    private fun parseCsv(text: String): List<List<String>> {
+        val rows = ArrayList<List<String>>()
+        var row = ArrayList<String>()
+        val cell = StringBuilder()
+        var quoted = false
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            when {
+                quoted && c == '"' && text.getOrNull(i + 1) == '"' -> {
+                    cell.append('"')
+                    i++
+                }
+                c == '"' -> quoted = !quoted
+                !quoted && c == ',' -> {
+                    row += cell.toString()
+                    cell.clear()
+                }
+                !quoted && (c == '\n' || c == '\r') -> {
+                    if (c == '\r' && text.getOrNull(i + 1) == '\n') i++
+                    row += cell.toString()
+                    cell.clear()
+                    if (row.any { it.isNotEmpty() }) rows += row
+                    row = ArrayList()
+                }
+                else -> cell.append(c)
+            }
+            i++
+        }
+        row += cell.toString()
+        if (row.any { it.isNotEmpty() }) rows += row
+        return rows
+    }
 
     private fun songKey(title: String, artist: String): String =
         "song:" + norm(title) + "|" + norm(artist)

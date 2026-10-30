@@ -7,6 +7,7 @@ import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -54,6 +55,12 @@ fun libraryLinks(): List<LibraryLink> {
         icon = icon,
     )
     return listOfNotNull(
+        // BitChord Audio: every place your music is, one row per song.
+        link(
+            stringResource(R.string.merged_library),
+            stringResource(R.string.merged_library_subtitle),
+            com.music.bitchord.data.MergedLibrary.BROWSE_ID,
+        ),
         link(
             stringResource(R.string.downloads),
             stringResource(R.string.downloaded_songs),
@@ -126,6 +133,7 @@ fun libraryDeviceItems(downloadedReleases: List<SavedCollection>): List<ShelfIte
 fun deviceFolderIcon(browseId: String): ImageVector? = when (browseId) {
     "local:downloads" -> Icons.Rounded.Download
     "local:all" -> Icons.Rounded.Folder
+    com.music.bitchord.data.MergedLibrary.BROWSE_ID -> Icons.Rounded.LibraryMusic
     CACHE_FOLDER_BROWSE_ID -> Icons.Rounded.Storage
     com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID -> Icons.Rounded.Cloud
     com.music.bitchord.data.smb.SmbConfig.BROWSE_ID -> Icons.Rounded.Lan

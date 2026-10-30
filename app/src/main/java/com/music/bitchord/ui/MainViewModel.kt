@@ -458,15 +458,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         _lyricsChecked.value = false
         lyricsJob = viewModelScope.launch {
-            // BitChord Audio: a `.lrc` filed beside the track wins over
-            // everything — see [SidecarLyrics].
-            com.music.bitchord.data.lyrics.SidecarLyrics.forSong(getApplication(), videoId, localUri, localPath)
-                ?.let { sidecar ->
-                    _lyrics.value = sidecar
+            // BitChord Audio: your own lyrics files — beside the track, or in a
+            // lyrics folder, found by any of the song's names (see
+            // [SidecarLyrics]). First unless Settings says online goes first.
+            val nameQueries = com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, artist)
+            suspend fun ownLyrics() = com.music.bitchord.data.lyrics.SidecarLyrics.forSong(
+                getApplication(), videoId, localUri, localPath,
+                titles = nameQueries.map { it.title }.distinct(),
+                artists = nameQueries.map { it.artist }.distinct(),
+            )
+            val ownFirst = AppSettings.ownLyricsFirst.value
+            if (ownFirst) {
+                ownLyrics()?.let { own ->
+                    _lyrics.value = own
                     _lyricsSource.value = null
                     _lyricsChecked.value = true
                     return@launch
                 }
+            }
             // The file first, and without the duration gate below: a length is
             // only needed to *match* a track against a stranger's database, and
             // nothing is being matched here — these lyrics were written into
@@ -506,6 +515,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             val selected = selectedLyricsSource?.let(lyricsProviderResults::get) ?: found
+            if (selected == null && !ownFirst) {
+                // Online found nothing: your own files are the fallback.
+                ownLyrics()?.let { own ->
+                    _lyrics.value = own
+                    _lyricsSource.value = null
+                    _lyricsChecked.value = true
+                    return@launch
+                }
+            }
             _lyrics.value = selected?.lines
             _lyricsSource.value = selected?.source
             _lyricsChecked.value = true
@@ -2746,7 +2764,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 R.string.smb_empty,
                 com.music.bitchord.data.smb.SmbRepository::getSongs,
             )
+        // BitChord Audio: pCloud, the phone and YouTube in one list.
+        com.music.bitchord.data.MergedLibrary.BROWSE_ID ->
+            RemoteLibrary(R.string.merged_empty) {
+                com.music.bitchord.data.MergedLibrary.songs(getApplication(), youtubeLibrarySongs())
+            }
         else -> null
+    }
+
+    /** BitChord Audio: your YouTube Music side of the merged library — Liked Music and library songs. */
+    private fun youtubeLibrarySongs(): List<Song> {
+        val liked = LikedMusicCache.load(_activeProfileId.value)?.songs.orEmpty()
+        val library = (_library.value as? UiState.Success)?.data
+        return liked + library?.likedSongs.orEmpty() + library?.librarySongs.orEmpty()
     }
 
     private suspend fun remoteSongsState(remote: RemoteLibrary): UiState<List<Song>> =

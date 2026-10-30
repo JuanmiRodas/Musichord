@@ -289,6 +289,13 @@ fun SettingsScreen(
     val dontRepeatSuggestions by AppSettings.dontRepeatSuggestions.collectAsStateWithLifecycle()
     val smartVersionAlignment by AppSettings.smartVersionAlignment.collectAsStateWithLifecycle()
     val audioOnly by AppSettings.audioOnly.collectAsStateWithLifecycle()
+    val ownLyricsFirst by AppSettings.ownLyricsFirst.collectAsStateWithLifecycle()
+    val sourcePreference by AppSettings.sourcePreference.collectAsStateWithLifecycle()
+    val libraryFolders by com.music.bitchord.data.webdav.LibraryFolders.folders.collectAsStateWithLifecycle()
+    var showLibraryFolders by remember { mutableStateOf(false) }
+    if (showLibraryFolders) {
+        com.music.bitchord.ui.components.LibraryFoldersDialog(onDismiss = { showLibraryFolders = false })
+    }
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
@@ -1142,6 +1149,21 @@ fun SettingsScreen(
                         onClick = { AppSettings.setLyricsBlur(!lyricsBlur) },
                     )
                 }
+                val ownLyricsTitle = stringResource(R.string.own_lyrics_first)
+                row(ownLyricsTitle, "lyrics", "lrc", "lrcx", "files", "pcloud") {
+                    SettingsRow(
+                        icon = SfIcons.Language,
+                        title = ownLyricsTitle,
+                        subtitle = stringResource(R.string.own_lyrics_first_subtitle),
+                        trailing = {
+                            IosSwitch(
+                                checked = ownLyricsFirst,
+                                onCheckedChange = AppSettings::setOwnLyricsFirst,
+                            )
+                        },
+                        onClick = { AppSettings.setOwnLyricsFirst(!ownLyricsFirst) },
+                    )
+                }
                 val romajiFirstTitle = stringResource(R.string.romaji_first_lyrics)
                 row(romajiFirstTitle, "lyrics", "romaji", "romanized", "romanised", "japanese", "korean", "transliteration") {
                     SettingsRow(
@@ -1573,6 +1595,37 @@ fun SettingsScreen(
         }
 
         if (shows(SettingsCategory.ADVANCED)) SearchableSettingsGroup(search, header = stringResource(R.string.advanced_options)) {
+            val sourcePrefTitle = stringResource(R.string.source_preference)
+            val sourcePrefValues = listOf(
+                AppSettings.SOURCE_BEST to stringResource(R.string.source_preference_best),
+                AppSettings.SOURCE_OWN_FIRST to stringResource(R.string.source_preference_own),
+                AppSettings.SOURCE_YOUTUBE_FIRST to stringResource(R.string.source_preference_youtube),
+            )
+            row(sourcePrefTitle, "source", "pcloud", "youtube", "quality", "library") {
+                SettingsRow(
+                    icon = SfIcons.Cloud,
+                    title = sourcePrefTitle,
+                    subtitle = sourcePrefValues.firstOrNull { it.first == sourcePreference }?.second
+                        ?: sourcePrefValues.first().second,
+                    onClick = {
+                        val i = sourcePrefValues.indexOfFirst { it.first == sourcePreference }
+                        AppSettings.setSourcePreference(sourcePrefValues[(i + 1).mod(sourcePrefValues.size)].first)
+                    },
+                )
+            }
+            val foldersTitle = stringResource(R.string.library_folders)
+            row(foldersTitle, "folders", "pcloud", "webdav", "lyrics", "library") {
+                SettingsRow(
+                    icon = SfIcons.Storage,
+                    title = foldersTitle,
+                    subtitle = if (libraryFolders.isEmpty()) {
+                        stringResource(R.string.library_folders_none)
+                    } else {
+                        libraryFolders.filter { it.enabled }.joinToString(", ") { it.name }
+                    },
+                    onClick = { showLibraryFolders = true },
+                )
+            }
             val audioOnlyTitle = stringResource(R.string.audio_only)
             row(audioOnlyTitle, "audio", "video", "music video", "music only") {
                 SettingsRow(

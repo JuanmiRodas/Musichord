@@ -142,6 +142,13 @@ fun SongActionsMenu(
      */
     onRollbackToOriginal: (() -> Unit)? = null,
     /**
+     * BitChord Audio: picks which copy of this song plays — pCloud, the phone
+     * or YouTube — for a song the merged library has in several places.
+     * [chooseSourceValue] names the copy playing now.
+     */
+    onChooseSource: (() -> Unit)? = null,
+    chooseSourceValue: String? = null,
+    /**
      * The way back from a revert: available only for a player item the listener
      * has pinned to YouTube's own upload, where nothing will go looking for a
      * better copy again until they ask.
@@ -241,7 +248,7 @@ fun SongActionsMenu(
         // a substituted copy, the other for a track held on YouTube's own —
         // and between them they are the whole of the choice, which is why they
         // sit in the same group.
-        if (onRollbackToOriginal != null || onUpgradeQuality != null || onToggleAudioVersion != null) {
+        if (onRollbackToOriginal != null || onUpgradeQuality != null || onToggleAudioVersion != null || onChooseSource != null) {
             if (startsGroup()) IosMenuSeparator()
             (onRollbackToOriginal ?: onUpgradeQuality)?.let {
                 ActionRow(
@@ -274,6 +281,15 @@ fun SongActionsMenu(
                     ),
                     accent = palette.accent,
                     enabled = !audioVersionMissing,
+                    onClick = it,
+                )
+            }
+            onChooseSource?.let {
+                ActionRow(
+                    icon = SfIcons.Cloud,
+                    label = stringResource(R.string.play_from),
+                    value = chooseSourceValue,
+                    accent = palette.accent,
                     onClick = it,
                 )
             }

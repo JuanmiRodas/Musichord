@@ -44,6 +44,10 @@ class RemoteLibrarySource(
         waitForAll: Boolean,
         request: StreamRequest?,
     ): List<Song> {
+        // "YouTube first" in Settings: your files never stand in for YouTube's.
+        if (com.music.bitchord.data.settings.AppSettings.sourcePreference.value ==
+            com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST
+        ) return emptyList()
         val words = norm(query).split(' ').filter { it.isNotBlank() }
         if (words.isEmpty()) return emptyList()
         return WebDavRepository.library()

@@ -147,6 +147,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         AppSettings.init(this, authStore)
         com.music.bitchord.data.LikedMusicCache.init(this)
         com.music.bitchord.data.webdav.WebDavRepository.init(this)
+        com.music.bitchord.data.MergedLibrary.init(this)
         com.music.bitchord.data.lyrics.LyricAliases.init(this)
         // Before anything resolves a track: an addon with `checkValidLossless`
         // is gated on this, and the gate reads "no" until it has looked.

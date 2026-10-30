@@ -49,7 +49,13 @@ object SettingsSync {
     private const val UPLOAD_DEBOUNCE_MS = 20_000L
 
     /** Preference files whose contents follow you. */
-    private val PREFS = listOf("bitchord_settings", "bitchord_offline_playlists", "bitchord_original_versions")
+    private val PREFS = listOf(
+        "bitchord_settings",
+        "bitchord_offline_playlists",
+        "bitchord_original_versions",
+        "bitchord_merged_choices",
+        "bitchord_library_folders",
+    )
 
     /** Files in the app's own storage that follow you. */
     private val FILES = listOf("lyric_aliases.json")

@@ -318,7 +318,11 @@ fun SourcesScreen(
             onTest = {
                 WebDavRepository.testConnection(webdavUrl, webdavUsername, webdavPassword)
             },
-            onDisconnect = { AppSettings.clearWebDav() },
+            onDisconnect = {
+                // Only stops reading: nothing on the server is touched.
+                com.music.bitchord.data.webdav.LibraryFolders.clear()
+                AppSettings.clearWebDav()
+            },
         )
 
         RemoteLibrarySection(
@@ -340,7 +344,11 @@ fun SourcesScreen(
             onTest = {
                 WebDavRepository.testConnection(webdavUrl, webdavUsername, webdavPassword)
             },
-            onDisconnect = { AppSettings.clearWebDav() },
+            onDisconnect = {
+                // Only stops reading: nothing on the server is touched.
+                com.music.bitchord.data.webdav.LibraryFolders.clear()
+                AppSettings.clearWebDav()
+            },
         )
 
         // A personal library on a file share, filed next to the WebDAV one
