@@ -41,8 +41,12 @@ buildscript {
  * No "v" in the name — the in-app updater reads it as a number; the "v" is the
  * release tag's alone.
  */
-extra["bitchordVersionCode"] = 36
-extra["bitchordVersionName"] = "1.9"
+// BitChord Audio fork: CI passes its build number, so every build installs over
+// the last one and the in-app updater (which compares dotted numbers) sees it as
+// newer. Local builds without the variable are build 0.
+val audioBuild: Int = System.getenv("AUDIO_BUILD_NUMBER")?.toIntOrNull() ?: 0
+extra["bitchordVersionCode"] = 1000 + audioBuild
+extra["bitchordVersionName"] = "1.9.$audioBuild"
 
 /*
  * Bump this by hand before cutting each sideloaded test build ("beta2",

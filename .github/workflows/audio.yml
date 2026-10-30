@@ -1,0 +1,74 @@
+name: BitChord Audio APK
+
+# Every push to main builds the phone app, signs it, and publishes it as a
+# GitHub release named v1.9.<run number>, which the in-app updater picks up.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: audio-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      AUDIO_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+
+      # The same key the hand-patched "BitChord Audio" builds were signed
+      # with, so these install over them and keep the sign-in. It is the
+      # widely published Android debug key: fine for a personal sideloaded
+      # app, but swap it for a private key (kept in repository secrets)
+      # before sharing builds with anyone.
+      - name: Signing config
+        run: |
+          {
+            echo "storeFile=ci/bitchord-audio.keystore"
+            echo "storePassword=android"
+            echo "keyAlias=androiddebugkey"
+            echo "keyPassword=android"
+          } > keystore.properties
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleProdRelease --stacktrace
+
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          v="1.9.${AUDIO_BUILD_NUMBER}"
+          for f in app/build/outputs/apk/prod/release/*.apk; do
+            case "$(basename "$f")" in
+              *arm64-v8a*) cp "$f" "out/BitChord-v${v}_arm64-v8a.apk" ;;
+            esac
+          done
+          ls -l out
+          test -n "$(ls out)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BitChord-Audio-${{ github.run_number }}
+          path: out/*.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.9.${{ github.run_number }}
+          name: BitChord Audio 1.9.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          body: ${{ github.event.head_commit.message }}
+          files: out/*.apk
