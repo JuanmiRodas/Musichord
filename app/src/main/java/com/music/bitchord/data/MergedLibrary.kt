@@ -107,7 +107,7 @@ object MergedLibrary {
                             length == null || o == null || abs(length - o) <= SAME_LENGTH_MS
                         }
                 }
-            val g = target ?: groups.size.also { groups += mutableListOf() }
+            val g = target ?: groups.size.also { groups.add(mutableListOf()) }
             groups[g] += v
             keys.forEach { k -> index.getOrPut(k) { mutableListOf() }.let { if (g !in it) it += g } }
         }
