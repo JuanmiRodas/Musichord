@@ -485,6 +485,12 @@ object AppSettings {
     /** Blurs unfocused lyric lines, keeping the active line sharp. */
     val lyricsBlur = MutableStateFlow(true)
 
+    /** BitChord Audio: romanized lyrics as the main line, fetched as soon as lyrics load. */
+    val romajiFirstLyrics = MutableStateFlow(false)
+
+    /** BitChord Audio: with [romajiFirstLyrics], the original line stays small underneath. */
+    val romajiShowOriginal = MutableStateFlow(true)
+
     /** Positive values delay synced lyrics; negative values bring them forward. */
     val lyricsOffsetMs = MutableStateFlow(0)
 
@@ -989,6 +995,8 @@ object AppSettings {
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
         progressiveBlur.value = prefs.getBoolean(KEY_PROGRESSIVE_BLUR, false)
         lyricsBlur.value = prefs.getBoolean(KEY_LYRICS_BLUR, true)
+        romajiFirstLyrics.value = prefs.getBoolean(KEY_ROMAJI_FIRST, false)
+        romajiShowOriginal.value = prefs.getBoolean(KEY_ROMAJI_SHOW_ORIGINAL, true)
         lyricsOffsetMs.value = prefs.getInt(KEY_LYRICS_OFFSET_MS, 0)
             .coerceIn(MIN_LYRICS_OFFSET_MS, MAX_LYRICS_OFFSET_MS)
         translationLanguage.value = prefs.getString(KEY_TRANSLATION_LANGUAGE, "").orEmpty()
@@ -1441,6 +1449,16 @@ object AppSettings {
         val normalized = normalizePerformanceRefreshRate(value)
         performanceRefreshRate.value = normalized
         prefs.edit().putInt(KEY_PERFORMANCE_REFRESH_RATE, normalized).apply()
+    }
+
+    fun setRomajiFirstLyrics(value: Boolean) {
+        romajiFirstLyrics.value = value
+        prefs.edit().putBoolean(KEY_ROMAJI_FIRST, value).apply()
+    }
+
+    fun setRomajiShowOriginal(value: Boolean) {
+        romajiShowOriginal.value = value
+        prefs.edit().putBoolean(KEY_ROMAJI_SHOW_ORIGINAL, value).apply()
     }
 
     fun setLyricsBlur(value: Boolean) {
@@ -2192,6 +2210,8 @@ object AppSettings {
     private const val KEY_LIQUID_GLASS = "liquid_glass"
     private const val KEY_PROGRESSIVE_BLUR = "progressive_blur"
     private const val KEY_LYRICS_BLUR = "lyrics_blur"
+    private const val KEY_ROMAJI_FIRST = "romaji_first_lyrics"
+    private const val KEY_ROMAJI_SHOW_ORIGINAL = "romaji_show_original"
     private const val KEY_LYRICS_OFFSET_MS = "lyrics_offset_ms"
     private const val KEY_TRANSLATION_LANGUAGE = "translation_language"
     private const val KEY_ANIMATED_CANVAS = "animated_canvas"

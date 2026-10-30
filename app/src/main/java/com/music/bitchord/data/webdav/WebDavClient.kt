@@ -36,6 +36,9 @@ object WebDavClient {
         val displayName: String,
         val isCollection: Boolean,
         val contentType: String? = null,
+        /** BitChord Audio: size and last change, so a file's saved tags can be checked against it. */
+        val size: Long? = null,
+        val modified: String? = null,
     )
 
     private val PROPFIND_BODY = """<?xml version="1.0" encoding="utf-8"?>
@@ -44,6 +47,8 @@ object WebDavClient {
     <d:displayname/>
     <d:resourcetype/>
     <d:getcontenttype/>
+    <d:getcontentlength/>
+    <d:getlastmodified/>
   </d:prop>
 </d:propfind>
 """.trimIndent().toRequestBody("application/xml; charset=utf-8".toMediaType())
@@ -69,7 +74,12 @@ object WebDavClient {
      * tracks already walks past them — a second pass would pay the whole
      * traversal again for files already in hand.
      */
-    data class Listing(val audio: List<Entry>, val images: List<Entry>)
+    data class Listing(
+        val audio: List<Entry>,
+        val images: List<Entry>,
+        /** BitChord Audio: `.lrc` files, matched to the audio beside them by name. */
+        val lyrics: List<Entry> = emptyList(),
+    )
 
     suspend fun listLibrary(
         baseUrl: String,
@@ -82,6 +92,7 @@ object WebDavClient {
             require(WebDavConfig.isConfigured(root)) { "WebDAV is not configured" }
             val foundAudio = LinkedHashMap<String, Entry>()
             val foundImages = LinkedHashMap<String, Entry>()
+            val foundLyrics = LinkedHashMap<String, Entry>()
             val dirs = ArrayDeque<String>()
             dirs.add(root)
             val visited = HashSet<String>()
@@ -97,11 +108,12 @@ object WebDavClient {
                         when {
                             WebDavConfig.isAudioFile(name) -> foundAudio.putIfAbsent(entry.url, entry)
                             isImageFile(name) -> foundImages.putIfAbsent(entry.url, entry)
+                            name.endsWith(".lrc", ignoreCase = true) -> foundLyrics.putIfAbsent(entry.url, entry)
                         }
                     }
                 }
             }
-            Listing(foundAudio.values.toList(), foundImages.values.toList())
+            Listing(foundAudio.values.toList(), foundImages.values.toList(), foundLyrics.values.toList())
         }
     }
 
@@ -116,6 +128,40 @@ object WebDavClient {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         return ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp"
     }
+
+    /**
+     * BitChord Audio: the first [bytes] of [fileUrl], for reading its tags.
+     * A server that ignores the range sends the whole file, so the body is
+     * cut off at [bytes] rather than read to the end.
+     */
+    suspend fun readHead(fileUrl: String, username: String, password: String, bytes: Int): Result<ByteArray> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val builder = Request.Builder().url(fileUrl).header("Range", "bytes=0-${bytes - 1}")
+                WebDavConfig.basicAuthHeader(username, password)?.let { builder.header("Authorization", it) }
+                Http.client.newCall(builder.build()).execute().use { response ->
+                    if (response.code !in 200..299) throw WebDavException("Read failed with ${response.code}")
+                    val body = response.body ?: throw WebDavException("Empty response")
+                    val out = java.io.ByteArrayOutputStream(bytes)
+                    val source = body.byteStream()
+                    val buf = ByteArray(16 * 1024)
+                    while (out.size() < bytes) {
+                        val n = source.read(buf, 0, minOf(buf.size, bytes - out.size()))
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                    }
+                    out.toByteArray()
+                }
+            }
+        }
+
+    /** BitChord Audio: a small text file — a `.lrc` — read whole. */
+    suspend fun readText(fileUrl: String, username: String, password: String, maxBytes: Int = 1024 * 1024): Result<String> =
+        readHead(fileUrl, username, password, maxBytes).map { bytes ->
+            // UTF-8 with or without a BOM; that is what every lyric tool writes.
+            val text = String(bytes, Charsets.UTF_8)
+            text.removePrefix("\uFEFF")
+        }
 
     private fun propfindRequest(
         url: String,
@@ -254,7 +300,20 @@ object WebDavClient {
                 ?.getElementsByTagNameNS("*", "collection")?.length?.let { it > 0 } == true
             val contentType = node.getElementsByTagNameNS("*", "getcontenttype")
                 .item(0)?.textContent?.trim()?.takeIf { it.isNotBlank() }
-            out.add(Entry(url = url, displayName = displayName, isCollection = isCollection, contentType = contentType))
+            val size = node.getElementsByTagNameNS("*", "getcontentlength")
+                .item(0)?.textContent?.trim()?.toLongOrNull()
+            val modified = node.getElementsByTagNameNS("*", "getlastmodified")
+                .item(0)?.textContent?.trim()?.takeIf { it.isNotBlank() }
+            out.add(
+                Entry(
+                    url = url,
+                    displayName = displayName,
+                    isCollection = isCollection,
+                    contentType = contentType,
+                    size = size,
+                    modified = modified,
+                ),
+            )
         }
         return out
     }

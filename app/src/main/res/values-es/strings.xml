@@ -538,6 +538,16 @@
     <string name="not_enough_this_month">Escucha algunas canciones más este mes para desbloquear tu Replay.</string>
     <string name="liked_music_pin_title">Música que te gusta</string>
     <string name="liked_music_pin_subtitle">Lista automática</string>
+    <string name="romaji_first_lyrics">Letras romanizadas primero</string>
+    <string name="romaji_first_lyrics_subtitle">Muestra las letras en otras escrituras romanizadas (p. ej. romaji) como línea principal, en cuanto se cargan</string>
+    <string name="romaji_show_original">Mostrar el original debajo</string>
+    <string name="romaji_show_original_subtitle">Mantiene la línea original en letra pequeña bajo cada línea romanizada</string>
+    <string name="pcloud">pCloud</string>
+    <string name="pcloud_subtitle">Música en tu pCloud</string>
+    <string name="pcloud_not_configured">Inicia sesión para añadir tu carpeta de música de pCloud</string>
+    <string name="pcloud_description">Tu carpeta de música de pCloud y todas las carpetas que contiene, con etiquetas, portadas y letras .lrc. Usa tu email y contraseña de pCloud; las cuentas con verificación en dos pasos no pueden conectarse así.</string>
+    <string name="pcloud_email">Email de pCloud</string>
+    <string name="pcloud_folder_hint">Carpeta, p. ej. Music (vacío para todo)</string>
     <string name="pinned">Fijado</string>
     <string name="replay_across"> repartidas en </string>
     <string name="replay_album_end"> concentró tu atención.</string>

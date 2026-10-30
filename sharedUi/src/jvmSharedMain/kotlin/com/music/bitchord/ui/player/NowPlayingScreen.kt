@@ -2214,7 +2214,7 @@ fun NowPlayingScreen(
                                 // a tap to reveal, and leaving the reveal gesture
                                 // armed would only eat taps meant for the lines.
                                 LyricsPanel(
-                                    lines = lyrics.orEmpty(),
+                                    lines = lyricsTranslation.panelLines,
                                     subLines = lyricsTranslation.subLines,
                                     trackKey = song.videoId,
                                     playhead = lyricsPlayhead,
@@ -3696,7 +3696,7 @@ fun NowPlayingScreen(
                                         .graphicsLayer { alpha = if (lyricsPanelVisible) panelFade.value else 0f },
                                 ) { particleProgress ->
                                     LyricsPanel(
-                                        lines = lyrics.orEmpty(),
+                                        lines = lyricsTranslation.panelLines,
                                         subLines = lyricsTranslation.subLines,
                                         trackKey = song.videoId,
                                         playhead = lyricsPlayhead,

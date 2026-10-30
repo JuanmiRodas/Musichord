@@ -1,10 +1,7 @@
 package com.music.bitchord.data
 
 import android.content.Context
-import com.music.bitchord.data.model.ArtistRef
 import com.music.bitchord.data.model.Song
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 
 /**
@@ -46,29 +43,16 @@ object LikedMusicCache {
         return File(base, "liked_$key.json")
     }
 
-    fun load(profile: String?): Saved? = runCatching {
-        val f = file(profile)?.takeIf { it.isFile } ?: return null
-        val root = JSONObject(f.readText())
-        val array = root.getJSONArray("songs")
-        val songs = (0 until array.length()).map { songFrom(array.getJSONObject(it)) }
-        Saved(songs, root.optLong("savedAt", 0L)).takeIf { songs.isNotEmpty() }
-    }.getOrNull()
+    fun load(profile: String?): Saved? {
+        val f = file(profile) ?: return null
+        val saved = SongListStore.load(f) ?: return null
+        return Saved(saved.songs, saved.savedAt).takeIf { it.songs.isNotEmpty() }
+    }
 
     fun save(profile: String?, songs: List<Song>) {
         if (songs.isEmpty()) return
-        runCatching {
-            val f = file(profile) ?: return
-            val array = JSONArray()
-            songs.forEach { array.put(json(it)) }
-            val root = JSONObject().put("savedAt", System.currentTimeMillis()).put("songs", array)
-            // Written aside and renamed, so a process killed mid-write keeps the old list.
-            val tmp = File(f.parentFile, f.name + ".tmp")
-            tmp.writeText(root.toString())
-            if (!tmp.renameTo(f)) {
-                f.delete()
-                tmp.renameTo(f)
-            }
-        }
+        val f = file(profile) ?: return
+        SongListStore.save(f, songs)
     }
 
     /** Takes [videoId] out of the saved list — an un-like made inside the app. */
@@ -95,55 +79,5 @@ object LikedMusicCache {
         val anchor = fresh.asReversed().firstNotNullOfOrNull { savedIndex[it.videoId] } ?: return null
         val inFresh = fresh.mapTo(HashSet()) { it.videoId }
         return fresh + saved.drop(anchor + 1).filterNot { it.videoId in inFresh }
-    }
-
-    private fun json(s: Song): JSONObject = JSONObject().apply {
-        put("videoId", s.videoId)
-        put("title", s.title)
-        put("artist", s.artist)
-        s.thumbnailUrl?.let { put("thumbnailUrl", it) }
-        s.durationText?.let { put("durationText", it) }
-        s.artistId?.let { put("artistId", it) }
-        s.albumId?.let { put("albumId", it) }
-        s.albumName?.let { put("albumName", it) }
-        if (s.isVideo) put("isVideo", true)
-        s.setVideoId?.let { put("setVideoId", it) }
-        s.isExplicit?.let { put("isExplicit", it) }
-        if (s.artists.isNotEmpty()) {
-            put(
-                "artists",
-                JSONArray().apply {
-                    s.artists.forEach { a ->
-                        put(JSONObject().put("name", a.name).apply { a.browseId?.let { put("browseId", it) } })
-                    }
-                },
-            )
-        }
-    }
-
-    private fun JSONObject.str(key: String): String? = if (has(key) && !isNull(key)) getString(key) else null
-
-    private fun songFrom(o: JSONObject): Song {
-        val artists = o.optJSONArray("artists")?.let { a ->
-            (0 until a.length()).map { i ->
-                val x = a.getJSONObject(i)
-                ArtistRef(name = x.getString("name"), browseId = x.str("browseId"))
-            }
-        }.orEmpty()
-        val isVideo = o.optBoolean("isVideo", false)
-        return Song(
-            videoId = o.getString("videoId"),
-            title = o.getString("title"),
-            artist = o.getString("artist"),
-            thumbnailUrl = o.str("thumbnailUrl"),
-            durationText = o.str("durationText"),
-            artistId = o.str("artistId"),
-            artists = artists,
-            albumId = o.str("albumId"),
-            albumName = o.str("albumName"),
-            isVideo = isVideo,
-            setVideoId = o.str("setVideoId"),
-            isExplicit = if (o.has("isExplicit")) o.getBoolean("isExplicit") else null,
-        )
     }
 }

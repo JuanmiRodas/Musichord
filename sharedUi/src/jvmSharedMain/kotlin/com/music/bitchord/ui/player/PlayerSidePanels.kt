@@ -106,7 +106,7 @@ fun LyricsSidePanel(
                     // is no transport hidden behind these lines for a tap to
                     // bring back.
                     LyricsPanel(
-                        lines = lyrics.orEmpty(),
+                        lines = lyricsTranslation.panelLines,
                         subLines = lyricsTranslation.subLines,
                         trackKey = song.videoId,
                         playhead = lyricsPlayhead,

@@ -243,6 +243,10 @@ interface PlayerSettingsSource {
     val lastPlayerScreen: StateFlow<LastPlayerScreen>
     val legacyMeshGradient: StateFlow<Boolean>
     val lyricsBlur: StateFlow<Boolean>
+    /** BitChord Audio: romanized lyrics as the main line, fetched as soon as lyrics load. */
+    val romajiFirstLyrics: StateFlow<Boolean>
+    /** BitChord Audio: with [romajiFirstLyrics], keep the original small under each line. */
+    val romajiShowOriginal: StateFlow<Boolean>
     val lyricsOffsetMs: StateFlow<Int>
     val lyricsSourceOrder: StateFlow<List<LyricsSource>>
     val meteredConnection: StateFlow<Boolean?>

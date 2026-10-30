@@ -117,6 +117,8 @@ fun SourcesScreen(
      * this subtree.
      */
     onEditWebDav: () -> Unit,
+    /** BitChord Audio: as [onEditWebDav], for the pCloud sign-in (a WebDAV library underneath). */
+    onEditPcloud: () -> Unit = {},
     /** As [onEditWebDav], for the SMB share editor. */
     onEditSmb: () -> Unit,
     /** Opens the full-window warning before JioSaavn is opted into. */
@@ -295,6 +297,30 @@ fun SourcesScreen(
         // holds the listener's own files instead of answering for YouTube's,
         // so it takes no part in the ranking and gets its own group. The
         // editor is raised to the activity like every other alert.
+        // BitChord Audio: pCloud, which is the WebDAV library below pointed at
+        // pCloud's own server — see [com.music.bitchord.data.webdav.PcloudPreset].
+        val pcloudConnected = com.music.bitchord.data.webdav.PcloudPreset.isPcloud(webdavUrl)
+        RemoteLibrarySection(
+            icon = SfIcons.Cloud,
+            title = stringResource(R.string.pcloud),
+            description = stringResource(R.string.pcloud_description),
+            subtitle = if (!pcloudConnected) {
+                stringResource(R.string.pcloud_not_configured)
+            } else {
+                val folder = com.music.bitchord.data.webdav.PcloudPreset.folderOf(webdavUrl).ifBlank { "/" }
+                "$webdavUsername · $folder"
+            },
+            listSubtitle = stringResource(R.string.pcloud_subtitle),
+            disconnectTitle = stringResource(R.string.webdav_disconnect),
+            configured = pcloudConnected,
+            testFailedRes = R.string.webdav_test_failed,
+            onEdit = onEditPcloud,
+            onTest = {
+                WebDavRepository.testConnection(webdavUrl, webdavUsername, webdavPassword)
+            },
+            onDisconnect = { AppSettings.clearWebDav() },
+        )
+
         RemoteLibrarySection(
             icon = SfIcons.Cloud,
             title = stringResource(R.string.webdav),

@@ -659,6 +659,7 @@ private fun BitChordApp(
     var showListenBrainzLogin by remember { mutableStateOf(false) }
     var showLastfmLogin by remember { mutableStateOf(false) }
     var showWebDavEditor by remember { mutableStateOf(false) }
+    var showPcloudEditor by remember { mutableStateOf(false) }
     var showSmbEditor by remember { mutableStateOf(false) }
     // Discord Rich Presence: its own page under Account & integrations (a
     // route), its own full-screen sign-in, and one slot for whichever of its
@@ -1156,9 +1157,10 @@ private fun BitChordApp(
     val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
     val lyricsSourceOrder by AppSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
     val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
+    val lyricAliasesVersion by com.music.bitchord.data.lyrics.LyricAliases.version.collectAsStateWithLifecycle()
     LaunchedEffect(
         player.song?.videoId, player.durationMs, syncedLyricsEnabled, lyricsSources,
-        lyricsSourceOrder, prioritizeSyllableSync,
+        lyricsSourceOrder, prioritizeSyllableSync, lyricAliasesVersion,
     ) {
         player.song?.let {
             viewModel.loadLyrics(
@@ -1173,6 +1175,7 @@ private fun BitChordApp(
                 player.durationMs.takeIf { ms -> ms > 0L } ?: it.durationMillis(),
                 it.albumName,
                 it.localUri,
+                it.localPath,
             )
         }
     }
@@ -3015,6 +3018,7 @@ private fun BitChordApp(
                                 contentPadding = listPadding,
                                 onEditSource = { editingSource = it },
                                 onEditWebDav = { showWebDavEditor = true },
+                                onEditPcloud = { showPcloudEditor = true },
                                 onEditSmb = { showSmbEditor = true },
                                 onConfirmJioSaavn = { confirmJioSaavn = true },
                             )
@@ -5577,6 +5581,66 @@ private fun BitChordApp(
                     showWebDavEditor = false
                 },
                 onDismiss = { showWebDavEditor = false },
+            )
+        }
+
+        // BitChord Audio: pCloud sign-in. It writes the WebDAV settings for
+        // pCloud's server; the region is found by trying EU, then US.
+        if (showPcloudEditor) {
+            BackHandler { showPcloudEditor = false }
+            val pcloudUrl = AppSettings.webdavUrl.value
+            val isPcloud = com.music.bitchord.data.webdav.PcloudPreset.isPcloud(pcloudUrl)
+            var pcloudHost by remember {
+                mutableStateOf(
+                    com.music.bitchord.data.webdav.PcloudPreset.hostOf(pcloudUrl)
+                        ?: com.music.bitchord.data.webdav.PcloudPreset.EU_HOST,
+                )
+            }
+            ServerEditorHost(
+                hazeState = hazeState,
+                title = stringResource(R.string.pcloud),
+                description = stringResource(R.string.pcloud_description),
+                fields = listOf(
+                    FieldConfig(
+                        initial = if (isPcloud) AppSettings.webdavUsername.value else "",
+                        placeholder = stringResource(R.string.pcloud_email),
+                        keyboardType = KeyboardType.Email,
+                    ),
+                    FieldConfig(
+                        initial = if (isPcloud) AppSettings.webdavPassword.value else "",
+                        placeholder = stringResource(R.string.password),
+                        keyboardType = KeyboardType.Password,
+                        isPassword = true,
+                    ),
+                    FieldConfig(
+                        initial = if (isPcloud) com.music.bitchord.data.webdav.PcloudPreset.folderOf(pcloudUrl) else "Music",
+                        placeholder = stringResource(R.string.pcloud_folder_hint),
+                    ),
+                ),
+                canSubmit = { it[0].isNotBlank() && it[1].isNotBlank() },
+                testFailedRes = R.string.webdav_test_failed,
+                onTest = { (email, password, folder) ->
+                    var last: Result<Unit> = Result.failure(IllegalStateException("pCloud"))
+                    for (host in com.music.bitchord.data.webdav.PcloudPreset.hosts) {
+                        last = com.music.bitchord.data.webdav.WebDavRepository.testConnection(
+                            com.music.bitchord.data.webdav.PcloudPreset.urlFor(host, folder),
+                            email.trim(),
+                            password,
+                        )
+                        if (last.isSuccess) {
+                            pcloudHost = host
+                            break
+                        }
+                    }
+                    last
+                },
+                onSave = { (email, password, folder) ->
+                    AppSettings.setWebDavUsername(email.trim())
+                    AppSettings.setWebDavPassword(password)
+                    AppSettings.setWebDavUrl(com.music.bitchord.data.webdav.PcloudPreset.urlFor(pcloudHost, folder))
+                    showPcloudEditor = false
+                },
+                onDismiss = { showPcloudEditor = false },
             )
         }
 

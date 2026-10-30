@@ -247,6 +247,8 @@ fun SettingsScreen(
     val progressiveBlur by AppSettings.progressiveBlur.collectAsStateWithLifecycle()
     val liquidGlassSupported = isGlassSupported()
     val lyricsBlur by AppSettings.lyricsBlur.collectAsStateWithLifecycle()
+    val romajiFirstLyrics by AppSettings.romajiFirstLyrics.collectAsStateWithLifecycle()
+    val romajiShowOriginal by AppSettings.romajiShowOriginal.collectAsStateWithLifecycle()
     val animatedCanvas by AppSettings.animatedCanvas.collectAsStateWithLifecycle()
     val canvasOverCellular by AppSettings.canvasOverCellular.collectAsStateWithLifecycle()
     val signatureApiEnabled by AppSettings.signatureApiEnabled.collectAsStateWithLifecycle()
@@ -1139,6 +1141,38 @@ fun SettingsScreen(
                         },
                         onClick = { AppSettings.setLyricsBlur(!lyricsBlur) },
                     )
+                }
+                val romajiFirstTitle = stringResource(R.string.romaji_first_lyrics)
+                row(romajiFirstTitle, "lyrics", "romaji", "romanized", "romanised", "japanese", "korean", "transliteration") {
+                    SettingsRow(
+                        icon = SfIcons.Language,
+                        title = romajiFirstTitle,
+                        subtitle = stringResource(R.string.romaji_first_lyrics_subtitle),
+                        trailing = {
+                            IosSwitch(
+                                checked = romajiFirstLyrics,
+                                onCheckedChange = AppSettings::setRomajiFirstLyrics,
+                            )
+                        },
+                        onClick = { AppSettings.setRomajiFirstLyrics(!romajiFirstLyrics) },
+                    )
+                }
+                if (romajiFirstLyrics) {
+                    val romajiOriginalTitle = stringResource(R.string.romaji_show_original)
+                    row(romajiOriginalTitle, "lyrics", "romaji", "original") {
+                        SettingsRow(
+                            icon = SfIcons.Language,
+                            title = romajiOriginalTitle,
+                            subtitle = stringResource(R.string.romaji_show_original_subtitle),
+                            trailing = {
+                                IosSwitch(
+                                    checked = romajiShowOriginal,
+                                    onCheckedChange = AppSettings::setRomajiShowOriginal,
+                                )
+                            },
+                            onClick = { AppSettings.setRomajiShowOriginal(!romajiShowOriginal) },
+                        )
+                    }
                 }
                 val lyricsSourcesTitle = stringResource(R.string.lyrics_sources)
                 row(lyricsSourcesTitle, "lyrics", "lrclib", "musixmatch") {

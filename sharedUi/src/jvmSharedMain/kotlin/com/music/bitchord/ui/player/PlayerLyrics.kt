@@ -3046,6 +3046,11 @@ private fun LyricsLoadingLine(text: String, modifier: Modifier = Modifier) {
 internal class LyricsTranslationUi(
     /** The lines the one-line strip reads: the originals, or their translation. */
     val displayedLyrics: List<LyricLine>,
+    /**
+     * BitChord Audio: the panel's main lines — the originals, or with
+     * romanized-first on, their romanization (the originals then go to [subLines]).
+     */
+    val panelLines: List<LyricLine>,
     /** Drawn small under each original line in the panel; null for none. */
     val subLines: List<LyricLine>?,
     val translationState: LyricsTranslationUiState,
@@ -3136,9 +3141,20 @@ internal fun rememberLyricsTranslation(
     // Music style. The panel itself always keeps the original words; only the
     // one-line strip over the scrubber swaps to [displayedLyrics]. One mode at
     // a time by construction — [lyricsDisplayMode] holds a single value.
+    // BitChord Audio: with romanized-first on, the romanization is the main
+    // line and the original moves underneath (or goes, if that's switched off).
+    val romajiFirst by PlayerSettings.romajiFirstLyrics.collectAsStateWithLifecycle()
+    val romajiShowOriginal by PlayerSettings.romajiShowOriginal.collectAsStateWithLifecycle()
+    val romanizedLines = (romanizationState as? LyricsTranslationUiState.Ready)?.lines
+    val romajiLeads = romajiFirst && lyricsDisplayMode == LyricsDisplayMode.Romanized && romanizedLines != null
+    val panelLines = if (romajiLeads) romanizedLines.orEmpty() else lyrics.orEmpty()
     val lyricsSubLines = when (lyricsDisplayMode) {
         LyricsDisplayMode.Translated -> (translationState as? LyricsTranslationUiState.Ready)?.lines
-        LyricsDisplayMode.Romanized -> (romanizationState as? LyricsTranslationUiState.Ready)?.lines
+        LyricsDisplayMode.Romanized -> if (romajiLeads) {
+            lyrics.takeIf { romajiShowOriginal }
+        } else {
+            romanizedLines
+        }
         LyricsDisplayMode.Original -> null
     }
     val translationScope = rememberCoroutineScope()
@@ -3272,8 +3288,20 @@ internal fun rememberLyricsTranslation(
         else -> stringResource(Res.string.lyrics_saved_with_download)
     }
 
+    // BitChord Audio: romanized-first asks for the romanization by itself,
+    // once per sheet of lyrics; switching it off by hand afterwards sticks.
+    LaunchedEffect(trackId, lyrics, romajiFirst) {
+        if (romajiFirst && !lyrics.isNullOrEmpty() && lyrics.hasNonLatinScript() &&
+            romanizationState is LyricsTranslationUiState.Idle &&
+            lyricsDisplayMode == LyricsDisplayMode.Original
+        ) {
+            toggleRomanization()
+        }
+    }
+
     return LyricsTranslationUi(
         displayedLyrics = displayedLyrics,
+        panelLines = panelLines,
         subLines = lyricsSubLines,
         translationState = translationState,
         romanizationState = romanizationState,
@@ -3285,4 +3313,15 @@ internal fun rememberLyricsTranslation(
         toggleTranslation = toggleTranslation,
         toggleRomanization = toggleRomanization,
     )
+}
+
+/**
+ * BitChord Audio: whether any line is written in a script other than Latin —
+ * the lyrics worth romanizing without being asked. Checked on letters only, so
+ * punctuation and digits in any script don't count.
+ */
+private fun List<LyricLine>.hasNonLatinScript(): Boolean = any { line ->
+    line.text.any { ch ->
+        Character.isLetter(ch) && Character.UnicodeScript.of(ch.code) != Character.UnicodeScript.LATIN
+    }
 }

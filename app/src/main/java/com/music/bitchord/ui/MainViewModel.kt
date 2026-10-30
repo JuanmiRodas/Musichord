@@ -128,16 +128,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
 
     private val _home = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
-    /**
-     * Home as drawn. BitChord Audio: while signed in, a "Pinned" shelf holding
-     * Liked Music always comes first, whatever YouTube's feed puts on top. It
-     * is added here, on the way out, so no part of the feed's own loading,
-     * paging or de-duplication ever sees it.
-     */
-    val home: StateFlow<UiState<List<HomeShelf>>> = combine(_home, _signedIn) { state, signedIn ->
-        if (signedIn && state is UiState.Success) UiState.Success(listOf(pinnedLikedShelf()) + state.data) else state
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, _home.value)
-
     private val pinnedLiked by lazy {
         HomeShelf(
             title = text(R.string.pinned),
@@ -154,6 +144,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun pinnedLikedShelf(): HomeShelf = pinnedLiked
+
+    /**
+     * Home as drawn. BitChord Audio: while signed in, a "Pinned" shelf holding
+     * Liked Music always comes first, whatever YouTube's feed puts on top. It
+     * is added here, on the way out, so no part of the feed's own loading,
+     * paging or de-duplication ever sees it.
+     */
+    val home: StateFlow<UiState<List<HomeShelf>>> = combine(_home, _signedIn) { state, signedIn ->
+        if (signedIn && state is UiState.Success) UiState.Success(listOf(pinnedLikedShelf()) + state.data) else state
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, _home.value)
+
 
     /**
      * Token for the next page of Home shelves; null once there's nothing
@@ -414,6 +415,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         durationMs: Long,
         album: String? = null,
         localUri: String? = null,
+        localPath: String? = null,
     ) {
         val sources = if (AppSettings.syncedLyrics.value) {
             AppSettings.lyricsSources.value
@@ -422,7 +424,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val key = lyricsLookupKey(
             videoId, sources, AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
-        )
+        ) + com.music.bitchord.data.lyrics.LyricAliases.version.value
         if (lyricsFor == key) return
         // The duration lands a beat after the track, and a database match needs
         // it. Turned away here rather than inside the job below: claiming the
@@ -431,7 +433,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // dropped as a duplicate, and leave the track marked as being looked up
         // by nobody — which is what left a paused track loading for ever, since
         // pausing is when the duration is most likely to arrive a frame late.
-        if (localUri == null && durationMs <= 0L) return
+        if (localUri == null && durationMs <= 0L &&
+            !com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(videoId)
+        ) return
         lyricsFor = key
         lyricsGeneration += 1
         val generation = lyricsGeneration
@@ -454,6 +458,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         _lyricsChecked.value = false
         lyricsJob = viewModelScope.launch {
+            // BitChord Audio: a `.lrc` filed beside the track wins over
+            // everything — see [SidecarLyrics].
+            com.music.bitchord.data.lyrics.SidecarLyrics.forSong(getApplication(), videoId, localUri, localPath)
+                ?.let { sidecar ->
+                    _lyrics.value = sidecar
+                    _lyricsSource.value = null
+                    _lyricsChecked.value = true
+                    return@launch
+                }
             // The file first, and without the duration gate below: a length is
             // only needed to *match* a track against a stranger's database, and
             // nothing is being matched here — these lyrics were written into
@@ -473,15 +486,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 lyricsFor = null
                 return@launch
             }
-            val found = LyricsRepository.lyrics(
-                videoId, title, artist, durationMs, album, sources,
-                AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
-                onSourceStarted = { source -> providerStarted(generation, source) },
-                onSourceResult = { source, result ->
-                    providerFinished(generation, source, result)
-                },
-                onSourceCancelled = { source -> providerCancelled(generation, source) },
-            )
+            // BitChord Audio: the names the listener gave the song come first,
+            // then the shown one, then the file's own alternatives — see
+            // [com.music.bitchord.data.lyrics.LyricAliases].
+            var found: LyricsRepository.Result? = null
+            for (query in com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, artist)) {
+                found = LyricsRepository.lyrics(
+                    videoId, query.title, query.artist, durationMs, album, sources,
+                    AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
+                    onSourceStarted = { source -> providerStarted(generation, source) },
+                    onSourceResult = { source, result ->
+                        providerFinished(generation, source, result)
+                    },
+                    onSourceCancelled = { source -> providerCancelled(generation, source) },
+                )
+                if (found != null) {
+                    currentLyricsRequest = LyricsRequest(videoId, query.title, query.artist, durationMs, album)
+                    break
+                }
+            }
             val selected = selectedLyricsSource?.let(lyricsProviderResults::get) ?: found
             _lyrics.value = selected?.lines
             _lyricsSource.value = selected?.source
@@ -1522,6 +1545,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             AppSettings.webdavUrl.drop(1).collect {
                 reloadRemoteDetail(com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID)
+            }
+        }
+        viewModelScope.launch {
+            // BitChord Audio: tags read in the background fill in an open
+            // WebDAV/pCloud page without listing the server again.
+            com.music.bitchord.data.webdav.WebDavRepository.changes.drop(1).collect {
+                val id = com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID
+                if (_detailStack.value.none { it.browseId == id }) return@collect
+                val songs = com.music.bitchord.data.webdav.WebDavRepository.relabeled() ?: return@collect
+                if (songs.isEmpty()) return@collect
+                _detailStack.value = _detailStack.value.map {
+                    if (it.browseId == id && it.songs is UiState.Success) it.copy(songs = UiState.Success(songs)) else it
+                }
             }
         }
         viewModelScope.launch {
@@ -2814,6 +2850,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (it.browseId == browseId && it.songs is UiState.Loading) it.copy(songs = UiState.Success(likedSaved.songs)) else it
                 }
             }
+            // BitChord Audio: the WebDAV/pCloud library as last listed goes up
+            // at once; the server is listed again behind it.
+            val remoteSaved = if (browseId == com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID) {
+                com.music.bitchord.data.webdav.WebDavRepository.saved()
+            } else {
+                null
+            }
+            if (remoteSaved != null) {
+                _detailStack.value = _detailStack.value.map {
+                    if (it.browseId == browseId && it.songs is UiState.Loading) it.copy(songs = UiState.Success(remoteSaved)) else it
+                }
+            }
             if (localPlaylist != null) {
                 name = localPlaylist.title
                 credit = getApplication<Application>().getString(R.string.local_playlist_subtitle, localPlaylist.songs.size)
@@ -2912,7 +2960,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _detailStack.value = _detailStack.value.map {
                 if (it.browseId == browseId &&
                     (it.songs is UiState.Loading ||
-                        ((onDevice.isNotEmpty() || likedSaved != null) && pageState is UiState.Success))
+                        ((onDevice.isNotEmpty() || likedSaved != null || remoteSaved != null) &&
+                            pageState is UiState.Success))
                 ) {
                     it.copy(
                         songs = pageState,
