@@ -45,7 +45,16 @@ jobs:
       - name: Build
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleProdRelease --stacktrace
+          set -o pipefail
+          ./gradlew :app:assembleProdRelease --stacktrace 2>&1 | tee build.log
+
+      # Compiler errors as annotations, readable from the API without the log.
+      - name: Report compile errors
+        if: failure()
+        run: |
+          grep -E '^e: |error: |What went wrong|Execution failed' build.log | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
 
       # The fork's own unit tests (tag reading, Liked Music merge). Reported,
       # but a failure here doesn't hold back the APK.
