@@ -465,6 +465,9 @@ object AppSettings {
     /** Analyzes audio waveform/envelope to align matching playback moment between versions. */
     val smartVersionAlignment = MutableStateFlow(true)
 
+    /** BitChord Audio: music videos play as their audio release; see [com.music.bitchord.playback.AudioFirst]. */
+    val audioOnly = MutableStateFlow(true)
+
     /** Drops haze blur (status bar, mini player, bottom fade, lyrics focus) for a solid-fill look. */
     val reduceDynamicBlur = MutableStateFlow(false)
 
@@ -981,6 +984,7 @@ object AppSettings {
         swipeToPlayNext.value = prefs.getBoolean(KEY_SWIPE_TO_PLAY_NEXT, false)
         dontRepeatSuggestions.value = prefs.getBoolean(KEY_DONT_REPEAT_SUGGESTIONS, false)
         smartVersionAlignment.value = prefs.getBoolean(KEY_SMART_VERSION_ALIGNMENT, true)
+        audioOnly.value = prefs.getBoolean(KEY_AUDIO_ONLY, true)
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
         progressiveBlur.value = prefs.getBoolean(KEY_PROGRESSIVE_BLUR, false)
@@ -1389,6 +1393,11 @@ object AppSettings {
     fun setDontRepeatSuggestions(value: Boolean) {
         dontRepeatSuggestions.value = value
         prefs.edit().putBoolean(KEY_DONT_REPEAT_SUGGESTIONS, value).apply()
+    }
+
+    fun setAudioOnly(value: Boolean) {
+        audioOnly.value = value
+        prefs.edit().putBoolean(KEY_AUDIO_ONLY, value).apply()
     }
 
     fun setSmartVersionAlignment(value: Boolean) {
@@ -2178,6 +2187,7 @@ object AppSettings {
     private const val KEY_SWIPE_TO_PLAY_NEXT = "swipe_to_play_next"
     private const val KEY_DONT_REPEAT_SUGGESTIONS = "dont_repeat_suggestions"
     private const val KEY_SMART_VERSION_ALIGNMENT = "smart_version_alignment"
+    private const val KEY_AUDIO_ONLY = "audio_only"
     private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"
     private const val KEY_LIQUID_GLASS = "liquid_glass"
     private const val KEY_PROGRESSIVE_BLUR = "progressive_blur"

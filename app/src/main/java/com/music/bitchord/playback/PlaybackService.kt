@@ -710,6 +710,9 @@ class PlaybackService : MediaLibraryService() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    /** BitChord Audio: music videos play as their audio release, never loading the video. */
+    private val audioFirst = AudioFirst(scope) { player }
+
     /** Canonical context owner for the active local bounded album/playlist. */
     private val boundedContextRegistry = ContextRegistry { snapshot ->
         scope.launch {
@@ -1003,6 +1006,10 @@ class PlaybackService : MediaLibraryService() {
                 swappingMediaId = null
                 return
             }
+
+            // BitChord Audio: a video that reached the player despite the
+            // look-ahead is held and swapped for its audio release.
+            audioFirst.onBecameCurrent(mediaItem) { swappingMediaId = it }
 
             // A receiver, if it is the speaker, is put on whatever became
             // current — or it is the one that moved, and this is the phone
@@ -2195,6 +2202,8 @@ class PlaybackService : MediaLibraryService() {
         val currentIndex = activePlayer.currentMediaItemIndex
         if (currentIndex !in 0 until activePlayer.mediaItemCount) return
         val currentItem = activePlayer.currentMediaItem ?: return
+        // BitChord Audio: a switch to a video is the listener choosing to watch it.
+        if (targetMediaItem.toSong().isVideo) audioFirst.keepAsVideo(targetMediaItem.mediaId)
         // Listen Together plays the one track every member has, and a version
         // swap is a purely local choice about which cut of it to hear — see
         // [ListenTogether]'s own note on why Automix stays off in a party for
@@ -2676,6 +2685,7 @@ class PlaybackService : MediaLibraryService() {
         val targetIsVideo = args.getBoolean("targetIsVideo", false)
 
         if (targetVideoId == null || targetVideoId == song.videoId) return
+        if (targetIsVideo) audioFirst.keepAsVideo(targetVideoId)
 
         val position = activePlayer.currentPosition
         val wasPlaying = activePlayer.isPlaying
@@ -6360,6 +6370,9 @@ class PlaybackService : MediaLibraryService() {
      * tracks is more than it does anything with, but it decides that, not this.
      */
     private fun prefetchAround(player: ExoPlayer) {
+        // BitChord Audio: upcoming videos are replaced by their audio release
+        // before they play — and before read-ahead spends bytes on them.
+        audioFirst.lookAhead(player)
         // Direct Source Stream reads ahead from its own window instead — see
         // [driveDirectWindow]. Anything the ordinary read-ahead had running
         // for the old queue is dropped with it.
@@ -8888,8 +8901,10 @@ class PlaybackService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future(Dispatchers.IO) {
-            val resolved = resolveMediaItems(mediaItems)
-            val validIndex = startIndex.coerceIn(0, (resolved.size - 1).coerceAtLeast(0))
+            val expanded = resolveMediaItems(mediaItems)
+            val validIndex = startIndex.coerceIn(0, (expanded.size - 1).coerceAtLeast(0))
+            // BitChord Audio: the track this starts on is audio before the player sees it.
+            val resolved = audioFirst.resolveStart(expanded, validIndex)
             MediaSession.MediaItemsWithStartPosition(
                 ImmutableList.copyOf(resolved),
                 validIndex,
