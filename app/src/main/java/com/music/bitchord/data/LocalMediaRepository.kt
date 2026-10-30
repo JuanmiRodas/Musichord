@@ -376,7 +376,8 @@ object LocalMediaRepository {
         // downloads, which it always sees.
         val trustMissing = canAsk && hasStoragePermission(context)
         songs.filter { song ->
-            val uri = song.localUri ?: return@filter false
+            // BitChord Audio: a streamed song in a mixed playlist has no file to check.
+            val uri = song.localUri ?: return@filter true
             val id = uri.mediaStoreAudioId()
             when {
                 id != null -> id in existing || !trustMissing

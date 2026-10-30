@@ -205,6 +205,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         main.post { Toast.makeText(app, message, Toast.LENGTH_SHORT).show() }
     }
 
+    override fun editLyricAliases(song: com.music.bitchord.data.model.Song) {
+        com.music.bitchord.ui.components.LyricAliasEditor.open(song)
+    }
+
     override val castState: StateFlow<CastUi> by lazy {
         CastController.ensureStarted(app)
         CastController.state

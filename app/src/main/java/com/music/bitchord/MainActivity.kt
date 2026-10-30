@@ -4443,7 +4443,9 @@ private fun BitChordApp(
                 },
                 onAddToPlaylist = {
                     songActions = null
-                    if (song.localUri != null && (song.videoId.startsWith("content://") || song.videoId.startsWith("file://"))) {
+                    if (song.localUri != null && (song.videoId.startsWith("content://") || song.videoId.startsWith("file://") ||
+                            com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(song.videoId))
+                    ) {
                         offlinePlaylistTarget = song
                     } else {
                         viewModel.loadPlaylists()
@@ -4884,6 +4886,14 @@ private fun BitChordApp(
                 },
                 onCreate = { title, privacy ->
                     viewModel.createPlaylist(title, privacy, target)
+                },
+                // BitChord Audio: a YouTube song can go in a device playlist
+                // too, beside files and pCloud songs.
+                onDevicePlaylists = target?.let { song ->
+                    {
+                        playlistTarget = null
+                        offlinePlaylistTarget = song
+                    }
                 },
             )
         }
@@ -5581,6 +5591,15 @@ private fun BitChordApp(
                     showWebDavEditor = false
                 },
                 onDismiss = { showWebDavEditor = false },
+            )
+        }
+
+        // BitChord Audio: other names for a song's lyrics, raised from the player.
+        val aliasSong by com.music.bitchord.ui.components.LyricAliasEditor.song.collectAsStateWithLifecycle()
+        aliasSong?.let { song ->
+            com.music.bitchord.ui.components.LyricAliasDialog(
+                song = song,
+                onDismiss = com.music.bitchord.ui.components.LyricAliasEditor::close,
             )
         }
 

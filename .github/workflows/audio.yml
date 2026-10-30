@@ -47,6 +47,12 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleProdRelease --stacktrace
 
+      # The fork's own unit tests (tag reading, Liked Music merge). Reported,
+      # but a failure here doesn't hold back the APK.
+      - name: Fork tests
+        continue-on-error: true
+        run: ./gradlew :app:testProdReleaseUnitTest --tests 'com.music.bitchord.AudioForkTest'
+
       - name: Collect APKs
         run: |
           mkdir -p out

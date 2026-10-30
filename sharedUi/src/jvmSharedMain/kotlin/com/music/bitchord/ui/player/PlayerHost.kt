@@ -110,6 +110,9 @@ interface PlayerHost {
     /** A short, non-blocking notice — a Toast on the phone. */
     fun showMessage(message: String)
 
+    /** BitChord Audio: edit the other names [song]'s lyrics are looked up by. */
+    fun editLyricAliases(song: Song) {}
+
     /** The full signal-chain readout, opened from the output drawer. */
     @Composable
     fun AudioPipelineDialog(hazeState: HazeState, isPlaying: Boolean, onDismiss: () -> Unit)

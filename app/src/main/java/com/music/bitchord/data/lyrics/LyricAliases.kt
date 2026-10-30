@@ -50,7 +50,11 @@ object LyricAliases {
     @Volatile
     private var file: File? = null
 
+    @Volatile
+    private var appContext: Context? = null
+
     fun init(context: Context) {
+        appContext = context.applicationContext
         val f = File(context.filesDir, "lyric_aliases.json")
         file = f
         runCatching {
@@ -82,6 +86,8 @@ object LyricAliases {
         if (cleaned.isEmpty) keys.forEach(user::remove) else keys.forEach { user[it] = cleaned }
         save()
         _version.value += 1
+        // BitChord Audio: these names follow you through pCloud.
+        appContext?.let(com.music.bitchord.data.sync.SettingsSync::changed)
     }
 
     /**

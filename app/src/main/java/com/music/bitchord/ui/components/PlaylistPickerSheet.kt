@@ -112,6 +112,8 @@ fun PlaylistPickerSheet(
     song: Song? = null,
     startCreating: Boolean = false,
     offline: Boolean = false,
+    /** BitChord Audio: switches to the device's own playlists, which can mix sources. */
+    onDevicePlaylists: (() -> Unit)? = null,
 ) {
     var creating by remember { mutableStateOf(startCreating) }
     // By id rather than by value: the list is re-fetched under an open sheet,
@@ -189,6 +191,13 @@ fun PlaylistPickerSheet(
                     label = stringResource(R.string.new_playlist),
                     onClick = { creating = true },
                 )
+                onDevicePlaylists?.let { open ->
+                    ActionRow(
+                        icon = SfIcons.Storage,
+                        label = stringResource(R.string.device_playlists_mixed),
+                        onClick = { closeAfter(open) },
+                    )
+                }
 
                 when {
                     // Only while there is nothing to show: re-fetching under a

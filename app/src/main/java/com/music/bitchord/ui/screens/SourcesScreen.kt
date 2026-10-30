@@ -817,6 +817,7 @@ private fun SourceRow(
                 SourceKind.MODULE -> SfIcons.Extension
                 SourceKind.JIOSAAVN -> SfIcons.GraphicEq // or some other icon
                 SourceKind.YOUTUBE -> SfIcons.PlayCircle
+                SourceKind.MY_LIBRARY -> SfIcons.Cloud
             },
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onBackground,

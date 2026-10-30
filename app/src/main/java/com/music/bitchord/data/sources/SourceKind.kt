@@ -69,6 +69,24 @@ enum class SourceKind(
      * had. Declared first so a source the user chose on purpose is asked before
      * anything the app fell back to.
      */
+    /**
+     * BitChord Audio: your own files — the pCloud / WebDAV library — answering
+     * for YouTube songs you also have. Built in, and first in the walk: a copy
+     * of your own, when it is the same recording and at least as good, is the
+     * one you meant. See [RemoteLibrarySource].
+     */
+    MY_LIBRARY(
+        label = "My library (pCloud)",
+        detail = "Your own pCloud or WebDAV music. A song you have there plays from your file " +
+            "when it is the same recording and better than YouTube's — a FLAC always is.",
+        labels = listOf("Your files", "FLAC", "Lossless"),
+        needsServer = false,
+        canServeLossless = true,
+        // Below every other rank, so it is asked first; not [USER_ADDED], so
+        // it isn't treated as one of the addons the user drags into order.
+        rank = -1,
+    ),
+
     ADDON(
         label = "Addon",
         detail = "An addon server you host or were given a link to. Searched and streamed over " +

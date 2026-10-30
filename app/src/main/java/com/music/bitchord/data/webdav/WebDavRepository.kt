@@ -77,7 +77,20 @@ object WebDavRepository {
     fun saved(): List<Song>? {
         if (!isConfigured()) return null
         val f = savedFile ?: return null
-        return SongListStore.load(f)?.songs?.takeIf { it.isNotEmpty() }
+        return SongListStore.load(f)?.songs?.takeIf { it.isNotEmpty() }?.also { inMemory = it }
+    }
+
+    @Volatile
+    private var inMemory: List<Song>? = null
+
+    /**
+     * The library as last known, without asking the server — what
+     * [RemoteLibrarySource] matches YouTube songs against. Read from the saved
+     * copy the first time.
+     */
+    fun library(): List<Song> {
+        if (!isConfigured()) return emptyList()
+        return inMemory ?: saved().orEmpty()
     }
 
     suspend fun getSongs(): List<Song> = withContext(Dispatchers.IO) {
@@ -93,6 +106,7 @@ object WebDavRepository {
         lastListing = listing
         val songs = songsOf(listing)
         registerLyrics(listing)
+        inMemory = songs
         savedFile?.let { SongListStore.save(it, songs) }
         readMissingTags(listing.audio, username, password)
         songs
@@ -116,7 +130,10 @@ object WebDavRepository {
      */
     suspend fun relabeled(): List<Song>? = withContext(Dispatchers.IO) {
         val listing = lastListing ?: return@withContext null
-        songsOf(listing).also { songs -> savedFile?.let { SongListStore.save(it, songs) } }
+        songsOf(listing).also { songs ->
+            inMemory = songs
+            savedFile?.let { SongListStore.save(it, songs) }
+        }
     }
 
     suspend fun testConnection(

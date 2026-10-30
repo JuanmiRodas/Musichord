@@ -114,7 +114,7 @@ object OfflinePlaylists {
         val playlist = OfflinePlaylist(
             id = "p" + System.currentTimeMillis().toString(36),
             title = title.trim(),
-            songs = songs.filter { it.localUri != null }.distinctBy { it.localUri }.map { it.stored() },
+            songs = songs.distinctBy { it.playlistKey }.map { it.stored() },
         )
         mutate { it + playlist }
         return playlist
@@ -127,14 +127,15 @@ object OfflinePlaylists {
      * [AddResult.added] counts the playlists that took at least one of them.
      */
     fun add(ids: Collection<String>, songs: List<Song>): AddResult {
-        val incoming = songs.filter { it.localUri != null }.distinctBy { it.localUri }
+        // BitChord Audio: streamed songs too, held by id — see [playlistKey].
+        val incoming = songs.distinctBy { it.playlistKey }
         var added = 0
         var alreadyThere = 0
         mutate { list ->
             list.map { playlist ->
                 if (playlist.id !in ids) return@map playlist
-                val known = playlist.songs.mapTo(HashSet()) { it.localUri }
-                val fresh = incoming.filter { known.add(it.localUri) }.map { it.stored() }
+                val known = playlist.songs.mapTo(HashSet()) { it.playlistKey }
+                val fresh = incoming.filter { known.add(it.playlistKey) }.map { it.stored() }
                 if (fresh.isEmpty()) {
                     alreadyThere++
                     return@map playlist
@@ -149,9 +150,9 @@ object OfflinePlaylists {
 
     fun remove(browseId: String, song: Song) {
         val id = browseId.removePrefix(PREFIX)
-        val key = song.localUri ?: return
+        val key = song.playlistKey
         mutate { list ->
-            list.map { if (it.id == id) it.copy(songs = it.songs.filterNot { s -> s.localUri == key }) else it }
+            list.map { if (it.id == id) it.copy(songs = it.songs.filterNot { s -> s.playlistKey == key }) else it }
         }
     }
 
@@ -185,6 +186,13 @@ object OfflinePlaylists {
      * up on its way through the player are left behind: they describe where it
      * was played from last, not the file.
      */
+    /**
+     * BitChord Audio: what a playlist holds a song by — its file, or for a song
+     * that is streamed (YouTube, a source), its id. That is what lets one
+     * playlist mix files on the phone, pCloud and YouTube.
+     */
+    val Song.playlistKey: String get() = localUri ?: "id:$videoId"
+
     private fun Song.stored(): Song = Song(
         videoId = videoId,
         title = title,
@@ -255,9 +263,11 @@ object OfflinePlaylists {
 
     private fun songFrom(obj: JSONObject): Song? {
         fun JSONObject.text(key: String): String? = if (isNull(key)) null else optString(key).takeIf { it.isNotEmpty() }
-        val uri = obj.text("localUri") ?: return null
+        val uri = obj.text("localUri")
+        // BitChord Audio: a streamed song has no file, only its id.
+        val id = obj.text("videoId") ?: uri ?: return null
         return Song(
-            videoId = obj.text("videoId") ?: uri,
+            videoId = id,
             title = obj.optString("title"),
             artist = obj.optString("artist"),
             thumbnailUrl = obj.text("thumbnailUrl"),

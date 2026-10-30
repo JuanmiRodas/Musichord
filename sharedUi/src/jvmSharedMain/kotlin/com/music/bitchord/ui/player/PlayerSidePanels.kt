@@ -130,6 +130,10 @@ fun LyricsSidePanel(
                 states = lyricsProviderStates,
                 onSelect = onSelectLyricsProvider,
                 onDismiss = { showLyricsProviders = false },
+                onEditAliases = {
+                    showLyricsProviders = false
+                    PlayerPlatform.host.editLyricAliases(song)
+                },
             )
         }
     }

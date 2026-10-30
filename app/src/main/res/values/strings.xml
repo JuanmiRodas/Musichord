@@ -765,6 +765,11 @@
     <string name="pcloud_description">Your pCloud music folder and every folder inside it, with tags, covers and .lrc lyrics. Uses your pCloud email and password; accounts with two-step verification can\'t connect this way.</string>
     <string name="pcloud_email">pCloud email</string>
     <string name="pcloud_folder_hint">Folder, e.g. Music (blank for everything)</string>
+    <string name="lyric_aliases_title">Other names for lyrics</string>
+    <string name="lyric_aliases_message">Lyrics for “%1$s” by %2$s are also searched by these names, before the ones shown.</string>
+    <string name="lyric_aliases_titles">Titles, one per line</string>
+    <string name="lyric_aliases_artists">Artists, one per line</string>
+    <string name="device_playlists_mixed">Device playlists (mix pCloud, phone and YouTube)</string>
     <string name="pinned">Pinned</string>
     <string name="replay_across">Across </string>
     <string name="replay_album_end"> held your attention.</string>

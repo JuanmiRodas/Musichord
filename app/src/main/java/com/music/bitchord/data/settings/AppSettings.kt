@@ -35,7 +35,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
  * caps, and it is the only source that can answer at all when the ones
  * above it are skipped.
  */
-fun AudioQuality.permits(kind: SourceKind): Boolean = when (this) {
+fun AudioQuality.permits(kind: SourceKind): Boolean = when {
+    // BitChord Audio: your own files are used at every setting but the lowest,
+    // where a FLAC is more data than that setting is meant to spend.
+    kind == SourceKind.MY_LIBRARY -> this != AudioQuality.LOW
+    else -> permitsCatalogue(kind)
+}
+
+private fun AudioQuality.permitsCatalogue(kind: SourceKind): Boolean = when (this) {
     AudioQuality.LOSSLESS -> true
     // No lossless answer is wanted here, and a source that can serve one is
     // the slow half of the list: an addon fronting several catalogues walks

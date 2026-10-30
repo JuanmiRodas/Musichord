@@ -58,6 +58,9 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
     @kotlin.OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate() {
         super.onCreate()
+        // BitChord Audio: settings synced from pCloud last session go in
+        // before anything reads them.
+        com.music.bitchord.data.sync.SettingsSync.applyPending(this)
         // The player is drawn by the shared UI module; this is what it reads
         // underneath — settings, the Canvas decoder, outputs, the party.
         AndroidStreamHooks.installEarly()
@@ -161,6 +164,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         // by [Song.toMediaItem], so it has to be open before the restart
         // snapshot below is turned back into queue items.
         OriginalVersion.init(this)
+        com.music.bitchord.data.sync.SettingsSync.start(this)
         // What's already saved to Downloads, so the song menu can say so
         // without a media-store query per row.
         Downloads.init(this)

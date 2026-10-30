@@ -548,6 +548,11 @@
     <string name="pcloud_description">Tu carpeta de música de pCloud y todas las carpetas que contiene, con etiquetas, portadas y letras .lrc. Usa tu email y contraseña de pCloud; las cuentas con verificación en dos pasos no pueden conectarse así.</string>
     <string name="pcloud_email">Email de pCloud</string>
     <string name="pcloud_folder_hint">Carpeta, p. ej. Music (vacío para todo)</string>
+    <string name="lyric_aliases_title">Otros nombres para la letra</string>
+    <string name="lyric_aliases_message">La letra de «%1$s» de %2$s también se buscará con estos nombres, antes que con los que se muestran.</string>
+    <string name="lyric_aliases_titles">Títulos, uno por línea</string>
+    <string name="lyric_aliases_artists">Artistas, uno por línea</string>
+    <string name="device_playlists_mixed">Listas del dispositivo (mezcla pCloud, móvil y YouTube)</string>
     <string name="pinned">Fijado</string>
     <string name="replay_across"> repartidas en </string>
     <string name="replay_album_end"> concentró tu atención.</string>
