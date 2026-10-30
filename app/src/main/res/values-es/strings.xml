@@ -536,6 +536,8 @@
     <string name="minutes_short">%1$d min</string>
     <string name="not_enough_listening">Todavía no hay suficientes reproducciones</string>
     <string name="not_enough_this_month">Escucha algunas canciones más este mes para desbloquear tu Replay.</string>
+    <string name="liked_music_pin_title">Música que te gusta</string>
+    <string name="liked_music_pin_subtitle">Lista automática</string>
     <string name="pinned">Fijado</string>
     <string name="replay_across"> repartidas en </string>
     <string name="replay_album_end"> concentró tu atención.</string>

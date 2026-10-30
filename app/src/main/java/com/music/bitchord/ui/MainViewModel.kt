@@ -15,6 +15,7 @@ import com.music.bitchord.data.AppUpdateChecker
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.LikeState
 import com.music.bitchord.data.YtMusicRepository
+import com.music.bitchord.data.LikedMusicCache
 import com.music.bitchord.data.TopPicks
 import com.music.bitchord.data.AppleArtistPhotos
 import com.music.bitchord.data.model.ArtistRef
@@ -127,7 +128,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
 
     private val _home = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
-    val home: StateFlow<UiState<List<HomeShelf>>> = _home.asStateFlow()
+    /**
+     * Home as drawn. BitChord Audio: while signed in, a "Pinned" shelf holding
+     * Liked Music always comes first, whatever YouTube's feed puts on top. It
+     * is added here, on the way out, so no part of the feed's own loading,
+     * paging or de-duplication ever sees it.
+     */
+    val home: StateFlow<UiState<List<HomeShelf>>> = combine(_home, _signedIn) { state, signedIn ->
+        if (signedIn && state is UiState.Success) UiState.Success(listOf(pinnedLikedShelf()) + state.data) else state
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, _home.value)
+
+    private val pinnedLiked by lazy {
+        HomeShelf(
+            title = text(R.string.pinned),
+            items = listOf(
+                ShelfItem(
+                    title = text(R.string.liked_music_pin_title),
+                    subtitle = text(R.string.liked_music_pin_subtitle),
+                    thumbnailUrl = LIKED_MUSIC_ART,
+                    videoId = null,
+                    browseId = YtMusicRepository.LIKED_MUSIC,
+                ),
+            ),
+        )
+    }
+
+    private fun pinnedLikedShelf(): HomeShelf = pinnedLiked
 
     /**
      * Token for the next page of Home shelves; null once there's nothing
@@ -762,6 +788,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * into a list that YouTube orders for itself; the next fetch places it.
      */
     private fun dropFromLikedLists(videoId: String) {
+        LikedMusicCache.remove(_activeProfileId.value, videoId)
         val library = (_library.value as? UiState.Success)?.data
         if (library != null && library.likedSongs.any { it.videoId == videoId }) {
             _library.value = UiState.Success(
@@ -2570,6 +2597,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        /** YouTube Music's own Liked Music cover. */
+        private const val LIKED_MUSIC_ART = "https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-music-@576.png"
         /** Today's Top Picks row, kept so the next launch paints it before any request. */
         private const val TOP_PICKS_FILE = "top_picks_v4.json"
 
@@ -2772,6 +2801,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (it.browseId == browseId && it.songs is UiState.Loading) it.copy(songs = UiState.Success(onDevice)) else it
                 }
             }
+            // BitChord Audio: Liked Music as last seen goes up straight away;
+            // only its first page is fetched below — see [LikedMusicCache].
+            val likedProfile = _activeProfileId.value
+            val likedSaved = if (browseId in LikedMusicCache.IDS && onDevice.isEmpty()) {
+                LikedMusicCache.load(likedProfile)
+            } else {
+                null
+            }
+            if (likedSaved != null) {
+                _detailStack.value = _detailStack.value.map {
+                    if (it.browseId == browseId && it.songs is UiState.Loading) it.copy(songs = UiState.Success(likedSaved.songs)) else it
+                }
+            }
             if (localPlaylist != null) {
                 name = localPlaylist.title
                 credit = getApplication<Application>().getString(R.string.local_playlist_subtitle, localPlaylist.songs.size)
@@ -2850,15 +2892,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             }
+            // BitChord Audio: when the first page overlaps the saved Liked
+            // Music, the two are merged and the remaining pages aren't walked.
+            // No overlap (or a week old) and the page fills in as upstream does.
+            var pageState = state
+            if (browseId in LikedMusicCache.IDS && state is UiState.Success) {
+                val merged = likedSaved?.takeUnless { it.stale }?.let { LikedMusicCache.merge(state.data, it.songs) }
+                if (merged != null) {
+                    pageState = UiState.Success(merged)
+                    more = null
+                    LikedMusicCache.save(likedProfile, merged)
+                } else if (more == null) {
+                    LikedMusicCache.save(likedProfile, state.data)
+                }
+            }
             // Update by id — the user may have pushed another page meanwhile.
             // A page showing its downloaded copy takes only a real listing: a
             // failed or empty fetch leaves the downloaded tracks up.
             _detailStack.value = _detailStack.value.map {
                 if (it.browseId == browseId &&
-                    (it.songs is UiState.Loading || (onDevice.isNotEmpty() && state is UiState.Success))
+                    (it.songs is UiState.Loading ||
+                        ((onDevice.isNotEmpty() || likedSaved != null) && pageState is UiState.Success))
                 ) {
                     it.copy(
-                        songs = state,
+                        songs = pageState,
                         sections = sections,
                         thumbnailUrl = artwork ?: it.thumbnailUrl,
                         title = name ?: it.title,
@@ -3148,9 +3205,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // A page with nothing new for any copy means the feed has looped
                 // back rather than run dry with a token still attached.
-                if (!progressed) return@launch
+                if (!progressed) break
                 _detailStack.value = updated
                 next = fetched.continuation
+            }
+            // BitChord Audio: a complete walk of Liked Music is what gets saved.
+            if (browseId in LikedMusicCache.IDS) {
+                (_detailStack.value.lastOrNull { it.browseId == browseId }?.songs as? UiState.Success)
+                    ?.data?.let { LikedMusicCache.save(_activeProfileId.value, it) }
             }
         }.also { job ->
             job.invokeOnCompletion {
