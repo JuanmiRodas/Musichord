@@ -32,6 +32,11 @@ import kotlin.math.abs
 object OwnFileMatcher {
 
     private const val MAX_DRIFT_SEC = 15
+    private const val UPLOADER_DRIFT_SEC = 2
+    private val UPLOADER = Regex(
+        """(\bchannel\b|vevo|\brecords?\b|\btopic\b|\bofficial\b|unknown artist|\bmusic\s+(japan|channel|entertainment)\b)""",
+        RegexOption.IGNORE_CASE,
+    )
 
     private val QUOTED = Regex("""[『「](.+?)[』」]""")
     private val SEPARATOR = Regex("""\s+[-–—/／|｜]\s+|\s*／\s*|\s*｜\s*""")
@@ -40,7 +45,15 @@ object OwnFileMatcher {
     private val ARTIST_SPLIT = Regex("""\s*(?:,|&|/|;|\bfeat\.?|\bft\.?|、|\band\b|\by\b|\bx\b|×)\s*""", RegexOption.IGNORE_CASE)
 
     /** Every name [title] could be the song under, as keys. */
+    /** "~小さな羽根ひろげて~": a subtitle, often in another script than the file's. */
+    private val TILDE = Regex("""\s*[~〜～][^~〜～]*[~〜～]\s*|\s*[~〜～].*$""")
+
     fun titleKeys(title: String): Set<String> {
+        val bare = title.replace(TILDE, " ").trim()
+        return keysOf(title) + (if (bare != title && bare.isNotBlank()) keysOf(bare) else emptySet())
+    }
+
+    private fun keysOf(title: String): Set<String> {
         val base = title.replace(NOTE, " ").replace(GUEST, "").trim()
         val names = buildList {
             add(base)
@@ -51,7 +64,7 @@ object OwnFileMatcher {
     }
 
     private fun words(s: String): Set<String> =
-        Normalizer.normalize(s, Normalizer.Form.NFKD)
+        Normalizer.normalize(s.replace('$', 's'), Normalizer.Form.NFKD)
             .replace(Regex("\\p{M}+"), "")
             .lowercase(Locale.ROOT)
             .split(Regex("[^\\p{L}\\p{N}]+"))
@@ -68,8 +81,8 @@ object OwnFileMatcher {
             val longer = if (shorter === x) y else x
             if (longer.containsAll(shorter) && shorter.joinToString("").length >= 4) return true
         }
-        val ka = FileName.key(a)
-        val kb = FileName.key(b)
+        val ka = FileName.key(a.replace('$', 's'))
+        val kb = FileName.key(b.replace('$', 's'))
         return ka.length >= 4 && kb.length >= 4 && (ka in kb || kb in ka)
     }
 
@@ -101,7 +114,13 @@ object OwnFileMatcher {
             .filter { file ->
                 val artists = listOf(file.artist) +
                     LyricAliases.queries(file.videoId, file.title, file.artist).map { it.artist }
-                artists.any { sameArtist(artist, it) }
+                artists.any { sameArtist(artist, it) } ||
+                    // An upload credited to its channel ("NBCUniversal Music
+                    // Channel", "… - Topic", "Unknown artist"), the singer only
+                    // in the title: the same name and length to 2 seconds.
+                    (UPLOADER.containsMatchIn(artist) && durationSec != null &&
+                        file.durationMillis().takeIf { it > 0 }
+                            ?.let { abs(durationSec - (it / 1000).toInt()) <= UPLOADER_DRIFT_SEC } == true)
             }
             .filter { file ->
                 val got = file.durationMillis().takeIf { it > 0 }?.let { (it / 1000).toInt() }

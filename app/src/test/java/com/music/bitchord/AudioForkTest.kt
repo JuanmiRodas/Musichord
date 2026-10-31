@@ -199,4 +199,12 @@ class AudioForkTest {
         assertEquals(100_000L, tags.durationMs)
         assertEquals("MP3 128 kbps", tags.qualityLabel)
     }
+
+    @Test
+    fun `a tilde subtitle is not needed to match`() {
+        val k = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("OPEN YOUR MIND ~小さな羽根ひろげて~ (Audio)")
+        val f = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("Open Your Mind ~Chiisana Hane Hirogete~")
+        assertTrue("$k / $f", (k intersect f).contains("openyourmind"))
+        assertTrue(com.music.bitchord.data.sources.OwnFileMatcher.sameArtist("Kesha", "Ke$ha"))
+    }
 }
