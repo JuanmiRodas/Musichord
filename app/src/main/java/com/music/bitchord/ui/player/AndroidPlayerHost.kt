@@ -107,7 +107,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     @Composable
     override fun CanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) = AndroidCanvasVideo(spec, modifier)
 
-    override val musicVideoSupported: Boolean get() = true
+    // BitChord Audio: with audio only on, no track gets the video box —
+    // the player shows the cover art, as for any song.
+    override val musicVideoSupported: Boolean
+        get() = !com.music.bitchord.data.settings.AppSettings.audioOnly.value
 
     @Composable
     override fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) =

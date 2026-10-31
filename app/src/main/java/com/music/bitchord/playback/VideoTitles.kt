@@ -61,13 +61,38 @@ internal object VideoTitles {
         return t.trim().trim('-', '–', '—', ' ').ifBlank { title }
     }
 
+    /** "浜崎あゆみ / Rule", "Artist ／ Title", "Artist - Title": the separators a video title joins its parts with. */
+    private val SPLIT = Regex("""\s+[/／|｜\-–—]\s+|／|｜""")
+
+    /**
+     * The names [title] might be the song under: the cleaned title, and each
+     * side of a separator in it — the artist in front is often in another
+     * script than the channel's ("浜崎あゆみ / Rule" on "ayumi hamasaki"),
+     * so which side is the song can't be told by comparing names.
+     */
+    fun titleOptions(title: String, artist: String): List<String> {
+        val clean = cleanTitle(title, artist)
+        val parts = clean.split(SPLIT).map { it.trim().trim('「', '」', '『', '』', '"', '\'') }.filter { it.isNotBlank() }
+        return (listOf(clean) + parts.reversed()).distinctBy { FileName.key(it) }.filter { FileName.key(it).isNotEmpty() }
+    }
+
     /** The catalogue song for [video], or null when nothing is close enough. */
     suspend fun findRelease(video: Song): Song? {
         found[video.videoId]?.let { return it }
         val artist = cleanArtist(video.artist)
-        val title = cleanTitle(video.title, video.artist)
-        if (title.isBlank()) return null
-        val candidates = withTimeoutOrNull(12_000L) {
+        val options = titleOptions(video.title, video.artist)
+        if (options.isEmpty()) return null
+        for (title in options.take(3)) {
+            pick(video, artist, title, options)?.let {
+                found[video.videoId] = it
+                return it
+            }
+        }
+        return null
+    }
+
+    private suspend fun pick(video: Song, artist: String, title: String, options: List<String>): Song? {
+        val candidates = withTimeoutOrNull(8_000L) {
             YtMusicRepository.search("$title $artist", SearchFilter.SONGS).getOrNull()
         }.orEmpty()
             .mapNotNull { r ->
@@ -80,16 +105,17 @@ internal object VideoTitles {
             .filterNot { it.isVideo }
         if (candidates.isEmpty()) return null
         val target = TrackMatcher.Target(title = title, artist = artist, isVideo = true)
-        val titleKey = FileName.key(title)
+        val keys = options.map { FileName.key(it) }.toSet()
+        // A side of the title that names the artist in another script counts
+        // as the artist too.
+        val artists = listOf(artist, video.artist) + options.drop(1)
         val pick = TrackMatcher.best(candidates, target)
             ?: TrackMatcher.bestOfficialAudioForVideo(candidates, target)
             ?: candidates.firstOrNull { c ->
-                FileName.key(c.title) == titleKey &&
-                    (TrackMatcher.sharesArtist(artist, c.artist) || TrackMatcher.sharesArtist(video.artist, c.artist))
+                FileName.key(c.title) in keys && artists.any { TrackMatcher.sharesArtist(it, c.artist) }
             }
             ?: return null
         TrackLog.d(TAG, "audio-first: '${video.title}' → '${pick.title}' by ${pick.artist} (cleaned title)", about = video.videoId)
-        found[video.videoId] = pick
         return pick
     }
 }

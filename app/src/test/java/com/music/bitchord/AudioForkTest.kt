@@ -160,4 +160,10 @@ class AudioForkTest {
     fun `no overlap means walking the whole list`() {
         assertNull(LikedMusicCache.merge(listOf("x", "y").map(::s), listOf("a", "b").map(::s)))
     }
+
+    @Test
+    fun `video titles split on a slash give the song as an option`() {
+        val options = com.music.bitchord.playback.VideoTitles.titleOptions("浜崎あゆみ / Rule", "ayumi hamasaki")
+        assertTrue(options.toString(), options.any { it == "Rule" })
+    }
 }
