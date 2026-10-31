@@ -335,7 +335,7 @@ fun SettingsScreen(
                 )
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { playlistReport = null }) { Text(stringResource(R.string.done)) }
+                androidx.compose.material3.TextButton(onClick = { com.music.bitchord.data.PlaylistExchange.dismissReport() }) { Text(stringResource(R.string.done)) }
             },
         )
     }
