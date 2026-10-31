@@ -49,8 +49,14 @@ object LikedMusicCache {
         return Saved(saved.songs, saved.savedAt).takeIf { it.songs.isNotEmpty() }
     }
 
+    /** The profile Liked Music was last saved for — whose list an export takes. */
+    @Volatile
+    var lastProfile: String? = null
+        private set
+
     fun save(profile: String?, songs: List<Song>) {
         if (songs.isEmpty()) return
+        lastProfile = profile
         val f = file(profile) ?: return
         SongListStore.save(f, songs)
     }

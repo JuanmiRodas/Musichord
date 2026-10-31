@@ -120,6 +120,28 @@ object OfflinePlaylists {
         return playlist
     }
 
+    /**
+     * BitChord Audio: the playlist called [title] now holds exactly [songs] —
+     * an imported (cleaned) playlist replaces the one it came from, or is made.
+     * Liked is never replaced this way.
+     */
+    fun replaceOrCreate(title: String, songs: List<Song>): OfflinePlaylist {
+        val name = title.trim()
+        val stored = songs.distinctBy { it.playlistKey }.map { it.stored() }
+        var result: OfflinePlaylist? = null
+        mutate { list ->
+            val i = list.indexOfFirst { !it.isLiked && it.title.equals(name, ignoreCase = true) }
+            if (i >= 0) {
+                list.toMutableList().also { l -> l[i] = l[i].copy(songs = stored).also { result = it } }
+            } else {
+                val made = OfflinePlaylist(id = "p" + System.currentTimeMillis().toString(36), title = name, songs = stored)
+                result = made
+                list + made
+            }
+        }
+        return result!!
+    }
+
     class AddResult(val added: Int, val alreadyThere: Int)
 
     /**

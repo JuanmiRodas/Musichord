@@ -166,6 +166,10 @@ object WebDavClient {
             }
         }
 
+    /** BitChord Audio: the files (not folders) directly inside [dirUrl]. */
+    suspend fun listFiles(dirUrl: String, username: String, password: String): Result<List<Entry>> =
+        withContext(Dispatchers.IO) { propfind(dirUrl, username, password).map { list -> list.filterNot { it.isCollection } } }
+
     /** BitChord Audio: a small text file — a `.lrc` — read whole. */
     suspend fun readText(fileUrl: String, username: String, password: String, maxBytes: Int = 1024 * 1024): Result<String> =
         readHead(fileUrl, username, password, maxBytes).map { bytes ->

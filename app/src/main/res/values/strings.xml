@@ -793,6 +793,17 @@
     <string name="library_folder_music">Music</string>
     <string name="library_folder_lyrics">Lyrics</string>
     <string name="library_folder_both">Both</string>
+    <string name="playlists_title">Playlists</string>
+    <string name="playlists_export_pcloud">Export playlists to pCloud</string>
+    <string name="playlists_export_pcloud_subtitle">Every playlist (device, YouTube Music, Liked Music) as a readable .json file in “BitChord Playlists” in your pCloud music folder</string>
+    <string name="playlists_import_pcloud">Import playlists from pCloud</string>
+    <string name="playlists_import_pcloud_subtitle">Reads the .json, .m3u8 and .csv files in “BitChord Playlists”; each becomes a device playlist, replacing one with the same name</string>
+    <string name="playlists_export_folder">Export playlists to a folder…</string>
+    <string name="playlists_import_files">Import playlist files…</string>
+    <string name="playlists_import_files_subtitle">.json, .m3u, .m3u8 or .csv</string>
+    <string name="playlists_exported">Exported %1$d playlists.</string>
+    <string name="playlists_imported">Imported %1$d playlists with %2$d songs.</string>
+    <string name="playlists_missing">%1$d songs couldn’t be found:</string>
     <string name="pinned">Pinned</string>
     <string name="replay_across">Across </string>
     <string name="replay_album_end"> held your attention.</string>

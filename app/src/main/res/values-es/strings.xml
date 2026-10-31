@@ -576,6 +576,17 @@
     <string name="library_folder_music">Música</string>
     <string name="library_folder_lyrics">Letras</string>
     <string name="library_folder_both">Ambas</string>
+    <string name="playlists_title">Listas</string>
+    <string name="playlists_export_pcloud">Exportar listas a pCloud</string>
+    <string name="playlists_export_pcloud_subtitle">Cada lista (del dispositivo, YouTube Music, Me gusta) como un archivo .json legible en “BitChord Playlists” dentro de tu carpeta de música de pCloud</string>
+    <string name="playlists_import_pcloud">Importar listas desde pCloud</string>
+    <string name="playlists_import_pcloud_subtitle">Lee los archivos .json, .m3u8 y .csv de “BitChord Playlists”; cada uno pasa a ser una lista del dispositivo y sustituye a la del mismo nombre</string>
+    <string name="playlists_export_folder">Exportar listas a una carpeta…</string>
+    <string name="playlists_import_files">Importar archivos de listas…</string>
+    <string name="playlists_import_files_subtitle">.json, .m3u, .m3u8 o .csv</string>
+    <string name="playlists_exported">Se exportaron %1$d listas.</string>
+    <string name="playlists_imported">Se importaron %1$d listas con %2$d canciones.</string>
+    <string name="playlists_missing">No se encontraron %1$d canciones:</string>
     <string name="pinned">Fijado</string>
     <string name="replay_across"> repartidas en </string>
     <string name="replay_album_end"> concentró tu atención.</string>

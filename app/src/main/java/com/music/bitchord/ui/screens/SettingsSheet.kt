@@ -296,6 +296,49 @@ fun SettingsScreen(
     if (showLibraryFolders) {
         com.music.bitchord.ui.components.LibraryFoldersDialog(onDismiss = { showLibraryFolders = false })
     }
+    // BitChord Audio: playlists out to files and back in — see PlaylistExchange.
+    val playlistScope = rememberCoroutineScope()
+    var playlistBusy by remember { mutableStateOf(false) }
+    var playlistReport by remember { mutableStateOf<String?>(null) }
+    fun runPlaylistJob(job: suspend () -> String) {
+        if (playlistBusy) return
+        playlistBusy = true
+        playlistScope.launch {
+            playlistReport = runCatching { job() }.getOrElse { it.message ?: it.javaClass.simpleName }
+            playlistBusy = false
+        }
+    }
+    fun describe(r: com.music.bitchord.data.PlaylistExchange.Report): String =
+        context.getString(R.string.playlists_imported, r.playlists, r.tracks) +
+            if (r.missing.isEmpty()) "" else "\n\n" + context.getString(R.string.playlists_missing, r.missing.size) +
+                "\n" + r.missing.take(40).joinToString("\n")
+    val exportFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) runPlaylistJob {
+            val n = com.music.bitchord.data.PlaylistExchange.exportToFolder(context, tree, null).getOrThrow()
+            context.getString(R.string.playlists_exported, n)
+        }
+    }
+    val importFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) runPlaylistJob {
+            describe(com.music.bitchord.data.PlaylistExchange.importUris(context, uris))
+        }
+    }
+    playlistReport?.let { text ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { playlistReport = null },
+            title = { Text(stringResource(R.string.playlists_title)) },
+            text = {
+                Text(
+                    text,
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { playlistReport = null }) { Text(stringResource(R.string.done)) }
+            },
+        )
+    }
+    val webdavUrlForPlaylists by AppSettings.webdavUrl.collectAsStateWithLifecycle()
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
@@ -1624,6 +1667,49 @@ fun SettingsScreen(
                         libraryFolders.filter { it.enabled }.joinToString(", ") { it.name }
                     },
                     onClick = { showLibraryFolders = true },
+                )
+            }
+            val playlistsTitle = stringResource(R.string.playlists_title)
+            row(playlistsTitle, "playlist", "export", "import", "m3u", "json", "pcloud") {
+                SettingsRow(
+                    icon = SfIcons.Storage,
+                    title = stringResource(R.string.playlists_export_pcloud),
+                    subtitle = if (playlistBusy) stringResource(R.string.checking) else stringResource(R.string.playlists_export_pcloud_subtitle),
+                    enabled = !playlistBusy && webdavUrlForPlaylists.isNotBlank(),
+                    onClick = {
+                        runPlaylistJob {
+                            val n = com.music.bitchord.data.PlaylistExchange.exportToPcloud(null).getOrThrow()
+                            context.getString(R.string.playlists_exported, n)
+                        }
+                    },
+                )
+            }
+            row(playlistsTitle, "playlist", "import", "pcloud") {
+                SettingsRow(
+                    icon = SfIcons.Storage,
+                    title = stringResource(R.string.playlists_import_pcloud),
+                    subtitle = stringResource(R.string.playlists_import_pcloud_subtitle),
+                    enabled = !playlistBusy && webdavUrlForPlaylists.isNotBlank(),
+                    onClick = {
+                        runPlaylistJob { describe(com.music.bitchord.data.PlaylistExchange.importFromPcloud().getOrThrow()) }
+                    },
+                )
+            }
+            row(playlistsTitle, "playlist", "export", "folder", "file") {
+                SettingsRow(
+                    icon = SfIcons.Storage,
+                    title = stringResource(R.string.playlists_export_folder),
+                    enabled = !playlistBusy,
+                    onClick = { exportFolderPicker.launch(null) },
+                )
+            }
+            row(playlistsTitle, "playlist", "import", "file", "m3u", "csv", "json") {
+                SettingsRow(
+                    icon = SfIcons.Storage,
+                    title = stringResource(R.string.playlists_import_files),
+                    subtitle = stringResource(R.string.playlists_import_files_subtitle),
+                    enabled = !playlistBusy,
+                    onClick = { importFilePicker.launch(arrayOf("*/*")) },
                 )
             }
             val audioOnlyTitle = stringResource(R.string.audio_only)
