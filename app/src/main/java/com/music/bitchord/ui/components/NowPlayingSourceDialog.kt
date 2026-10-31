@@ -134,7 +134,7 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                         list.forEach { f ->
                             SourceRow(
                                 label = "pCloud · " + fileLabel(f),
-                                detail = listOfNotNull(f.sourceQuality, f.durationText, folderOf(f)).joinToString(" · "),
+                                detail = listOfNotNull(qualityText(f), f.durationText, folderOf(f)).joinToString(" · "),
                                 selected = (choice as? PreferredSource.File)?.id == f.videoId ||
                                     (choice == null && f.videoId == song.videoId),
                             ) { switchTo(f) }
@@ -179,6 +179,17 @@ private suspend fun youTubeCopyOf(song: Song): Song? {
         .filterNot { it.isVideo }
     val target = TrackMatcher.Target(title = song.title, artist = song.artist, album = song.albumName)
     return TrackMatcher.ranked(results, target).firstOrNull() ?: results.firstOrNull()
+}
+
+/** "MP3 320 kbps", "FLAC 16/44.1" — from the tags as last read. */
+private fun qualityText(f: Song): String? {
+    val rank = com.music.bitchord.data.sources.OwnFileMatcher.qualityRank(f)
+    val codec = f.sourceQuality?.substringBefore(' ')?.takeIf { it.isNotBlank() }
+    return when {
+        rank >= 9_000 -> f.sourceQuality ?: "Lossless"
+        rank > 0 -> listOfNotNull(codec, "$rank kbps").joinToString(" ")
+        else -> f.sourceQuality
+    }
 }
 
 private fun fileLabel(f: Song): String =

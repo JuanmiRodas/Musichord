@@ -50,6 +50,7 @@ object WebDavRepository {
     /** How many files are read for their tags at once. */
     private const val TAG_READ_PARALLELISM = 4
     private const val MPEG_PROBE_BYTES = 16 * 1024
+    private const val STARTUP_REFRESH_DELAY_MS = 20_000L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var tagJob: Job? = null
@@ -82,6 +83,13 @@ object WebDavRepository {
             .getOrNull()?.let(SidecarLyrics::index)
         // And refreshed in the background, lyrics-only folders included.
         scope.launch { refreshLyricsOnly() }
+        // BitChord Audio: the library itself too, once per start — so new
+        // files, and the tags (bitrates) of files not read yet, are there for
+        // playback without the library page having to be opened.
+        scope.launch {
+            kotlinx.coroutines.delay(STARTUP_REFRESH_DELAY_MS)
+            if (isConfigured()) runCatching { getSongs() }
+        }
     }
 
     /** A lyrics folder's name: "LyricsX", "Lyrics", "Letras", "lrc"… */
@@ -357,6 +365,9 @@ object WebDavRepository {
             jobs.forEach { it.join() }
             RemoteTagStore.flush()
             _tagProgress.value = null
+            // The library rows carry the new tags (bitrates) without a page
+            // having to be opened for it.
+            runCatching { relabeled() }
             _changes.value += 1
         }
     }

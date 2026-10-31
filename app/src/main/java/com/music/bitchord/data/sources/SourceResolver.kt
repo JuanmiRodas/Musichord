@@ -508,6 +508,15 @@ object SourceResolver {
         servedBy: String? = null,
     ): SourceStream? {
         if (target.title.isBlank() || target.durationSec == null || target.isVideo) return null
+        // BitChord Audio: your own copy, by the same matcher and rule a fresh
+        // start uses — a track started from YouTube's cache swaps to it here.
+        val own = SourceRegistry.activeForPlayback().filter { it.kind == SourceKind.MY_LIBRARY }.map { it.configId }
+        if (servedBy == null || servedBy !in own) {
+            ownFileFor(target)?.let { mine ->
+                TrackLog.d(TAG, "upgrade found: '${target.title}' in your library at ${mine.format.summary}")
+                return mine
+            }
+        }
         val request = requestForNow()
         val active = SourceRegistry.activeForPlayback()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null

@@ -131,10 +131,24 @@ object OwnFileMatcher {
 
     private val KBPS = Regex("""(\d{2,4})\s*kbps""", RegexOption.IGNORE_CASE)
 
-    private fun qualityRank(song: Song): Int {
-        val q = song.sourceQuality.orEmpty()
+    /**
+     * Lossless as 9000+, else the bitrate — from the tags as last read
+     * ([com.music.bitchord.data.remote.RemoteTagStore]), not the library row,
+     * which can predate the bitrate being read; else the file's size over its
+     * length; else whatever the row's label says.
+     */
+    fun qualityRank(song: Song): Int {
         if (song.sourceHiRes) return 10_000
+        val url = com.music.bitchord.data.webdav.WebDavConfig.fileUrlOf(song.videoId)
+        val tags = url?.let { com.music.bitchord.data.remote.RemoteTagStore.get(it, com.music.bitchord.data.remote.RemoteTagStore.Stamp(null, null)) }
+        if (tags?.lossless == true) return 9_000
+        tags?.kbps?.takeIf { it > 0 }?.let { return it }
+        val q = song.sourceQuality.orEmpty()
         if (listOf("FLAC", "ALAC", "WAV", "AIFF").any { it in q.uppercase(Locale.ROOT) }) return 9_000
-        return KBPS.find(q)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        KBPS.find(q)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        val size = url?.let { com.music.bitchord.data.remote.RemoteTagStore.sizeOf(it) }
+        val ms = tags?.durationMs?.takeIf { it > 1000 } ?: song.durationMillis().takeIf { it > 1000 }
+        if (size != null && ms != null) return (size * 8 / ms).toInt()
+        return 0
     }
 }
