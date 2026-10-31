@@ -297,16 +297,17 @@ fun SettingsScreen(
         com.music.bitchord.ui.components.LibraryFoldersDialog(onDismiss = { showLibraryFolders = false })
     }
     // BitChord Audio: playlists out to files and back in — see PlaylistExchange.
-    val playlistScope = rememberCoroutineScope()
-    var playlistBusy by remember { mutableStateOf(false) }
-    var playlistReport by remember { mutableStateOf<String?>(null) }
+    // Jobs run in PlaylistExchange's own scope, so closing this sheet (or
+    // the folder picker recreating it) doesn't cancel an export half-way.
+    val playlistBusy by com.music.bitchord.data.PlaylistExchange.busy.collectAsStateWithLifecycle()
+    val playlistProgress by com.music.bitchord.data.PlaylistExchange.progress.collectAsStateWithLifecycle()
+    val playlistReport by com.music.bitchord.data.PlaylistExchange.report.collectAsStateWithLifecycle()
+    val appContext = context.applicationContext
     fun runPlaylistJob(job: suspend () -> String) {
-        if (playlistBusy) return
-        playlistBusy = true
-        playlistScope.launch {
-            playlistReport = runCatching { job() }.getOrElse { it.message ?: it.javaClass.simpleName }
-            playlistBusy = false
-        }
+        com.music.bitchord.data.PlaylistExchange.run(
+            onDone = { text -> android.widget.Toast.makeText(appContext, text.lineSequence().first(), android.widget.Toast.LENGTH_LONG).show() },
+            job = job,
+        )
     }
     fun describe(r: com.music.bitchord.data.PlaylistExchange.Report): String =
         context.getString(R.string.playlists_imported, r.playlists, r.tracks) +
@@ -325,7 +326,7 @@ fun SettingsScreen(
     }
     playlistReport?.let { text ->
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { playlistReport = null },
+            onDismissRequest = { com.music.bitchord.data.PlaylistExchange.dismissReport() },
             title = { Text(stringResource(R.string.playlists_title)) },
             text = {
                 Text(
@@ -1674,7 +1675,7 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = SfIcons.Storage,
                     title = stringResource(R.string.playlists_export_pcloud),
-                    subtitle = if (playlistBusy) stringResource(R.string.checking) else stringResource(R.string.playlists_export_pcloud_subtitle),
+                    subtitle = if (playlistBusy) (playlistProgress ?: stringResource(R.string.checking)) else stringResource(R.string.playlists_export_pcloud_subtitle),
                     enabled = !playlistBusy && webdavUrlForPlaylists.isNotBlank(),
                     onClick = {
                         runPlaylistJob {

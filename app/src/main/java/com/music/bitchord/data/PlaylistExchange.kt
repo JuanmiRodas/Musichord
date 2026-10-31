@@ -14,7 +14,13 @@ import com.music.bitchord.data.webdav.LibraryFolders
 import com.music.bitchord.data.webdav.WebDavClient
 import com.music.bitchord.data.webdav.WebDavConfig
 import com.music.bitchord.data.webdav.WebDavRepository
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
@@ -66,19 +72,59 @@ object PlaylistExchange {
 
     // ── Export ───────────────────────────────────────────────────────────
 
-    /** Every playlist worth exporting, with all its tracks. */
-    suspend fun gather(profile: String?): List<Pair<String, List<Song>>> = withContext(Dispatchers.IO) {
-        val out = ArrayList<Pair<String, List<Song>>>()
-        OfflinePlaylists.playlists.value.forEach { p -> if (p.songs.isNotEmpty()) out += p.title to p.songs }
+    // ── Jobs ─────────────────────────────────────────────────────────────
+    //
+    // An export walks every YouTube playlist page by page and can take minutes.
+    // Run from the settings sheet's own scope it was cancelled the moment the
+    // sheet closed or the folder picker recreated it — before a single file
+    // was written. Jobs run here instead, for the app's lifetime, and each
+    // playlist is written as soon as it has been read.
+
+    private val jobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _busy = MutableStateFlow(false)
+    val busy: StateFlow<Boolean> = _busy.asStateFlow()
+    private val _progress = MutableStateFlow<String?>(null)
+    /** "3 · Anime openings" while a job runs. */
+    val progress: StateFlow<String?> = _progress.asStateFlow()
+    private val _report = MutableStateFlow<String?>(null)
+    /** The last job's outcome, until [dismissReport]. */
+    val report: StateFlow<String?> = _report.asStateFlow()
+
+    fun dismissReport() { _report.value = null }
+
+    /** Runs [job] unless one is running; [onDone] gets its outcome on the main thread. */
+    fun run(onDone: (String) -> Unit = {}, job: suspend () -> String) {
+        if (!_busy.compareAndSet(false, true)) return
+        jobScope.launch {
+            val text = runCatching { job() }.getOrElse { it.message ?: it.javaClass.simpleName }
+            _progress.value = null
+            _report.value = text
+            _busy.value = false
+            withContext(Dispatchers.Main) { onDone(text) }
+        }
+    }
+
+    /**
+     * Every playlist worth exporting, with all its tracks, handed to [each]
+     * one at a time as it is read. Returns how many there were.
+     */
+    suspend fun forEachPlaylist(profile: String?, each: suspend (String, List<Song>) -> Unit): Int = withContext(Dispatchers.IO) {
+        var n = 0
+        suspend fun emit(title: String, songs: List<Song>) {
+            if (songs.isEmpty()) return
+            n++
+            _progress.value = "$n · $title"
+            each(title, songs)
+        }
+        OfflinePlaylists.playlists.value.forEach { p -> emit(p.title, p.songs) }
         // Liked Music: the saved copy, else walked whole.
         val liked = LikedMusicCache.load(profile ?: LikedMusicCache.lastProfile)?.songs
             ?: allSongs(YtMusicRepository.LIKED_MUSIC)
-        if (liked.isNotEmpty()) out += "Liked Music" to liked
+        emit("Liked Music", liked)
         YtMusicRepository.userPlaylists().getOrNull().orEmpty().forEach { p ->
-            val songs = allSongs(p.browseId)
-            if (songs.isNotEmpty()) out += p.title to songs
+            emit(p.title, allSongs(p.browseId))
         }
-        out
+        n
     }
 
     private suspend fun allSongs(browseId: String): List<Song> {
@@ -154,14 +200,12 @@ object PlaylistExchange {
             val user = AppSettings.webdavUsername.value
             val pass = AppSettings.webdavPassword.value
             WebDavClient.ensureCollection(dir, user, pass).getOrThrow()
-            val lists = gather(profile)
-            lists.forEach { (title, songs) ->
+            forEachPlaylist(profile) { title, songs ->
                 val bytes = encode(title, songs).toByteArray(Charsets.UTF_8)
                 val name = java.net.URLEncoder.encode(fileNameFor(title), "UTF-8").replace("+", "%20")
                 WebDavClient.putFile(dir + name, bytes.inputStream(), bytes.size.toLong(), "application/json", user, pass, overwrite = true)
                     .getOrThrow()
             }
-            lists.size
         }
     }
 
@@ -169,16 +213,45 @@ object PlaylistExchange {
     suspend fun exportToFolder(context: Context, treeUri: Uri, profile: String?): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
             val resolver = context.contentResolver
-            val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
-            val lists = gather(profile)
-            lists.forEach { (title, songs) ->
-                val doc = DocumentsContract.createDocument(resolver, parent, "application/json", fileNameFor(title))
-                    ?: error("Couldn't create ${fileNameFor(title)}")
-                resolver.openOutputStream(doc, "wt")?.use { it.write(encode(title, songs).toByteArray(Charsets.UTF_8)) }
+            // Kept past this call, so the write still has the folder if the
+            // picker's grant would otherwise lapse with the screen that asked.
+            runCatching {
+                resolver.takePersistableUriPermission(
+                    treeUri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
             }
-            lists.size
+            val parentId = DocumentsContract.getTreeDocumentId(treeUri)
+            val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentId)
+            val existing = childrenByName(context, treeUri, parentId)
+            val written = forEachPlaylist(profile) { title, songs ->
+                val name = fileNameFor(title)
+                // Overwritten in place on a second export, not "Name (1).json".
+                val doc = existing[name]
+                    ?: DocumentsContract.createDocument(resolver, parent, "application/json", name)
+                    ?: error("Couldn't create $name")
+                val out = resolver.openOutputStream(doc, "wt") ?: error("Couldn't write $name")
+                out.use { it.write(encode(title, songs).toByteArray(Charsets.UTF_8)) }
+            }
+            if (written == 0) error("No playlists found to export — sign in to YouTube Music or make a playlist first")
+            written
         }
     }
+
+    private fun childrenByName(context: Context, treeUri: Uri, parentId: String): Map<String, Uri> = runCatching {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
+        val out = HashMap<String, Uri>()
+        context.contentResolver.query(
+            children,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null,
+        )?.use { c ->
+            while (c.moveToNext()) {
+                out[c.getString(1)] = DocumentsContract.buildDocumentUriUsingTree(treeUri, c.getString(0))
+            }
+        }
+        out
+    }.getOrDefault(emptyMap())
 
     // ── Import ───────────────────────────────────────────────────────────
 
