@@ -304,7 +304,7 @@ fun SettingsScreen(
     val playlistReport by com.music.bitchord.data.PlaylistExchange.report.collectAsStateWithLifecycle()
     val appContext = context.applicationContext
     fun runPlaylistJob(job: suspend () -> String) {
-        com.music.bitchord.data.PlaylistExchange.run(
+        com.music.bitchord.data.PlaylistExchange.startJob(
             onDone = { text -> android.widget.Toast.makeText(appContext, text.lineSequence().first(), android.widget.Toast.LENGTH_LONG).show() },
             job = job,
         )

@@ -52,7 +52,9 @@ jobs:
       - name: Report compile errors
         if: failure()
         run: |
-          grep -E '^e: |error: |What went wrong|Execution failed' build.log | head -40 | while IFS= read -r line; do
+          # GitHub shows at most 10 error annotations per step: skip the
+          # library-metadata warnings so the real compile errors are the ones shown.
+          grep -E '^e: |error: |What went wrong|Execution failed' build.log | grep -v 'incompatible version of Kotlin' | head -40 | while IFS= read -r line; do
             echo "::error::${line}"
           done
 

@@ -93,7 +93,7 @@ object PlaylistExchange {
     fun dismissReport() { _report.value = null }
 
     /** Runs [job] unless one is running; [onDone] gets its outcome on the main thread. */
-    fun run(onDone: (String) -> Unit = {}, job: suspend () -> String) {
+    fun startJob(onDone: (String) -> Unit = {}, job: suspend () -> String) {
         if (!_busy.compareAndSet(false, true)) return
         jobScope.launch {
             val text = runCatching { job() }.getOrElse { it.message ?: it.javaClass.simpleName }
