@@ -205,6 +205,6 @@ class AudioForkTest {
         val k = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("OPEN YOUR MIND ~小さな羽根ひろげて~ (Audio)")
         val f = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("Open Your Mind ~Chiisana Hane Hirogete~")
         assertTrue("$k / $f", (k intersect f).contains("openyourmind"))
-        assertTrue(com.music.bitchord.data.sources.OwnFileMatcher.sameArtist("Kesha", "Ke$ha"))
+        assertTrue(com.music.bitchord.data.sources.OwnFileMatcher.sameArtist("Kesha", "Ke\$ha"))
     }
 }
