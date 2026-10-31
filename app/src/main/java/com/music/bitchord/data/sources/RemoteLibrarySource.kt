@@ -67,11 +67,48 @@ class RemoteLibrarySource(
         val headers = WebDavAuth.authHeader?.takeIf { it.isNotBlank() }?.let { mapOf("Authorization" to it) }.orEmpty()
         return SourceStream(
             url = url,
-            format = StreamFormat(codec = codec, sampleRateHz = tags?.sampleRate, bitDepth = tags?.bitDepth),
+            format = StreamFormat(
+                codec = codec,
+                kbps = tags?.kbps ?: estimatedKbps(url, tags?.durationMs),
+                sampleRateHz = tags?.sampleRate,
+                bitDepth = tags?.bitDepth,
+            ),
             headers = headers,
             durationSec = tags?.durationMs?.let { (it / 1000).toInt() },
             sourceConfigId = configId,
         )
+    }
+
+    /** Size over length when the frames haven't been read yet. */
+    private fun estimatedKbps(url: String, durationMs: Long?): Int? {
+        val size = RemoteTagStore.sizeOf(url) ?: return null
+        val ms = durationMs?.takeIf { it > 1000 } ?: return null
+        return (size * 8 / ms).toInt()
+    }
+
+    companion object {
+        /** Below this a lossy file of yours loses to YouTube's own stream. */
+        const val MIN_KBPS = 256
+
+        /**
+         * Whether your copy should play instead of YouTube's, under the
+         * listener's preference: always ("my files first"), never ("YouTube
+         * first"), or — the default, "best quality" — when it is lossless or
+         * at least [MIN_KBPS]. A bitrate not known yet is worked out from the
+         * file's size over the song's length.
+         */
+        fun qualifies(stream: SourceStream, targetDurationSec: Int?): Boolean {
+            val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value
+            if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return false
+            if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return true
+            if (stream.format.isLossless == true) return true
+            val kbps = stream.format.kbps
+                ?: RemoteTagStore.sizeOf(stream.url)?.let { size ->
+                    targetDurationSec?.takeIf { it > 0 }?.let { (size * 8 / 1000 / it).toInt() }
+                }
+                ?: return false
+            return kbps >= MIN_KBPS
+        }
     }
 
     private fun norm(s: String): String =

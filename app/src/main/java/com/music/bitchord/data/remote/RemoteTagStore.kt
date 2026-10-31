@@ -55,7 +55,16 @@ object RemoteTagStore {
     fun get(url: String, stamp: Stamp): RemoteTags.Tags? {
         ensureLoaded()
         val e = entries[url] ?: return null
+        // Read before bitrates were: a lossy file without one is read again,
+        // since its bitrate decides whether it plays over YouTube.
+        if (!e.tags.lossless && e.tags.codec != null && e.tags.kbps == null && stamp.size != null) return null
         return e.tags.takeIf { e.stamp == stamp || (stamp.size == null && stamp.modified == null) }
+    }
+
+    /** The file's size as last listed, for a bitrate before its tags are read. */
+    fun sizeOf(url: String): Long? {
+        ensureLoaded()
+        return entries[url]?.stamp?.size
     }
 
     fun put(url: String, stamp: Stamp, tags: RemoteTags.Tags) {
@@ -99,6 +108,7 @@ object RemoteTagStore {
         t.bitDepth?.let { put("depth", it) }
         if (t.lossless) put("lossless", true)
         t.codec?.let { put("codec", it) }
+        t.kbps?.let { put("kbps", it) }
         if (t.altTitles.isNotEmpty()) put("altTitles", JSONArray(t.altTitles))
         if (t.altArtists.isNotEmpty()) put("altArtists", JSONArray(t.altArtists))
     }
@@ -118,6 +128,7 @@ object RemoteTagStore {
         sampleRate = o.int("rate"),
         bitDepth = o.int("depth"),
         lossless = o.optBoolean("lossless", false),
+        kbps = o.int("kbps"),
         codec = o.str("codec"),
         altTitles = o.strings("altTitles"),
         altArtists = o.strings("altArtists"),

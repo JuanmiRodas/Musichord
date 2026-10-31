@@ -49,6 +49,7 @@ object WebDavRepository {
 
     /** How many files are read for their tags at once. */
     private const val TAG_READ_PARALLELISM = 4
+    private const val MPEG_PROBE_BYTES = 16 * 1024
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var tagJob: Job? = null
@@ -74,6 +75,7 @@ object WebDavRepository {
         lyricsIndexFile = File(context.filesDir, "remote_library/lyrics_index.txt")
         RemoteTagStore.init(context)
         LibraryFolders.init(context)
+        com.music.bitchord.data.sources.PreferredSource.init(context)
         // The lyrics folders' file list as last seen, so lyrics are found
         // before the library has been opened this session.
         runCatching { lyricsIndexFile?.takeIf { it.isFile }?.readLines()?.filter { it.isNotBlank() } }
@@ -82,14 +84,41 @@ object WebDavRepository {
         scope.launch { refreshLyricsOnly() }
     }
 
+    /** A lyrics folder's name: "LyricsX", "Lyrics", "Letras", "lrc"… */
+    private val LYRICS_FOLDER = Regex("""^(lyrics?\s*x?|letras?|lrcx?|karaoke lyrics)$""", RegexOption.IGNORE_CASE)
+
+    /**
+     * Lyrics folders found rather than added: one named like [LYRICS_FOLDER]
+     * beside a music folder — `Music/LyricsX` next to `Music/Música`, as
+     * LyricsX on a Mac keeps it. Folders already in the list are left to it.
+     */
+    private suspend fun autoLyricsFolders(username: String, password: String): List<String> {
+        val configured = LibraryFolders.folders.value.map { WebDavConfig.normalizeUrl(it.url).trimEnd('/') }.toSet()
+        val musicFolders = LibraryFolders.folders.value.filter { it.enabled && it.hasMusic }.map { it.url }
+            .ifEmpty { listOf(AppSettings.webdavUrl.value) }
+        return musicFolders
+            .map { WebDavConfig.normalizeUrl(it).trimEnd('/') }
+            .map { it.substringBeforeLast('/') + "/" }
+            .distinct()
+            .flatMap { parent ->
+                WebDavClient.listFolders(parent, username, password).getOrNull().orEmpty()
+                    .filter { LYRICS_FOLDER.matches(it.displayName.ifBlank { decodedLast(it.url) }.trim()) }
+                    .map { WebDavConfig.normalizeUrl(it.url).trimEnd('/') }
+            }
+            .filter { it !in configured }
+            .distinct()
+            .also { if (it.isNotEmpty()) TrackLog.d(TAG, "WebDAV: lyrics folders found beside the music: $it") }
+    }
+
     /** Lists just the folders that hold only lyrics — cheap, one flat folder is the usual case. */
     private suspend fun refreshLyricsOnly() {
         if (!isConfigured()) return
-        val folders = LibraryFolders.folders.value.filter { it.enabled && it.kind == LibraryFolders.Kind.LYRICS }
-        if (folders.isEmpty()) return
         val u = AppSettings.webdavUsername.value
         val p = AppSettings.webdavPassword.value
-        val found = folders.mapNotNull { WebDavClient.listLibrary(it.url, u, p).getOrNull() }
+        val folders = LibraryFolders.folders.value.filter { it.enabled && it.kind == LibraryFolders.Kind.LYRICS }.map { it.url } +
+            autoLyricsFolders(u, p)
+        if (folders.isEmpty()) return
+        val found = folders.mapNotNull { WebDavClient.listLibrary(it, u, p).getOrNull() }
         if (found.isEmpty()) return
         // Merged with what the music folders last contributed, kept in the file.
         val known = runCatching { lyricsIndexFile?.takeIf { it.isFile }?.readLines() }.getOrNull().orEmpty()
@@ -149,14 +178,16 @@ object WebDavRepository {
             WebDavClient.listLibrary(folder.url, username, password, maxFiles = 50_000).getOrNull()?.let { folder to it }
         }
         if (listed.isEmpty()) return@withContext emptyList()
+        val autoLyrics = autoLyricsFolders(username, password)
+            .mapNotNull { WebDavClient.listLibrary(it, username, password).getOrNull() }
         roots = listed.filter { it.first.hasMusic }.map { WebDavConfig.normalizeUrl(it.first.url).trimEnd('/') + "/" }
         val music = listed.filter { it.first.hasMusic }.map { it.second }
         val listing = WebDavClient.Listing(
             audio = music.flatMap { it.audio }.distinctBy { it.url },
             images = music.flatMap { it.images }.distinctBy { it.url },
             // Lyrics from every folder, music and lyrics alike, first folder first.
-            lyrics = listed.flatMap { it.second.lyrics }.distinctBy { it.url },
-            tables = listed.flatMap { it.second.tables }.distinctBy { it.url },
+            lyrics = (listed.flatMap { it.second.lyrics } + autoLyrics.flatMap { it.lyrics }).distinctBy { it.url },
+            tables = (listed.flatMap { it.second.tables } + autoLyrics.flatMap { it.tables }).distinctBy { it.url },
         )
         lastListing = listing
         listing.tables.forEach { readAliasTable(it.url, username, password) }
@@ -299,7 +330,14 @@ object WebDavRepository {
                         // Failures are not stored: a network blip shouldn't
                         // mark a file as having no tags for good.
                         if (head != null) {
-                            RemoteTagStore.put(entry.url, stamp(entry), RemoteTags.parse(head) ?: RemoteTags.Tags())
+                            var tags = RemoteTags.parse(head, entry.size) ?: RemoteTags.Tags()
+                            // A cover larger than the first read pushes the MP3
+                            // frames past it: a few KB from where they start.
+                            tags.audioOffset?.let { offset ->
+                                WebDavClient.readRange(entry.url, username, password, offset, MPEG_PROBE_BYTES).getOrNull()
+                                    ?.let { tags = RemoteTags.completeMpeg(tags, it, entry.size) }
+                            }
+                            RemoteTagStore.put(entry.url, stamp(entry), tags.copy(audioOffset = null))
                         }
                         synchronized(this@WebDavRepository) {
                             done++

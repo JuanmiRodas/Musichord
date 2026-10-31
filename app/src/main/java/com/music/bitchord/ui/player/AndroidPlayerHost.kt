@@ -208,6 +208,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         main.post { Toast.makeText(app, message, Toast.LENGTH_SHORT).show() }
     }
 
+    override fun chooseSource(song: com.music.bitchord.data.model.Song) {
+        com.music.bitchord.ui.components.NowPlayingSource.open(song)
+    }
+
     override fun editLyricAliases(song: com.music.bitchord.data.model.Song) {
         com.music.bitchord.ui.components.LyricAliasEditor.open(song)
     }

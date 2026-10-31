@@ -166,6 +166,43 @@ object WebDavClient {
             }
         }
 
+    /** BitChord Audio: [bytes] bytes of [fileUrl] from [offset]. */
+    suspend fun readRange(fileUrl: String, username: String, password: String, offset: Long, bytes: Int): Result<ByteArray> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val builder = Request.Builder().url(fileUrl).header("Range", "bytes=$offset-${offset + bytes - 1}")
+                WebDavConfig.basicAuthHeader(username, password)?.let { builder.header("Authorization", it) }
+                Http.client.newCall(builder.build()).execute().use { response ->
+                    // 206 only: a server ignoring Range would send the whole file from byte 0.
+                    if (response.code != 206) throw WebDavException("Range read failed with ${response.code}")
+                    val body = response.body ?: throw WebDavException("Empty response")
+                    val out = java.io.ByteArrayOutputStream(bytes)
+                    val source = body.byteStream()
+                    val buf = ByteArray(16 * 1024)
+                    while (out.size() < bytes) {
+                        val n = source.read(buf, 0, minOf(buf.size, bytes - out.size()))
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                    }
+                    out.toByteArray()
+                }
+            }
+        }
+
+    /** BitChord Audio: the folders directly inside [dirUrl], [dirUrl] itself left out. */
+    suspend fun listFolders(dirUrl: String, username: String, password: String): Result<List<Entry>> =
+        withContext(Dispatchers.IO) {
+            fun norm(u: String) = runCatching { java.net.URLDecoder.decode(u.trimEnd('/'), "UTF-8") }
+                .getOrDefault(u.trimEnd('/')).lowercase(Locale.ROOT)
+            val self = norm(dirUrl)
+            propfind(dirUrl, username, password).map { list ->
+                list.filter { e ->
+                    val n = norm(e.url)
+                    e.isCollection && n != self && !self.endsWith(n)
+                }
+            }
+        }
+
     /** BitChord Audio: the files (not folders) directly inside [dirUrl]. */
     suspend fun listFiles(dirUrl: String, username: String, password: String): Result<List<Entry>> =
         withContext(Dispatchers.IO) { propfind(dirUrl, username, password).map { list -> list.filterNot { it.isCollection } } }

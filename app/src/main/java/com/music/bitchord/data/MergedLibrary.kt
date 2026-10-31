@@ -131,6 +131,14 @@ object MergedLibrary {
         prefs?.getString(key, null)?.let { n ->
             versions.firstOrNull { it.origin.name == n }?.let { return it }
         }
+        // The pick from the player's source line.
+        when (val c = com.music.bitchord.data.sources.PreferredSource.get(versions.first().song)) {
+            is com.music.bitchord.data.sources.PreferredSource.File ->
+                versions.firstOrNull { it.song.videoId == c.id }?.let { return it }
+            com.music.bitchord.data.sources.PreferredSource.YouTube ->
+                versions.firstOrNull { it.origin == Origin.YOUTUBE }?.let { return it }
+            null -> Unit
+        }
         val order: (Version) -> Int = when (AppSettings.sourcePreference.value) {
             AppSettings.SOURCE_YOUTUBE_FIRST -> { v -> if (v.origin == Origin.YOUTUBE) 0 else 1 + rank(v) }
             AppSettings.SOURCE_OWN_FIRST -> { v -> if (v.origin == Origin.YOUTUBE) 10 else rank(v) }
@@ -139,15 +147,19 @@ object MergedLibrary {
         return versions.minByOrNull(order) ?: versions.first()
     }
 
-    /** Best quality first: lossless, then your other files, then YouTube. */
+    private val KBPS = Regex("""(\d{2,4})\s*KBPS""")
+
+    /** Best quality first: your lossless or 256+ kbps files, then YouTube, then your smaller files. */
     private fun rank(v: Version): Int {
         val q = v.song.sourceQuality.orEmpty().uppercase()
         val lossless = v.song.sourceHiRes || listOf("FLAC", "ALAC", "WAV", "AIFF").any { it in q }
+        val kbps = KBPS.find(q)?.groupValues?.get(1)?.toIntOrNull()
         return when {
             v.origin != Origin.YOUTUBE && lossless -> 0
-            v.origin == Origin.PCLOUD && "320" in q -> 1
-            v.origin != Origin.YOUTUBE && !q.contains("128") -> 2
-            v.origin == Origin.YOUTUBE -> 3
+            v.origin != Origin.YOUTUBE && kbps != null &&
+                kbps >= com.music.bitchord.data.sources.RemoteLibrarySource.MIN_KBPS -> 1
+            v.origin == Origin.YOUTUBE -> 2
+            v.origin != Origin.YOUTUBE && kbps == null -> 3
             else -> 4
         }
     }

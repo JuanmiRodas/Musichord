@@ -166,4 +166,37 @@ class AudioForkTest {
         val options = com.music.bitchord.playback.VideoTitles.titleOptions("浜崎あゆみ / Rule", "ayumi hamasaki")
         assertTrue(options.toString(), options.any { it == "Rule" })
     }
+
+    @Test
+    fun `bilingual and quoted video titles give the song's own names`() {
+        val k = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("流れ星 - Nagare-Boshi")
+        assertTrue(k.toString(), "流れ星" in k && "nagareboshi" in k)
+        val q = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("宇多田ヒカル『One Last Kiss』")
+        assertTrue(q.toString(), "onelastkiss" in q)
+        val g = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("Anti-Hero (con Bleachers)")
+        assertTrue(g.toString(), "antihero" in g)
+    }
+
+    @Test
+    fun `artists match in either name order but not by accident`() {
+        val m = com.music.bitchord.data.sources.OwnFileMatcher
+        assertTrue(m.sameArtist("Hikaru Utada", "Utada Hikaru"))
+        assertTrue(m.sameArtist("Taylor Swift", "Taylor Swift, Bleachers"))
+        assertTrue(m.sameArtist("ASIAN KUNG-FU GENERATION", "Asian Kung-Fu Generation"))
+        assertTrue(!m.sameArtist("Amaia", "Amaral"))
+    }
+
+    @Test
+    fun `mp3 bitrate and length come from the first frame`() {
+        // ID3v2.3 with an empty tag, then an MPEG-1 layer III frame at 128 kbps, 44.1 kHz.
+        val head = byteArrayOf(
+            'I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0, 0, 0, 0, 0,
+            0xFF.toByte(), 0xFB.toByte(), 0x90.toByte(), 0x64,
+        ) + ByteArray(64)
+        val tags = RemoteTags.parse(head, totalSize = 10L + 1_600_000L)
+        assertNotNull(tags)
+        assertEquals(128, tags!!.kbps)
+        assertEquals(100_000L, tags.durationMs)
+        assertEquals("MP3 128 kbps", tags.qualityLabel)
+    }
 }

@@ -5499,6 +5499,12 @@ class PlaybackService : MediaLibraryService() {
         if (StreamChoice.substitutesRefused(videoId)) {
             return Resolved.YouTube(StreamResolver.resolve(videoId))
         }
+        // BitChord Audio: your own file, when it qualifies, plays from the
+        // start — no race against YouTube, nothing to swap later.
+        runCatching { SourceResolver.ownFileFor(target) }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrNull()
+            ?.let { return Resolved.Module(it) }
         if (DirectSourceGate.isActive()) return resolveDirect(videoId, target)
         NerdStats.onLosslessRaceStart(videoId)
         // Both legs are parented to the service's scope rather than to the

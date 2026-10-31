@@ -222,6 +222,7 @@ import com.music.bitchord.playback.toggleShuffle
 import com.music.bitchord.playback.upgradeQuality
 import com.music.bitchord.playback.revertToOriginal
 import com.music.bitchord.playback.swapToVersion
+import com.music.bitchord.ui.components.carryingQueueOf
 import com.music.bitchord.playback.smart.VersionAudioAligner
 import com.music.bitchord.download.DownloadSession
 import com.music.bitchord.download.DownloadStore
@@ -2206,6 +2207,10 @@ private fun BitChordApp(
         item.browseId?.let { id ->
             if (id == SPOTIFY_BROWSE_ID) {
                 navigator.push(AppRoute.Spotify)
+                return@let
+            }
+            if (id == com.music.bitchord.ui.components.PcloudBrowser.LIBRARY_LINK) {
+                com.music.bitchord.ui.components.PcloudBrowser.browse()
                 return@let
             }
             if ((id == "local:all" || id == "local:downloads") && !LocalMediaRepository.hasStoragePermission(context)) {
@@ -5615,6 +5620,38 @@ private fun BitChordApp(
                     viewModel.reloadLocalDetail(com.music.bitchord.data.MergedLibrary.BROWSE_ID)
                 },
                 onDismiss = { sourceChoiceSong = null },
+            )
+        }
+
+        // BitChord Audio: where the playing song comes from, raised from the player.
+        val sourceSong by com.music.bitchord.ui.components.NowPlayingSource.song.collectAsStateWithLifecycle()
+        sourceSong?.let { song ->
+            com.music.bitchord.ui.components.NowPlayingSourceDialog(
+                song = song,
+                controller = controller,
+                onBrowse = {
+                    com.music.bitchord.ui.components.NowPlayingSource.close()
+                    com.music.bitchord.ui.components.PcloudBrowser.pickFor(song)
+                },
+                onDismiss = { com.music.bitchord.ui.components.NowPlayingSource.close() },
+            )
+        }
+        // BitChord Audio: pCloud by folder — to play, or to pick a song's file.
+        val browserRequest by com.music.bitchord.ui.components.PcloudBrowser.request.collectAsStateWithLifecycle()
+        browserRequest?.let { req ->
+            com.music.bitchord.ui.components.PcloudBrowserDialog(
+                request = req,
+                controller = controller,
+                onPicked = { file ->
+                    req.pickFor?.let { song ->
+                        com.music.bitchord.data.sources.PreferredSource.chooseFile(song, file)
+                        if (controller?.currentMediaItem?.mediaId == song.videoId && file.videoId != song.videoId) {
+                            controller?.swapToVersion(file.carryingQueueOf(song))
+                        }
+                    }
+                    com.music.bitchord.ui.components.PcloudBrowser.close()
+                },
+                onDismiss = { com.music.bitchord.ui.components.PcloudBrowser.close() },
             )
         }
 

@@ -39,16 +39,25 @@ object RemoteTags {
         val codec: String? = null,
         val altTitles: List<String> = emptyList(),
         val altArtists: List<String> = emptyList(),
+        /** Average bitrate: from the MP3 frames, else the file's size over its length. */
+        val kbps: Int? = null,
+        /**
+         * Where an MP3's audio starts when its ID3 tag ran past the bytes that
+         * were read (a large cover), so the frames can be read from there.
+         * Not stored.
+         */
+        val audioOffset: Long? = null,
     ) {
         val isEmpty: Boolean get() = title == null && artist == null && album == null
 
         /** "FLAC 24/96", "MP3", … — the badge text the player already shows for sources. */
         val qualityLabel: String?
             get() = codec?.let { c ->
-                if (bitDepth != null && sampleRate != null) {
-                    "$c $bitDepth/${formatRate(sampleRate)}"
-                } else {
-                    c
+                when {
+                    lossless && bitDepth != null && sampleRate != null -> "$c $bitDepth/${formatRate(sampleRate)}"
+                    !lossless && kbps != null -> "$c $kbps kbps"
+                    bitDepth != null && sampleRate != null -> "$c $bitDepth/${formatRate(sampleRate)}"
+                    else -> c
                 }
             }
 
@@ -58,21 +67,122 @@ object RemoteTags {
             if (hz % 1000 == 0) "${hz / 1000}" else "%.1f".format(hz / 1000.0)
     }
 
-    fun parse(head: ByteArray): Tags? = runCatching {
-        when {
+    /**
+     * The tags in [head], the first bytes of a file of [totalSize] bytes.
+     * With the size known, an MP3's bitrate and length come from its frames
+     * (a Xing/VBRI header when there is one, the first frame's bitrate when
+     * not), and any other lossy file's bitrate from its size over its length.
+     */
+    fun parse(head: ByteArray, totalSize: Long? = null): Tags? = runCatching {
+        val tags = when {
             head.size >= 10 && head[0] == 'I'.code.toByte() && head[1] == 'D'.code.toByte() && head[2] == '3'.code.toByte() -> {
                 val id3 = id3(head)
                 // A FLAC file may carry a leading ID3 tag; its own blocks follow.
                 val after = id3?.second ?: 0
                 val flac = if (after + 4 <= head.size && head.matches(after, "fLaC")) flac(head, after) else null
-                merge(id3?.first, flac)
+                val merged = merge(id3?.first, flac)
+                if (flac == null && merged != null) {
+                    if (after < head.size) {
+                        mpegInto(merged, head, after, totalSize)
+                    } else {
+                        merged.copy(audioOffset = after.toLong())
+                    }
+                } else {
+                    merged
+                }
             }
             head.matches(0, "fLaC") -> flac(head, 0)
             head.matches(0, "OggS") -> ogg(head)
             head.size >= 12 && head.matches(4, "ftyp") -> mp4(head)
+            head.size >= 4 && (head[0].toInt() and 0xFF) == 0xFF && (head[1].toInt() and 0xE0) == 0xE0 ->
+                mpegInto(Tags(codec = "MP3"), head, 0, totalSize)
             else -> null
         }
+        tags?.withSizeBitrate(totalSize)
     }.getOrNull()?.takeUnless { it.isEmpty && it.codec == null }
+
+    /**
+     * [tags] completed from the MPEG frames in [b] — a few KB read at
+     * [Tags.audioOffset] when the tag was too large for the first read.
+     */
+    fun completeMpeg(tags: Tags, b: ByteArray, totalSize: Long?): Tags {
+        val offset = tags.audioOffset ?: return tags
+        return runCatching { mpegInto(tags.copy(audioOffset = null), b, 0, totalSize, offset) }
+            .getOrDefault(tags)
+            .withSizeBitrate(totalSize)
+    }
+
+    private fun Tags.withSizeBitrate(totalSize: Long?): Tags {
+        if (kbps != null || lossless || totalSize == null || totalSize <= 0) return this
+        val ms = durationMs?.takeIf { it > 1000 } ?: return this
+        return copy(kbps = (totalSize * 8 / ms).toInt())
+    }
+
+    // ── MPEG audio ───────────────────────────────────────────────────────
+
+    private val MPEG1_L3 = intArrayOf(0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
+    private val MPEG2_L3 = intArrayOf(0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0)
+    private val RATES = arrayOf(
+        intArrayOf(11025, 12000, 8000), // MPEG 2.5
+        intArrayOf(0, 0, 0),
+        intArrayOf(22050, 24000, 16000), // MPEG 2
+        intArrayOf(44100, 48000, 32000), // MPEG 1
+    )
+
+    /**
+     * Fills bitrate, sample rate and length from the first MPEG layer III
+     * frame at or after [from] in [b]. [base] is where [b] sits in the file.
+     */
+    private fun mpegInto(into: Tags, b: ByteArray, from: Int, totalSize: Long?, base: Long = 0): Tags {
+        var at = from
+        val limit = minOf(b.size - 4, from + 64 * 1024)
+        while (at < limit) {
+            val h = u32(b, at)
+            if ((h ushr 21) and 0x7FF == 0x7FF) {
+                val version = (h ushr 19) and 3
+                val layer = (h ushr 17) and 3
+                val brIndex = (h ushr 12) and 0xF
+                val srIndex = (h ushr 10) and 3
+                if (version != 1 && layer == 1 && brIndex in 1..14 && srIndex != 3) {
+                    val mpeg1 = version == 3
+                    val rate = RATES[version][srIndex]
+                    val firstKbps = (if (mpeg1) MPEG1_L3 else MPEG2_L3)[brIndex]
+                    val mono = (h ushr 6) and 3 == 3
+                    val samplesPerFrame = if (mpeg1) 1152 else 576
+                    val side = if (mpeg1) (if (mono) 17 else 32) else (if (mono) 9 else 17)
+                    val audioBytes = totalSize?.let { it - (base + at) }?.takeIf { it > 0 }
+                    // Xing / Info (LAME) or VBRI: the frame count, for a VBR file's true length.
+                    val xing = at + 4 + side
+                    var frames: Long? = null
+                    if (xing + 12 <= b.size && (b.matches(xing, "Xing") || b.matches(xing, "Info"))) {
+                        val flags = u32(b, xing + 4)
+                        if (flags and 1 != 0) frames = u32(b, xing + 8).toLong() and 0xFFFFFFFFL
+                    } else if (at + 36 + 18 <= b.size && b.matches(at + 36, "VBRI")) {
+                        frames = u32(b, at + 36 + 14).toLong() and 0xFFFFFFFFL
+                    }
+                    val durationMs = when {
+                        frames != null && frames > 0 && rate > 0 -> frames * samplesPerFrame * 1000 / rate
+                        audioBytes != null && firstKbps > 0 -> audioBytes * 8 / firstKbps
+                        else -> null
+                    }
+                    val kbps = when {
+                        frames != null && audioBytes != null && durationMs != null && durationMs > 0 ->
+                            (audioBytes * 8 / durationMs).toInt()
+                        else -> firstKbps
+                    }
+                    return into.copy(
+                        codec = "MP3",
+                        kbps = kbps,
+                        sampleRate = rate,
+                        durationMs = into.durationMs ?: durationMs,
+                        audioOffset = null,
+                    )
+                }
+            }
+            at++
+        }
+        return into
+    }
 
     private fun merge(a: Tags?, b: Tags?): Tags? {
         if (a == null) return b

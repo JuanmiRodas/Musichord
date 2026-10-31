@@ -644,6 +644,21 @@ private fun Song.pickedMixQuery(configId: String): String {
     return "&${SourceResolver.MIX_PARAM}=${SourceResolver.mixOf(sourceQuality)}"
 }
 
+/**
+ * BitChord Audio: a downloaded YouTube copy steps aside for your own file —
+ * lossless, or at least 256 kbps, or the one you picked — while on an
+ * unmetered connection. Offline, or on mobile data, the download plays.
+ */
+private fun Song.ownFilePlaysInstead(): Boolean = runCatching {
+    com.music.bitchord.data.settings.AppSettings.meteredConnection.value == false &&
+        !OriginalVersion.isPinned(videoId) &&
+        com.music.bitchord.data.sources.OwnFileMatcher.beatsYouTube(
+            title,
+            artist,
+            durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 },
+        )
+}.getOrDefault(false)
+
 fun Song.toMediaItem(): MediaItem {
     val sourceTrack = SourceRegistry.parseTrackKey(videoId)
     // A row from search or a playlist carries no file of its own, but the track
@@ -671,7 +686,7 @@ fun Song.toMediaItem(): MediaItem {
     // that has become stale since it was created. Checking only the lookup
     // leaves that path unguarded.
     val offlineUri = localUri?.takeUnless(Downloads::isMissingLocalFile)
-        ?: Downloads.verifiedSavedUri(videoId)
+        ?: Downloads.verifiedSavedUri(videoId)?.takeUnless { ownFilePlaysInstead() }
     val uriString = offlineUri ?: when {
         videoId.startsWith("content://") || videoId.startsWith("file://") -> videoId
         // Title, artist and runtime ride along in the URI because they are what

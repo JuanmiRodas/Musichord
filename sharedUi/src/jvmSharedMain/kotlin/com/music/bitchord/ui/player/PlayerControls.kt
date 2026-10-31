@@ -371,7 +371,12 @@ internal fun PlaybackQualityLabel(
 @Composable
 internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
     val showNerdStats by PlayerSettings.showNerdStats.collectAsStateWithLifecycle()
-    if (!showNerdStats) return
+    // BitChord Audio: where the song is playing from, always shown, and the
+    // way into choosing another copy of it.
+    if (!showNerdStats) {
+        SourceLine(song, modifier)
+        return
+    }
     val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
     val smartFadeOn by PlayerSettings.smartFadeEnabled.collectAsStateWithLifecycle()
     val smartAnalysis by PlayerSettings.smartAnalysis.collectAsStateWithLifecycle()
@@ -402,6 +407,7 @@ internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier,
     ) {
+        SourceLine(song)
         nerdStats?.describe()?.let { stats ->
             Text(
                 text = stats,
@@ -1873,6 +1879,45 @@ private fun ShimmerText(
  * about the copy being played.
  */
 @Composable
+/**
+ * BitChord Audio: "pCloud · MP3 · 320 kbps" — the place the playing copy comes
+ * from and what it is. Tapping it opens the source picker.
+ */
+@Composable
+internal fun SourceLine(song: Song, modifier: Modifier = Modifier) {
+    val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
+    val snapshot = nerdStats?.takeIf { it.mediaId == null || it.mediaId == song.videoId }
+    val place = snapshot?.sourceName?.takeIf { it.isNotBlank() }
+        ?: NerdStats.sourceFor(song.videoId)
+        ?: when {
+            song.videoId.startsWith("webdav:") -> "pCloud"
+            song.localUri != null -> "Phone"
+            else -> "YouTube"
+        }
+    val text = listOfNotNull(
+        place,
+        codecLabel(snapshot?.mimeType),
+        (snapshot?.claimed?.kbps ?: snapshot?.bitrateKbps)?.let { "$it kbps" },
+    ).joinToString(" · ")
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .clickable { PlayerPlatform.host.chooseSource(song) }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text = "$text  ›",
+            style = MaterialTheme.typography.labelSmall.copy(
+                shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), offset = Offset(0f, 1f), blurRadius = 4f),
+            ),
+            color = Color.White.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 private fun NerdStats.Snapshot.describe(): String? {
     val parts = buildList {
         codecLabel(mimeType)?.let(::add)

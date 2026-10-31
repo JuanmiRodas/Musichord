@@ -779,7 +779,7 @@
     <string name="own_lyrics_first">Your lyrics files first</string>
     <string name="own_lyrics_first_subtitle">Uses .lrc, .lrcx and .txt lyrics from your folders before the online providers</string>
     <string name="source_preference">When a song is in several places</string>
-    <string name="source_preference_best">Best quality first (your lossless files, then your other files, then YouTube)</string>
+    <string name="source_preference_best">Best quality first (your lossless or 256+ kbps files, then YouTube)</string>
     <string name="source_preference_own">Your files first</string>
     <string name="source_preference_youtube">YouTube Music first</string>
     <string name="library_folders">Library folders</string>
@@ -804,6 +804,18 @@
     <string name="playlists_exported">Exported %1$d playlists.</string>
     <string name="playlists_imported">Imported %1$d playlists with %2$d songs.</string>
     <string name="playlists_missing">%1$d songs couldn’t be found:</string>
+    <string name="source_title">Source</string>
+    <string name="source_playing_now">Playing now from %1$s</string>
+    <string name="source_auto">Automatic</string>
+    <string name="source_auto_detail">Your file when it is lossless or at least 256 kbps, otherwise YouTube</string>
+    <string name="source_no_files">No matching files of yours found</string>
+    <string name="source_browse_pcloud">Choose a file from pCloud…</string>
+    <string name="browser_loading">Loading…</string>
+    <string name="pcloud_folders">pCloud folders</string>
+    <string name="pcloud_folders_subtitle">Browse your music by folder</string>
+    <string name="play_folder">Play all</string>
+    <string name="play_folder_deep">Play all, with subfolders</string>
+    <string name="folder_up">Up</string>
     <string name="pinned">Pinned</string>
     <string name="replay_across">Across </string>
     <string name="replay_album_end"> held your attention.</string>

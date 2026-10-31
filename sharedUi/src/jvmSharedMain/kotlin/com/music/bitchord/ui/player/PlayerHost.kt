@@ -113,6 +113,9 @@ interface PlayerHost {
     /** BitChord Audio: edit the other names [song]'s lyrics are looked up by. */
     fun editLyricAliases(song: Song) {}
 
+    /** BitChord Audio: "where is this playing from" — the source picker for [song]. */
+    fun chooseSource(song: Song) {}
+
     /** The full signal-chain readout, opened from the output drawer. */
     @Composable
     fun AudioPipelineDialog(hazeState: HazeState, isPlaying: Boolean, onDismiss: () -> Unit)

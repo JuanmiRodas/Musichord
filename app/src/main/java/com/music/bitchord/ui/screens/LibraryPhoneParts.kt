@@ -84,6 +84,13 @@ fun libraryLinks(): List<LibraryLink> {
             stringResource(R.string.webdav_subtitle),
             com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID,
         ).takeIf { webdavConfigured.isNotBlank() },
+        // BitChord Audio: the same files, by folder — Artist, Album, files.
+        link(
+            stringResource(R.string.pcloud_folders),
+            stringResource(R.string.pcloud_folders_subtitle),
+            com.music.bitchord.ui.components.PcloudBrowser.LIBRARY_LINK,
+            Icons.Rounded.Folder,
+        ).takeIf { webdavConfigured.isNotBlank() },
         link(
             stringResource(R.string.smb),
             stringResource(R.string.smb_subtitle),

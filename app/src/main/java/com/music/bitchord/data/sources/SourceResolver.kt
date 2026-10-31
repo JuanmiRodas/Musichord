@@ -282,6 +282,47 @@ object SourceResolver {
      * runs with sound already playing and is where a slow source's better answer
      * gets its hearing.
      */
+    /**
+     * BitChord Audio: your own copy of a YouTube track, asked alone and before
+     * anything else. It answers from the library on the device, so it costs
+     * no time — and playing it from the start means no YouTube start and no
+     * swap a few seconds in.
+     */
+    suspend fun ownFileFor(target: TrackMatcher.Target): SourceStream? {
+        if (target.title.isBlank() || target.isVideo) return null
+        val own = SourceRegistry.activeForPlayback().filter { it.kind == SourceKind.MY_LIBRARY }
+        if (own.isEmpty()) return null
+        // The listener's pick from the player comes before any rule.
+        when (val choice = PreferredSource.get(target.title, target.artist)) {
+            PreferredSource.YouTube -> return null
+            is PreferredSource.File -> {
+                val source = own.first()
+                val chosen = runCatching { source.stream(choice.id, requestForNow()) }.getOrNull()
+                if (chosen != null) {
+                    TrackLog.d(TAG, "own file: '${target.title}' plays the file you chose")
+                    return chosen.copy(sourceConfigId = chosen.sourceConfigId ?: source.configId)
+                }
+            }
+            null -> Unit
+        }
+        // Your files by every name they go by (both scripts of a title,
+        // the song quoted in a video title, names in either order), best
+        // copy first; the first that qualifies plays.
+        val request = requestForNow()
+        for (file in OwnFileMatcher.matches(target.title, target.artist, target.durationSec).take(3)) {
+            val source = own.first()
+            val found = runCatching { source.stream(file.videoId, request) }.getOrNull() ?: continue
+            if (!RemoteLibrarySource.qualifies(found, target.durationSec)) continue
+            TrackLog.d(TAG, "own file: '${target.title}' plays '${file.title}' from your library at ${found.format.summary}")
+            return found.copy(sourceConfigId = found.sourceConfigId ?: source.configId)
+        }
+        val (_, stream) = bestAcross(own, target, requestForNow(), timeoutMs = OWN_FILE_TIMEOUT_MS) { _, found ->
+            RemoteLibrarySource.qualifies(found, target.durationSec)
+        } ?: return null
+        TrackLog.d(TAG, "own file: '${target.title}' plays from your library at ${stream.format.summary}")
+        return stream
+    }
+
     suspend fun substituteForYouTube(target: TrackMatcher.Target): SourceStream? {
         // Video rows always use YouTube's own stream unless the listener
         // explicitly converts the current item in the player. A module match
@@ -290,7 +331,11 @@ object SourceResolver {
         val active = SourceRegistry.activeForPlayback()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
         val request = requestForNow()
-        val (source, stream) = bestAcross(rankedAbove(youtube.configId, active), target, request)
+        val youTubeChosen = PreferredSource.prefersYouTube(target.title, target.artist)
+        val (source, stream) = bestAcross(rankedAbove(youtube.configId, active), target, request) { candidate, found ->
+            candidate.kind != SourceKind.MY_LIBRARY ||
+                (!youTubeChosen && RemoteLibrarySource.qualifies(found, target.durationSec))
+        }
             ?: return null
         // Says what was found, not what the caller will do with it. This
         // line used to read "substituted" unconditionally, including for
@@ -503,6 +548,11 @@ object SourceResolver {
             requireSharedArtist = true,
             driftSec = upgradeSlackSec(),
         ) { candidate, stream ->
+            // BitChord Audio: your files follow the listener's own rule, not the margin.
+            if (candidate.kind == SourceKind.MY_LIBRARY) {
+                return@bestAcross !PreferredSource.prefersYouTube(target.title, target.artist) &&
+                    RemoteLibrarySource.qualifies(stream, target.durationSec)
+            }
             worthSwapping(stream.format, playing).also { worth ->
                 // Named rather than skipped silently. This is the one refusal
                 // in the upgrade path that discards a stream already found,
@@ -1425,6 +1475,7 @@ object SourceResolver {
      * module's 128kbps MP3 settle-for.
      */
     private const val YOUTUBE_BEST_AAC_KBPS = 256
+    private const val OWN_FILE_TIMEOUT_MS = 1_500L
 
     /**
      * How many kbps a lossy stream has to gain before it earns a seam in the
