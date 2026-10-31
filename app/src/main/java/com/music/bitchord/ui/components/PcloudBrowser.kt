@@ -97,7 +97,7 @@ fun PcloudBrowserDialog(request: PcloudBrowser.Request, controller: MediaControl
             return@LaunchedEffect
         }
         listing = Listing(
-            folders = folders.getOrNull().orEmpty().sortedBy { nameOf(it).lowercase() },
+            folders = folders.getOrNull().orEmpty().filterNot { nameOf(it).startsWith(".") }.sortedBy { nameOf(it).lowercase() },
             files = files.getOrNull().orEmpty()
                 .filter { WebDavConfig.isAudioFile(nameOf(it)) }
                 .sortedBy { nameOf(it).lowercase() },

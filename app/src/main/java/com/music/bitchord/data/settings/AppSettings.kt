@@ -475,6 +475,9 @@ object AppSettings {
     /** BitChord Audio: music videos play as their audio release; see [com.music.bitchord.playback.AudioFirst]. */
     val audioOnly = MutableStateFlow(true)
 
+    /** BitChord Audio: your pCloud files also play on mobile data (else YouTube / the download there). */
+    val ownFilesOnMobileData = MutableStateFlow(false)
+
     /** Drops haze blur (status bar, mini player, bottom fade, lyrics focus) for a solid-fill look. */
     val reduceDynamicBlur = MutableStateFlow(false)
 
@@ -1008,6 +1011,7 @@ object AppSettings {
         dontRepeatSuggestions.value = prefs.getBoolean(KEY_DONT_REPEAT_SUGGESTIONS, false)
         smartVersionAlignment.value = prefs.getBoolean(KEY_SMART_VERSION_ALIGNMENT, true)
         audioOnly.value = prefs.getBoolean(KEY_AUDIO_ONLY, true)
+        ownFilesOnMobileData.value = prefs.getBoolean(KEY_OWN_FILES_MOBILE, false)
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
         progressiveBlur.value = prefs.getBoolean(KEY_PROGRESSIVE_BLUR, false)
@@ -1421,6 +1425,19 @@ object AppSettings {
         dontRepeatSuggestions.value = value
         prefs.edit().putBoolean(KEY_DONT_REPEAT_SUGGESTIONS, value).apply()
     }
+
+    fun setOwnFilesOnMobileData(value: Boolean) {
+        ownFilesOnMobileData.value = value
+        prefs.edit().putBoolean(KEY_OWN_FILES_MOBILE, value).apply()
+    }
+
+    /** Whether your own files should play on the connection in use now. */
+    val ownFilesAllowedNow: Boolean
+        get() = when (meteredConnection.value) {
+            null -> false
+            true -> ownFilesOnMobileData.value
+            false -> true
+        }
 
     fun setAudioOnly(value: Boolean) {
         audioOnly.value = value
@@ -2235,6 +2252,7 @@ object AppSettings {
     private const val KEY_DONT_REPEAT_SUGGESTIONS = "dont_repeat_suggestions"
     private const val KEY_SMART_VERSION_ALIGNMENT = "smart_version_alignment"
     private const val KEY_AUDIO_ONLY = "audio_only"
+    private const val KEY_OWN_FILES_MOBILE = "own_files_mobile_data"
     private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"
     private const val KEY_LIQUID_GLASS = "liquid_glass"
     private const val KEY_PROGRESSIVE_BLUR = "progressive_blur"

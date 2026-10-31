@@ -41,7 +41,7 @@ internal class OwnFirst(
     private val inFlight = HashSet<String>()
 
     private val enabled: Boolean
-        get() = AppSettings.meteredConnection.value != null &&
+        get() = AppSettings.ownFilesAllowedNow &&
             AppSettings.sourcePreference.value != AppSettings.SOURCE_YOUTUBE_FIRST &&
             !ListenTogether.state.value.inParty
 

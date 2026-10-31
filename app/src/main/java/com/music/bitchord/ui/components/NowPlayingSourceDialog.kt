@@ -115,6 +115,8 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                             ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
                         when {
                             com.music.bitchord.data.settings.AppSettings.meteredConnection.value == null -> "offline"
+                            !com.music.bitchord.data.settings.AppSettings.ownFilesAllowedNow ->
+                                "mobile data — your files are set to play on Wi-Fi only (Settings)"
                             else -> when (val v = com.music.bitchord.data.sources.OwnFileMatcher.decide(song.title, song.artist, seconds)) {
                                 is com.music.bitchord.data.sources.OwnFileMatcher.Keep -> v.reason
                                 is com.music.bitchord.data.sources.OwnFileMatcher.Play -> "your file will play: ${v.file.title}"

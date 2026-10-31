@@ -650,7 +650,7 @@ private fun Song.pickedMixQuery(configId: String): String {
  * Offline, the download plays.
  */
 private fun Song.ownFilePlaysInstead(): Boolean = runCatching {
-    com.music.bitchord.data.settings.AppSettings.meteredConnection.value != null &&
+    com.music.bitchord.data.settings.AppSettings.ownFilesAllowedNow &&
         !OriginalVersion.isPinned(videoId) &&
         com.music.bitchord.data.sources.OwnFileMatcher.beatsYouTube(
             title,

@@ -599,6 +599,8 @@
     <string name="play_folder">Reproducir todo</string>
     <string name="play_folder_deep">Reproducir todo, con subcarpetas</string>
     <string name="folder_up">Subir</string>
+    <string name="own_files_mobile_data">Usar mis archivos de pCloud con datos móviles</string>
+    <string name="own_files_mobile_data_subtitle">Desactivado: con datos móviles suena YouTube (o tu descarga) en lugar de tus archivos, para ahorrar datos. En Wi-Fi siempre suenan tus archivos</string>
     <string name="pinned">Fijado</string>
     <string name="replay_across"> repartidas en </string>
     <string name="replay_album_end"> concentró tu atención.</string>

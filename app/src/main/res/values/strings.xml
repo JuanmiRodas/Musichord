@@ -816,6 +816,8 @@
     <string name="play_folder">Play all</string>
     <string name="play_folder_deep">Play all, with subfolders</string>
     <string name="folder_up">Up</string>
+    <string name="own_files_mobile_data">Play my pCloud files on mobile data</string>
+    <string name="own_files_mobile_data_subtitle">Off: on mobile data, YouTube (or your download) plays instead of your files, to save data. Your files always play on Wi-Fi</string>
     <string name="pinned">Pinned</string>
     <string name="replay_across">Across </string>
     <string name="replay_album_end"> held your attention.</string>

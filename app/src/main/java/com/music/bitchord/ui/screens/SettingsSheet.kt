@@ -289,6 +289,7 @@ fun SettingsScreen(
     val dontRepeatSuggestions by AppSettings.dontRepeatSuggestions.collectAsStateWithLifecycle()
     val smartVersionAlignment by AppSettings.smartVersionAlignment.collectAsStateWithLifecycle()
     val audioOnly by AppSettings.audioOnly.collectAsStateWithLifecycle()
+    val ownFilesOnMobileData by AppSettings.ownFilesOnMobileData.collectAsStateWithLifecycle()
     val ownLyricsFirst by AppSettings.ownLyricsFirst.collectAsStateWithLifecycle()
     val sourcePreference by AppSettings.sourcePreference.collectAsStateWithLifecycle()
     val libraryFolders by com.music.bitchord.data.webdav.LibraryFolders.folders.collectAsStateWithLifecycle()
@@ -1711,6 +1712,21 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.playlists_import_files_subtitle),
                     enabled = !playlistBusy,
                     onClick = { importFilePicker.launch(arrayOf("*/*")) },
+                )
+            }
+            val ownMobileTitle = stringResource(R.string.own_files_mobile_data)
+            row(ownMobileTitle, "pcloud", "mobile data", "datos", "wifi", "my files") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = ownMobileTitle,
+                    subtitle = stringResource(R.string.own_files_mobile_data_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = ownFilesOnMobileData,
+                            onCheckedChange = AppSettings::setOwnFilesOnMobileData,
+                        )
+                    },
+                    onClick = { AppSettings.setOwnFilesOnMobileData(!ownFilesOnMobileData) },
                 )
             }
             val audioOnlyTitle = stringResource(R.string.audio_only)
