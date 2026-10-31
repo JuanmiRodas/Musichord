@@ -1878,7 +1878,6 @@ private fun ShimmerText(
  * cannot, because it says more about how compressible that recording was than
  * about the copy being played.
  */
-@Composable
 /**
  * BitChord Audio: "pCloud · MP3 · 320 kbps" — the place the playing copy comes
  * from and what it is. Tapping it opens the source picker.
@@ -1918,6 +1917,7 @@ internal fun SourceLine(song: Song, modifier: Modifier = Modifier) {
     }
 }
 
+@Composable
 private fun NerdStats.Snapshot.describe(): String? {
     val parts = buildList {
         codecLabel(mimeType)?.let(::add)
