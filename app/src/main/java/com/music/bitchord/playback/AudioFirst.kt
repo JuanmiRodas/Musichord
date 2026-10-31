@@ -68,11 +68,16 @@ internal class AudioFirst(
      * the item it replaces, or null when there is none.
      */
     private suspend fun resolve(song: Song): Song? {
-        val audio = runCatching { YtMusicRepository.resolveAudio(song) }
+        val official = runCatching { YtMusicRepository.resolveAudio(song) }
             .onFailure { TrackLog.d(TAG, "audio-first lookup failed: ${it.message}", about = song.videoId) }
             .getOrNull()
-            ?: return null
-        if (audio.videoId == song.videoId || audio.isVideo) {
+        // Fan uploads — lyric videos, "Artist - Title (Official Video)",
+        // VEVO and "- Topic" channels — aren't paired with a release and their
+        // titles don't search well as they are; asked again by the song's
+        // own name they usually are a catalogue track.
+        val audio = official?.takeIf { it.videoId != song.videoId && !it.isVideo }
+            ?: runCatching { VideoTitles.findRelease(song) }.getOrNull()
+        if (audio == null || audio.videoId == song.videoId || audio.isVideo) {
             noAudio += song.videoId
             return null
         }
