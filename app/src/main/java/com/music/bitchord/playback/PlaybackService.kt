@@ -711,6 +711,20 @@ class PlaybackService : MediaLibraryService() {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     /** BitChord Audio: music videos play as their audio release, never loading the video. */
+    /** BitChord Audio: your own files in the queue in place of YouTube's copies. */
+    private val ownFirst = OwnFirst(
+        scope = scope,
+        currentPlayer = { player },
+        swapCurrent = { target ->
+            if (crossfade?.isTransitioning() == true || player == null) {
+                false
+            } else {
+                smoothSwapCurrentTrackVersion(target)
+                true
+            }
+        },
+    )
+
     private val audioFirst = AudioFirst(
         scope = scope,
         currentPlayer = { player },
@@ -1022,6 +1036,7 @@ class PlaybackService : MediaLibraryService() {
             // look-ahead keeps playing as sound and is cross-faded onto its
             // audio release once that is found.
             audioFirst.onBecameCurrent(mediaItem)
+            ownFirst.onBecameCurrent(mediaItem)
 
             // A receiver, if it is the speaker, is put on whatever became
             // current — or it is the one that moved, and this is the phone
@@ -6391,6 +6406,7 @@ class PlaybackService : MediaLibraryService() {
         // BitChord Audio: upcoming videos are replaced by their audio release
         // before they play — and before read-ahead spends bytes on them.
         audioFirst.lookAhead(player)
+        ownFirst.lookAhead(player)
         // Direct Source Stream reads ahead from its own window instead — see
         // [driveDirectWindow]. Anything the ordinary read-ahead had running
         // for the old queue is dropped with it.
@@ -8922,7 +8938,7 @@ class PlaybackService : MediaLibraryService() {
             val expanded = resolveMediaItems(mediaItems)
             val validIndex = startIndex.coerceIn(0, (expanded.size - 1).coerceAtLeast(0))
             // BitChord Audio: the track this starts on is audio before the player sees it.
-            val resolved = audioFirst.resolveStart(expanded, validIndex)
+            val resolved = ownFirst.resolveStart(audioFirst.resolveStart(expanded, validIndex), validIndex)
             MediaSession.MediaItemsWithStartPosition(
                 ImmutableList.copyOf(resolved),
                 validIndex,

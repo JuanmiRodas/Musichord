@@ -116,6 +116,33 @@ object OwnFileMatcher {
      * the listener's pick, else the rule in Settings applied to the best
      * matching file's quality.
      */
+    /** The file of yours to play for this song, or why there is none. */
+    sealed interface Verdict
+    data class Play(val file: Song) : Verdict
+    data class Keep(val reason: String) : Verdict
+
+    fun decide(title: String, artist: String, durationSec: Int?): Verdict {
+        if (!WebDavRepository.isConfigured()) return Keep("pCloud not connected")
+        val library = WebDavRepository.library()
+        if (library.isEmpty()) return Keep("pCloud library not loaded yet")
+        when (val choice = PreferredSource.get(title, artist)) {
+            PreferredSource.YouTube -> return Keep("you chose YouTube for this song")
+            is PreferredSource.File -> library.firstOrNull { it.videoId == choice.id }?.let { return Play(it) }
+            null -> Unit
+        }
+        val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value
+        if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return Keep("Settings: YouTube first")
+        val all = matches(title, artist, durationSec)
+        val best = all.firstOrNull() ?: return Keep("no file of yours matches (${library.size} songs in your library)")
+        if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return Play(best)
+        val rank = qualityRank(best)
+        return if (rank >= RemoteLibrarySource.MIN_KBPS) {
+            Play(best)
+        } else {
+            Keep("best file of yours is ${if (rank > 0) "$rank kbps" else "of unknown bitrate"}, below ${RemoteLibrarySource.MIN_KBPS}")
+        }
+    }
+
     fun beatsYouTube(title: String, artist: String, durationSec: Int?): Boolean {
         when (val choice = PreferredSource.get(title, artist)) {
             PreferredSource.YouTube -> return false

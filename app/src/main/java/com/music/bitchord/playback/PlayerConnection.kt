@@ -646,11 +646,11 @@ private fun Song.pickedMixQuery(configId: String): String {
 
 /**
  * BitChord Audio: a downloaded YouTube copy steps aside for your own file —
- * lossless, or at least 256 kbps, or the one you picked — while on an
- * unmetered connection. Offline, or on mobile data, the download plays.
+ * lossless, or at least 256 kbps, or the one you picked — while online.
+ * Offline, the download plays.
  */
 private fun Song.ownFilePlaysInstead(): Boolean = runCatching {
-    com.music.bitchord.data.settings.AppSettings.meteredConnection.value == false &&
+    com.music.bitchord.data.settings.AppSettings.meteredConnection.value != null &&
         !OriginalVersion.isPinned(videoId) &&
         com.music.bitchord.data.sources.OwnFileMatcher.beatsYouTube(
             title,

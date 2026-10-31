@@ -106,8 +106,28 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                     stringResource(R.string.source_playing_now, playingFrom),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp),
+                    modifier = Modifier.padding(bottom = 4.dp),
                 )
+                // Why a song you might own still plays from YouTube.
+                if (!isFile) {
+                    val why = remember(song.videoId, files) {
+                        val seconds = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+                            ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+                        when {
+                            com.music.bitchord.data.settings.AppSettings.meteredConnection.value == null -> "offline"
+                            else -> when (val v = com.music.bitchord.data.sources.OwnFileMatcher.decide(song.title, song.artist, seconds)) {
+                                is com.music.bitchord.data.sources.OwnFileMatcher.Keep -> v.reason
+                                is com.music.bitchord.data.sources.OwnFileMatcher.Play -> "your file will play: ${v.file.title}"
+                            }
+                        }
+                    }
+                    Text(
+                        "pCloud: $why",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
                 SourceRow(
                     label = stringResource(R.string.source_auto),
                     detail = stringResource(R.string.source_auto_detail),
