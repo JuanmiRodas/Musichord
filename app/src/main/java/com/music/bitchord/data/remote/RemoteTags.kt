@@ -55,7 +55,7 @@ object RemoteTags {
             get() = codec?.let { c ->
                 when {
                     lossless && bitDepth != null && sampleRate != null -> "$c $bitDepth/${formatRate(sampleRate)}"
-                    !lossless && kbps != null -> "$c $kbps kbps"
+                    !lossless && kbps != null && kbps > 0 -> "$c $kbps kbps"
                     bitDepth != null && sampleRate != null -> "$c $bitDepth/${formatRate(sampleRate)}"
                     else -> c
                 }

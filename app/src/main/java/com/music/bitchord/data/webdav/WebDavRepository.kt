@@ -337,7 +337,9 @@ object WebDavRepository {
                                 WebDavClient.readRange(entry.url, username, password, offset, MPEG_PROBE_BYTES).getOrNull()
                                     ?.let { tags = RemoteTags.completeMpeg(tags, it, entry.size) }
                             }
-                            RemoteTagStore.put(entry.url, stamp(entry), tags.copy(audioOffset = null))
+                            // 0 = "looked, couldn't tell": not read again on every listing.
+                            val kbps = tags.kbps ?: if (!tags.lossless && tags.codec != null) 0 else null
+                            RemoteTagStore.put(entry.url, stamp(entry), tags.copy(audioOffset = null, kbps = kbps))
                         }
                         synchronized(this@WebDavRepository) {
                             done++

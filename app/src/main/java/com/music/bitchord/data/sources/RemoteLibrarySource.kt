@@ -69,7 +69,7 @@ class RemoteLibrarySource(
             url = url,
             format = StreamFormat(
                 codec = codec,
-                kbps = tags?.kbps ?: estimatedKbps(url, tags?.durationMs),
+                kbps = tags?.kbps?.takeIf { it > 0 } ?: estimatedKbps(url, tags?.durationMs),
                 sampleRateHz = tags?.sampleRate,
                 bitDepth = tags?.bitDepth,
             ),
@@ -102,7 +102,7 @@ class RemoteLibrarySource(
             if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return false
             if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return true
             if (stream.format.isLossless == true) return true
-            val kbps = stream.format.kbps
+            val kbps = stream.format.kbps?.takeIf { it > 0 }
                 ?: RemoteTagStore.sizeOf(stream.url)?.let { size ->
                     targetDurationSec?.takeIf { it > 0 }?.let { (size * 8 / 1000 / it).toInt() }
                 }
