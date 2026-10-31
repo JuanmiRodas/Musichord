@@ -5676,6 +5676,7 @@ private fun BitChordApp(
                         ?: com.music.bitchord.data.webdav.PcloudPreset.EU_HOST,
                 )
             }
+            var pcloudResolvedUrl by remember { mutableStateOf<String?>(null) }
             ServerEditorHost(
                 hazeState = hazeState,
                 title = stringResource(R.string.pcloud),
@@ -5700,24 +5701,31 @@ private fun BitChordApp(
                 canSubmit = { it[0].isNotBlank() && it[1].isNotBlank() },
                 testFailedRes = R.string.webdav_test_failed,
                 onTest = { (email, password, folder) ->
+                    // Each region in turn; the folder is found level by level
+                    // (accents, spaces and case as pCloud has them). The error
+                    // shown is the one from the region that accepted the login
+                    // — a 401 from the other region only means "not here".
+                    var signedIn: Result<Unit>? = null
                     var last: Result<Unit> = Result.failure(IllegalStateException("pCloud"))
                     for (host in com.music.bitchord.data.webdav.PcloudPreset.hosts) {
-                        last = com.music.bitchord.data.webdav.WebDavRepository.testConnection(
-                            com.music.bitchord.data.webdav.PcloudPreset.urlFor(host, folder),
-                            email.trim(),
-                            password,
-                        )
-                        if (last.isSuccess) {
+                        val found = com.music.bitchord.data.webdav.PcloudPreset.resolve(host, folder, email.trim(), password)
+                        if (found.isSuccess) {
                             pcloudHost = host
+                            pcloudResolvedUrl = found.getOrNull()
+                            last = Result.success(Unit)
                             break
                         }
+                        val err = found.exceptionOrNull()
+                        last = Result.failure(err ?: IllegalStateException("pCloud"))
+                        if (err?.message?.contains("401") != true) signedIn = last
                     }
-                    last
+                    if (last.isSuccess) last else signedIn ?: last
                 },
                 onSave = { (email, password, folder) ->
                     AppSettings.setWebDavUsername(email.trim())
                     AppSettings.setWebDavPassword(password)
-                    val pcloudFolderUrl = com.music.bitchord.data.webdav.PcloudPreset.urlFor(pcloudHost, folder)
+                    val pcloudFolderUrl = pcloudResolvedUrl
+                        ?: com.music.bitchord.data.webdav.PcloudPreset.urlFor(pcloudHost, folder)
                     AppSettings.setWebDavUrl(pcloudFolderUrl)
                     com.music.bitchord.data.webdav.LibraryFolders.replacePrimary(pcloudFolderUrl)
                     showPcloudEditor = false

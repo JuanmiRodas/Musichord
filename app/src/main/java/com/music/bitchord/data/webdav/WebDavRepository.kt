@@ -92,6 +92,23 @@ object WebDavRepository {
         }
     }
 
+    /**
+     * A pCloud folder that didn't answer, found again by name level by level
+     * (see [PcloudPreset.resolve]) and saved under its real address — a path
+     * typed on the phone against a folder named on a Mac.
+     */
+    private suspend fun repaired(folder: LibraryFolders.Folder, username: String, password: String): LibraryFolders.Folder? {
+        val host = PcloudPreset.hostOf(folder.url) ?: return null
+        val url = PcloudPreset.resolve(host, PcloudPreset.folderOf(folder.url), username, password).getOrNull() ?: return null
+        if (WebDavConfig.normalizeUrl(url) == WebDavConfig.normalizeUrl(folder.url)) return null
+        TrackLog.d(TAG, "WebDAV: folder ${folder.url} found at $url")
+        if (folder.id == "legacy" || WebDavConfig.normalizeUrl(AppSettings.webdavUrl.value) == WebDavConfig.normalizeUrl(folder.url)) {
+            AppSettings.setWebDavUrl(url)
+        }
+        if (folder.id != "legacy") LibraryFolders.edit(folder.id, folder.name, url, folder.kind)
+        return folder.copy(url = url)
+    }
+
     /** A lyrics folder's name: "LyricsX", "Lyrics", "Letras", "lrc"… */
     private val LYRICS_FOLDER = Regex("""^(lyrics?\s*x?|letras?|lrcx?|karaoke lyrics)$""", RegexOption.IGNORE_CASE)
 
@@ -184,6 +201,9 @@ object WebDavRepository {
             .ifEmpty { listOf(LibraryFolders.Folder("legacy", "", url, true, LibraryFolders.Kind.BOTH)) }
         val listed = folders.mapNotNull { folder ->
             WebDavClient.listLibrary(folder.url, username, password, maxFiles = 50_000).getOrNull()?.let { folder to it }
+                ?: repaired(folder, username, password)?.let { fixed ->
+                    WebDavClient.listLibrary(fixed.url, username, password, maxFiles = 50_000).getOrNull()?.let { fixed to it }
+                }
         }
         if (listed.isEmpty()) return@withContext emptyList()
         val autoLyrics = autoLyricsFolders(username, password)

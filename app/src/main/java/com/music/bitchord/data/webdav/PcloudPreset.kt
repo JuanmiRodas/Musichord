@@ -1,6 +1,8 @@
 package com.music.bitchord.data.webdav
 
 import java.net.URI
+import java.text.Normalizer
+import java.util.Locale
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -41,4 +43,43 @@ object PcloudPreset {
 
     fun hostOf(url: String): String? =
         runCatching { URI(url.trim()).host?.lowercase() }.getOrNull()?.takeIf { it in hosts }
+
+    /** A folder name compared as letters and digits: accents however stored, spaces, case. */
+    private fun nameKey(s: String): String =
+        Normalizer.normalize(s, Normalizer.Form.NFC).lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+
+    /**
+     * The real address of [folder] on [host], found one level at a time.
+     *
+     * A folder typed on the phone and the same folder made on a Mac can differ
+     * in ways that don't show: macOS stores "Música" with the accent as a
+     * separate character, and pCloud Backup names a computer folder its own
+     * way ("MacBook Air de Juanmi" for "MacBookAirdeJuanmi"). Each level is
+     * listed and the child whose name matches as letters and digits is taken,
+     * so whatever was typed lands on the folder that is there.
+     */
+    suspend fun resolve(host: String, folder: String, username: String, password: String): Result<String> {
+        val root = "https://$host/"
+        WebDavClient.testConnection(root, username, password).onFailure { return Result.failure(it) }
+        var url = root
+        for (segment in folder.trim().trim('/').split('/').filter { it.isNotBlank() }) {
+            val want = nameKey(segment)
+            val children = WebDavClient.listFolders(url, username, password).getOrElse { return Result.failure(it) }
+            val hit = children.firstOrNull { nameKey(it.displayName.ifBlank { lastName(it.url) }) == want }
+                ?: children.firstOrNull { nameKey(lastName(it.url)) == want }
+                ?: return Result.failure(
+                    IllegalStateException(
+                        "Folder \"$segment\" not found in /${folderOf(url)} — there: " +
+                            children.joinToString(", ") { it.displayName.ifBlank { lastName(it.url) } }.take(300),
+                    ),
+                )
+            url = hit.url.let { if (it.startsWith("http")) it else "https://$host" + (if (it.startsWith("/")) it else "/$it") }
+                .let { if (it.endsWith("/")) it else "$it/" }
+        }
+        return Result.success(url)
+    }
+
+    private fun lastName(url: String): String =
+        runCatching { URLDecoder.decode(url.trimEnd('/').substringAfterLast('/'), "UTF-8") }
+            .getOrDefault(url.trimEnd('/').substringAfterLast('/'))
 }
