@@ -144,6 +144,11 @@ object MusicVideoEngine {
                 refresh()
             }
         }
+        // Turning audio only on drops a picture already showing; turning it
+        // off lets the current video's picture load.
+        scope.launch {
+            AppSettings.audioOnly.drop(1).collect { refresh() }
+        }
     }
 
     private val _shownVideoId = MutableStateFlow<String?>(null)
@@ -319,6 +324,10 @@ object MusicVideoEngine {
 
     /** The track the picture should be of: the controller's, when it is a music video. */
     private fun wanted(): Song? {
+        // BitChord Audio: with audio only on, no picture is ever fetched or
+        // decoded — not for a video still waiting to be swapped for its
+        // release, and not for one the listener switched to by hand.
+        if (AppSettings.audioOnly.value) return null
         val song = controller?.currentMediaItem?.toSong() ?: return null
         return song.takeIf { it.isVideo && it.videoId !in noPicture }
     }

@@ -9,6 +9,7 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -29,8 +30,12 @@ import java.util.concurrent.ConcurrentHashMap
  *    the background and replaced in place while they are still upcoming, which
  *    the listener never sees or hears.
  * 3. [onBecameCurrent] — the fallback for a video that reached the player some
- *    other way (a restored queue, a jump past the look-ahead window): it is held
- *    while its audio is found and then swapped from the start.
+ *    other way (a restored queue, a jump past the look-ahead window, a slow
+ *    first lookup): its sound keeps playing while the release is found, then
+ *    the player cross-fades onto the release at the same point in the song.
+ *
+ * The picture is never shown while audio only is on (see MusicVideoEngine),
+ * so until a swap lands a video is only ever heard, never seen.
  *
  * A video the listener switched to by hand ([keepAsVideo]) is left alone, and
  * nothing changes inside a Listen Together party, where everyone hears the same
@@ -40,6 +45,11 @@ internal class AudioFirst(
     private val scope: CoroutineScope,
     /** The session's active player now — it can change across a crossfade or a version swap. */
     private val currentPlayer: () -> Player?,
+    /**
+     * Moves the playing item onto [MediaItem] in place, aligned and
+     * cross-faded; false when it can't right now.
+     */
+    private val swapCurrent: (MediaItem) -> Boolean,
 ) {
     /** Video ids whose lookup is running. Main thread only. */
     private val inFlight = HashSet<String>()
@@ -136,37 +146,34 @@ internal class AudioFirst(
     }
 
     /**
-     * Point 3: a video that became current anyway. Held, resolved, and swapped
-     * from its start; [markSwap] tells the service the replacement is the same
-     * listen, not a new track. Main thread.
+     * Point 3: a video that became current anyway. It keeps playing — as
+     * sound only, the picture is never loaded while audio only is on — while
+     * its release is found, and is then cross-faded onto the release at the
+     * matching moment by [swapCurrent], the player's own version switch. No
+     * pause, no restart from zero. Main thread.
      */
-    fun onBecameCurrent(item: MediaItem?, markSwap: (String) -> Unit) {
+    fun onBecameCurrent(item: MediaItem?) {
         if (!enabled || item == null) return
         val song = item.toSong()
         if (!wants(song) || !inFlight.add(song.videoId)) return
-        val player = currentPlayer() ?: run {
-            inFlight -= song.videoId
-            return
-        }
-        val resume = player.playWhenReady
-        if (resume) player.pause()
         scope.launch {
             val audio = try {
                 withContext(Dispatchers.IO) { withTimeoutOrNull(FALLBACK_TIMEOUT_MS) { resolve(song) } }
             } finally {
                 inFlight -= song.videoId
             }
-            val live = currentPlayer() ?: return@launch
-            val stillCurrent = live.currentMediaItem?.mediaId == item.mediaId
-            if (audio != null && stillCurrent) {
-                val index = live.currentMediaItemIndex
-                markSwap(audio.videoId)
-                live.replaceMediaItem(index, audio.toMediaItem())
-                live.seekTo(index, 0L)
-                TrackLog.d(TAG, "audio-first: playing '${song.title}' as ${audio.videoId}", about = song.videoId)
+            audio ?: return@launch
+            // The switch declines while an Automix blend is running; that
+            // blend ends within seconds, so it is asked again a few times.
+            repeat(SWAP_ATTEMPTS) {
+                val live = currentPlayer() ?: return@launch
+                if (live.currentMediaItem?.mediaId != item.mediaId) return@launch
+                if (swapCurrent(audio.toMediaItem())) {
+                    TrackLog.d(TAG, "audio-first: '${song.title}' cross-faded to ${audio.videoId}", about = song.videoId)
+                    return@launch
+                }
+                delay(SWAP_RETRY_MS)
             }
-            // Resumed whether or not a swap happened: the hold was ours.
-            if (resume && !live.playWhenReady) live.play()
         }
     }
 
@@ -174,8 +181,14 @@ internal class AudioFirst(
         const val TAG = "BitChord"
         /** How many upcoming items are kept resolved ahead of the playhead. */
         const val LOOK_AHEAD = 3
-        /** How long a play request may wait for its first track's audio before playing the video. */
-        const val START_TIMEOUT_MS = 8_000L
+        /**
+         * How long a play request waits for its first track's release before
+         * starting on the video's own sound. Short: a cache hit is instant,
+         * and a slow lookup carries on in [onBecameCurrent] while it plays.
+         */
+        const val START_TIMEOUT_MS = 1_500L
+        const val SWAP_ATTEMPTS = 6
+        const val SWAP_RETRY_MS = 2_000L
         const val FALLBACK_TIMEOUT_MS = 15_000L
     }
 }

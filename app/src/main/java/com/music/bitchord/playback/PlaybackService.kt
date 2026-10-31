@@ -711,7 +711,18 @@ class PlaybackService : MediaLibraryService() {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     /** BitChord Audio: music videos play as their audio release, never loading the video. */
-    private val audioFirst = AudioFirst(scope) { player }
+    private val audioFirst = AudioFirst(
+        scope = scope,
+        currentPlayer = { player },
+        swapCurrent = { target ->
+            if (crossfade?.isTransitioning() == true || player == null) {
+                false
+            } else {
+                smoothSwapCurrentTrackVersion(target)
+                true
+            }
+        },
+    )
 
     /** Canonical context owner for the active local bounded album/playlist. */
     private val boundedContextRegistry = ContextRegistry { snapshot ->
@@ -1008,8 +1019,9 @@ class PlaybackService : MediaLibraryService() {
             }
 
             // BitChord Audio: a video that reached the player despite the
-            // look-ahead is held and swapped for its audio release.
-            audioFirst.onBecameCurrent(mediaItem) { swappingMediaId = it }
+            // look-ahead keeps playing as sound and is cross-faded onto its
+            // audio release once that is found.
+            audioFirst.onBecameCurrent(mediaItem)
 
             // A receiver, if it is the speaker, is put on whatever became
             // current — or it is the one that moved, and this is the phone
