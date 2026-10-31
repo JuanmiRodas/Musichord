@@ -156,7 +156,7 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                         list.forEach { f ->
                             SourceRow(
                                 label = "pCloud · " + fileLabel(f),
-                                detail = listOfNotNull(qualityText(f), f.durationText, folderOf(f)).joinToString(" · "),
+                                detail = listOfNotNull(qualityText(f, song.durationText?.let(::secondsIn)), f.durationText, folderOf(f)).joinToString(" · "),
                                 selected = (choice as? PreferredSource.File)?.id == f.videoId ||
                                     (choice == null && f.videoId == song.videoId),
                             ) { switchTo(f) }
@@ -204,8 +204,11 @@ private suspend fun youTubeCopyOf(song: Song): Song? {
 }
 
 /** "MP3 320 kbps", "FLAC 16/44.1" — from the tags as last read. */
-private fun qualityText(f: Song): String? {
-    val rank = com.music.bitchord.data.sources.OwnFileMatcher.qualityRank(f)
+private fun secondsIn(text: String): Int? =
+    text.split(':').mapNotNull { it.trim().toIntOrNull() }.fold(0) { acc, p -> acc * 60 + p }.takeIf { it > 0 }
+
+private fun qualityText(f: Song, forSeconds: Int?): String? {
+    val rank = com.music.bitchord.data.sources.OwnFileMatcher.qualityRank(f, f.durationText?.let(::secondsIn) ?: forSeconds)
     val codec = f.sourceQuality?.substringBefore(' ')?.takeIf { it.isNotBlank() }
     return when {
         rank >= 9_000 -> f.sourceQuality ?: "Lossless"

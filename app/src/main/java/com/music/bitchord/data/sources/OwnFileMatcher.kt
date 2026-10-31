@@ -107,7 +107,32 @@ object OwnFileMatcher {
                 val got = file.durationMillis().takeIf { it > 0 }?.let { (it / 1000).toInt() }
                 durationSec == null || got == null || abs(durationSec - got) <= MAX_DRIFT_SEC
             }
-            .sortedByDescending { qualityRank(it) }
+            // A live take, a TV-size cut, a karaoke or remix isn't the song
+            // asked for unless its title says so too.
+            .filter { file -> VERSION_WORDS.none { it in versionNotes(file.title) && it !in versionNotes(title) } }
+            // Audio files ahead of video files of the same song.
+            .sortedWith(
+                compareByDescending<Song> { qualityRank(it, durationSec) }
+                    .thenBy { if (isVideoFile(it)) 1 else 0 },
+            )
+    }
+
+    private val VERSION_WORDS = listOf(
+        "live", "tv", "size", "karaoke", "instrumental", "inst", "off vocal", "remix", "mix", "acoustic",
+        "demo", "short", "ver", "version", "edit", "cover", "directo", "en vivo",
+    )
+
+    /** The bracketed notes of a title, lower-cased: "(TV Live)" → "tv live". */
+    private fun versionNotes(title: String): String =
+        Regex("""[(\[（【]([^)\]）】]*)[)\]）】]""").findAll(title)
+            .joinToString(" ") { it.groupValues[1] }
+            .lowercase(Locale.ROOT)
+            .let { notes -> Regex("""\b(${VERSION_WORDS.joinToString("|") { Regex.escape(it) }})\b""").findAll(notes).joinToString(" ") { it.value } }
+
+    private fun isVideoFile(song: Song): Boolean {
+        val ext = com.music.bitchord.data.webdav.WebDavConfig.fileUrlOf(song.videoId)
+            ?.substringAfterLast('.', "")?.lowercase(Locale.ROOT)
+        return ext in setOf("webm", "mp4", "mkv", "mov")
     }
 
     /**
@@ -135,7 +160,7 @@ object OwnFileMatcher {
         val all = matches(title, artist, durationSec)
         val best = all.firstOrNull() ?: return Keep("no file of yours matches (${library.size} songs in your library)")
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return Play(best)
-        val rank = qualityRank(best)
+        val rank = qualityRank(best, durationSec)
         return if (rank >= RemoteLibrarySource.MIN_KBPS) {
             Play(best)
         } else {
@@ -153,7 +178,7 @@ object OwnFileMatcher {
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return false
         val best = matches(title, artist, durationSec).firstOrNull() ?: return false
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return true
-        return qualityRank(best) >= RemoteLibrarySource.MIN_KBPS
+        return qualityRank(best, durationSec) >= RemoteLibrarySource.MIN_KBPS
     }
 
     private val KBPS = Regex("""(\d{2,4})\s*kbps""", RegexOption.IGNORE_CASE)
@@ -164,7 +189,7 @@ object OwnFileMatcher {
      * which can predate the bitrate being read; else the file's size over its
      * length; else whatever the row's label says.
      */
-    fun qualityRank(song: Song): Int {
+    fun qualityRank(song: Song, durationSec: Int? = null): Int {
         if (song.sourceHiRes) return 10_000
         val url = com.music.bitchord.data.webdav.WebDavConfig.fileUrlOf(song.videoId)
         val tags = url?.let { com.music.bitchord.data.remote.RemoteTagStore.get(it, com.music.bitchord.data.remote.RemoteTagStore.Stamp(null, null)) }
@@ -173,8 +198,12 @@ object OwnFileMatcher {
         val q = song.sourceQuality.orEmpty()
         if (listOf("FLAC", "ALAC", "WAV", "AIFF").any { it in q.uppercase(Locale.ROOT) }) return 9_000
         KBPS.find(q)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
-        val size = url?.let { com.music.bitchord.data.remote.RemoteTagStore.sizeOf(it) }
-        val ms = tags?.durationMs?.takeIf { it > 1000 } ?: song.durationMillis().takeIf { it > 1000 }
+        // Before the tags are read: the file's size (from the folder listing)
+        // over the song's length — the file's own, else the song asked for.
+        val size = url?.let { com.music.bitchord.data.remote.RemoteTagStore.sizeOf(it) ?: WebDavRepository.sizeOf(it) }
+        val ms = tags?.durationMs?.takeIf { it > 1000 }
+            ?: song.durationMillis().takeIf { it > 1000 }
+            ?: durationSec?.takeIf { it > 0 }?.let { it * 1000L }
         if (size != null && ms != null) return (size * 8 / ms).toInt()
         return 0
     }

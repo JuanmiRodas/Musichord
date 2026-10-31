@@ -71,9 +71,34 @@ object WebDavRepository {
     @Volatile
     private var lyricsIndexFile: File? = null
 
+    /** Every file's size as last listed, kept on the device — a bitrate before its tags are read. */
+    private val sizes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    @Volatile
+    private var sizesFile: File? = null
+
+    fun sizeOf(url: String): Long? = sizes[url]
+
+    private fun saveSizes(audio: List<WebDavClient.Entry>) {
+        audio.forEach { e -> e.size?.takeIf { it > 0 }?.let { sizes[e.url] = it } }
+        runCatching {
+            sizesFile?.let { f ->
+                f.parentFile?.mkdirs()
+                f.writeText(sizes.entries.joinToString("\n") { "${it.value}\t${it.key}" })
+            }
+        }
+    }
+
     fun init(context: Context) {
         savedFile = File(context.filesDir, "remote_library/webdav.json")
         lyricsIndexFile = File(context.filesDir, "remote_library/lyrics_index.txt")
+        sizesFile = File(context.filesDir, "remote_library/sizes.tsv")
+        runCatching {
+            sizesFile?.takeIf { it.isFile }?.readLines()?.forEach { line ->
+                val tab = line.indexOf('\t')
+                if (tab > 0) line.substring(0, tab).toLongOrNull()?.let { sizes[line.substring(tab + 1)] = it }
+            }
+        }
         RemoteTagStore.init(context)
         LibraryFolders.init(context)
         com.music.bitchord.data.sources.PreferredSource.init(context)
@@ -218,6 +243,7 @@ object WebDavRepository {
             tables = (listed.flatMap { it.second.tables } + autoLyrics.flatMap { it.tables }).distinctBy { it.url },
         )
         lastListing = listing
+        saveSizes(listing.audio)
         listing.tables.forEach { readAliasTable(it.url, username, password) }
         val songs = songsOf(listing)
         registerLyrics(listing)
