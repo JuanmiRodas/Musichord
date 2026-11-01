@@ -161,11 +161,30 @@ object WebDavRepository {
             .also { if (it.isNotEmpty()) TrackLog.d(TAG, "WebDAV: lyrics folders found beside the music: $it") }
     }
 
+    /**
+     * Romaji tables (`.csv` with `japanese_title` / `romanized_title`) kept
+     * beside a music folder rather than in it — `Music/Romaji answers.csv`
+     * next to `Music/Música`. Read for their names like the ones inside.
+     */
+    private suspend fun siblingTables(username: String, password: String): List<String> {
+        val musicFolders = LibraryFolders.folders.value.filter { it.enabled && it.hasMusic }.map { it.url }
+            .ifEmpty { listOf(AppSettings.webdavUrl.value) }
+        return musicFolders
+            .map { WebDavConfig.normalizeUrl(it).trimEnd('/').substringBeforeLast('/') + "/" }
+            .distinct()
+            .flatMap { parent ->
+                WebDavClient.listFiles(parent, username, password).getOrNull().orEmpty()
+                    .filter { it.displayName.ifBlank { decodedLast(it.url) }.endsWith(".csv", ignoreCase = true) }
+                    .map { it.url }
+            }
+    }
+
     /** Lists just the folders that hold only lyrics — cheap, one flat folder is the usual case. */
     private suspend fun refreshLyricsOnly() {
         if (!isConfigured()) return
         val u = AppSettings.webdavUsername.value
         val p = AppSettings.webdavPassword.value
+        siblingTables(u, p).forEach { readAliasTable(it, u, p) }
         val folders = LibraryFolders.folders.value.filter { it.enabled && it.kind == LibraryFolders.Kind.LYRICS }.map { it.url } +
             autoLyricsFolders(u, p)
         if (folders.isEmpty()) return
@@ -246,6 +265,7 @@ object WebDavRepository {
         lastListing = listing
         saveSizes(listing.audio)
         listing.tables.forEach { readAliasTable(it.url, username, password) }
+        siblingTables(username, password).forEach { readAliasTable(it, username, password) }
         val songs = songsOf(listing)
         registerLyrics(listing)
         publishLyrics(listing.lyrics.map { it.url })

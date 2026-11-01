@@ -217,4 +217,12 @@ class AudioForkTest {
         assertTrue(m.nearSpelling("boku no lyric no bouyomi", "Boku no Lyric no Boyomi"))
         assertTrue(!m.nearSpelling("Amaia", "Amaral"))
     }
+
+    @Test
+    fun `an original title kept in brackets is one of the file's names`() {
+        val k = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("Uta Choufugetsu (歌鳥風月)")
+        assertTrue(k.toString(), "歌鳥風月" in k && "utachoufugetsu" in k)
+        val v = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("Swimmer (TV Live)")
+        assertTrue(v.toString(), "tvlive" !in v)
+    }
 }

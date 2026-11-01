@@ -41,6 +41,7 @@ object OwnFileMatcher {
     private val QUOTED = Regex("""[『「](.+?)[』」]""")
     private val SEPARATOR = Regex("""\s+[-–—/／|｜]\s+|\s*／\s*|\s*｜\s*""")
     private val NOTE = Regex("""\s*[(\[（【][^)\]）】]*[)\]）】]\s*""")
+    private val GUEST_ONLY = Regex("""^(feat\.?|ft\.?|featuring|con|with)\s.*""", RegexOption.IGNORE_CASE)
     private val GUEST = Regex("""\s+(feat\.?|ft\.?|featuring|con|with)\s.*$""", RegexOption.IGNORE_CASE)
     private val ARTIST_SPLIT = Regex("""\s*(?:,|&|/|;|\bfeat\.?|\bft\.?|、|\band\b|\by\b|\bx\b|×)\s*""", RegexOption.IGNORE_CASE)
 
@@ -59,6 +60,11 @@ object OwnFileMatcher {
             add(base)
             QUOTED.findAll(title).forEach { add(it.groupValues[1]) }
             addAll(base.split(SEPARATOR))
+            // "Uta Choufugetsu (歌鳥風月)": the original title kept in brackets,
+            // unless the bracket only says which version it is.
+            NOTE.findAll(title).map { it.value.trim().trim('(', ')', '[', ']', '（', '）', '【', '】').trim() }
+                .filter { inner -> inner.isNotEmpty() && versionNotes("($inner)").isEmpty() && !GUEST_ONLY.matches(inner) }
+                .forEach { add(it) }
         }
         return names.map { FileName.key(it) }.filter { it.length >= 2 }.toSet()
     }
@@ -89,16 +95,22 @@ object OwnFileMatcher {
     @Volatile
     private var indexed: Pair<List<Song>, Map<String, List<Song>>>? = null
 
+    /** The alias tables' version the index was built with: new names, new index. */
+    @Volatile
+    private var indexedNames = -1
+
     /** The library by every name its songs go by; rebuilt when the library changes. */
     private fun index(): Map<String, List<Song>> {
         val library = WebDavRepository.library()
-        indexed?.let { (of, map) -> if (of === library) return map }
+        val names = LyricAliases.version.value
+        indexed?.let { (of, map) -> if (of === library && indexedNames == names) return map }
         val map = HashMap<String, MutableList<Song>>()
         for (song in library) {
-            val names = LyricAliases.queries(song.videoId, song.title, song.artist).map { it.title } + song.title
-            names.flatMap(::titleKeys).toSet().forEach { k -> map.getOrPut(k) { mutableListOf() } += song }
+            val titles = LyricAliases.queries(song.videoId, song.title, song.artist).map { it.title } + song.title
+            titles.flatMap(::titleKeys).toSet().forEach { k -> map.getOrPut(k) { mutableListOf() } += song }
         }
         indexed = library to map
+        indexedNames = names
         return map
     }
 
@@ -123,7 +135,10 @@ object OwnFileMatcher {
     fun matches(title: String, artist: String, durationSec: Int?, album: String? = null): List<Song> {
         val map = index()
         if (map.isEmpty()) return emptyList()
-        val found = titleKeys(title).flatMap { map[it].orEmpty() }.distinctBy { it.videoId }
+        // The song's other names too: your romaji tables pair "星屑" with "Hoshikuzu".
+        val wanted = (listOf(title) + LyricAliases.queries("", title, artist).map { it.title })
+            .flatMap(::titleKeys).toSet()
+        val found = wanted.flatMap { map[it].orEmpty() }.distinctBy { it.videoId }
         return found
             .filter { file ->
                 val got = file.durationMillis().takeIf { it > 0 }?.let { (it / 1000).toInt() }
