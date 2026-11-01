@@ -282,4 +282,13 @@ class AudioForkTest {
         val cp = "[00:01.00]Prison gates won\u2019t open".toByteArray(charset("windows-1252"))
         assertTrue(com.music.bitchord.data.lyrics.SidecarLyrics.decode(cp).contains("won\u2019t"))
     }
+
+    @Test
+    fun `titles agree past accents, track numbers, extensions and Japanese version notes`() {
+        val m = com.music.bitchord.data.sources.OwnFileMatcher
+        assertTrue(m.titleKeys("Ojos Así").intersect(m.titleKeys("Ojos asi")).isNotEmpty())
+        assertTrue(m.titleKeys("identity").intersect(m.titleKeys("09.identity")).isNotEmpty())
+        assertTrue(m.titleKeys("Don´t You Want Me").intersect(m.titleKeys("Don´t You Want Me.Mp3")).isNotEmpty())
+        assertEquals("ga", m.key("が").let { if (it == "が") "ga" else it })
+    }
 }

@@ -82,7 +82,7 @@ object SourceMap {
     private fun gen(): Int = WebDavRepository.library().size * 100 + MATCHER_VERSION
 
     /** Bumped when matching improves: songs with no file then get another look. */
-    private const val MATCHER_VERSION = 2
+    private const val MATCHER_VERSION = 3
 
     /** The entry for [videoId], if it still holds for the library as it is. */
     fun lookup(videoId: String): Entry? {

@@ -53,6 +53,18 @@ object JapaneseReading {
         return runCatching { com.atilika.kuromoji.ipadic.Tokenizer() }.getOrNull()?.also { tokenizer = it }
     }
 
+    /** A Japanese name as romaji words — 森川美穂 → {morikawa, miho} — or null. */
+    fun romajiWords(text: String): Set<String>? {
+        if (!isJapanese(text)) return null
+        val t = tokenizer ?: run { warmUp(); return null }
+        return runCatching {
+            t.tokenize(text).mapNotNull { tok ->
+                val r = tok.reading?.takeIf { it.isNotBlank() && it != "*" } ?: tok.surface
+                TrackMatcher.romajiOf(r).lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }.takeIf { it.isNotEmpty() }
+            }.toSet()
+        }.getOrNull()?.takeIf { it.isNotEmpty() }
+    }
+
     /** [text] in romaji, or null while the dictionary isn't loaded. */
     fun romaji(text: String): String? {
         if (!isJapanese(text)) return text

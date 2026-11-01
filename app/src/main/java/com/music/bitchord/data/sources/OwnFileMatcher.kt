@@ -49,9 +49,43 @@ object OwnFileMatcher {
     /** "~小さな羽根ひろげて~": a subtitle, often in another script than the file's. */
     private val TILDE = Regex("""\s*[~〜～][^~〜～]*[~〜～]\s*|\s*[~〜～].*$""")
 
+    /** "11.LOVE 'n' HATE", "09.identity": a track number left in the tag. */
+    private val TRACK_NO = Regex("""^\s*\d{1,3}\s*[.\-_)]\s*(?=\S)""")
+    /** "Don´t You Want Me.Mp3": the file's extension left in the tag. */
+    private val EXTENSION = Regex("""\.(mp3|flac|m4a|ogg|opus|wav|aac)$""", RegexOption.IGNORE_CASE)
+    /** "Heaven's What I Feel (Corazon": a bracket the tag was cut off inside. */
+    private val UNCLOSED = Regex("""\s*[(\[（【][^)\]）】]*$""")
+
+    /**
+     * Letters and digits, accents taken off Latin letters only — "Así" and
+     * "Asi", "Llévame" and "Llevame" agree, while kana keep their dakuten.
+     */
+    fun key(s: String): String {
+        val out = StringBuilder()
+        for (ch in Normalizer.normalize(s, Normalizer.Form.NFKC)) {
+            val d = Normalizer.normalize(ch.toString(), Normalizer.Form.NFD)
+            if (d[0] < '\u0250') d.filter { Character.getType(it) != Character.NON_SPACING_MARK.toInt() }.forEach(out::append)
+            else out.append(ch)
+        }
+        return out.toString().lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+    }
+
+    private fun cleaned(title: String): String = title.replace(TRACK_NO, "").replace(EXTENSION, "").trim()
+
     fun titleKeys(title: String): Set<String> {
-        val bare = title.replace(TILDE, " ").trim()
-        return keysOf(title) + (if (bare != title && bare.isNotBlank()) keysOf(bare) else emptySet())
+        val t = cleaned(title)
+        val bare = t.replace(TILDE, " ").trim()
+        val cut = t.replace(UNCLOSED, "").trim()
+        return keysOf(t) +
+            (if (bare != t && bare.isNotBlank()) keysOf(bare) else emptySet()) +
+            (if (cut != t && cut.isNotBlank()) keysOf(cut) else emptySet())
+    }
+
+    /** A tag cut off at ID3v1's 30 characters, or inside a bracket: matched by how it starts. */
+    private fun truncatedKey(title: String): String? {
+        if (title.length != 30 && !UNCLOSED.containsMatchIn(title)) return null
+        if (UNCLOSED.containsMatchIn(title) && title.trimEnd().endsWith(")")) return null
+        return key(cleaned(title).replace(UNCLOSED, "")).takeIf { it.length >= 10 }
     }
 
     /**
@@ -85,7 +119,7 @@ object OwnFileMatcher {
                 .filter { inner -> inner.isNotEmpty() && versionNotes("($inner)").isEmpty() && !GUEST_ONLY.matches(inner) }
                 .forEach { add(it) }
         }
-        return names.map { FileName.key(it) }.filter { it.length >= 2 }.toSet()
+        return names.map { key(it) }.filter { it.length >= 2 }.toSet()
     }
 
     private fun words(s: String): Set<String> =
@@ -98,8 +132,12 @@ object OwnFileMatcher {
 
     /** The same person or group, in any order of names or with a member list around it. */
     fun sameArtist(a: String, b: String): Boolean {
-        val left = a.split(ARTIST_SPLIT).map(::words).filter { it.isNotEmpty() }
-        val right = b.split(ARTIST_SPLIT).map(::words).filter { it.isNotEmpty() }
+        // A name in kanji read as romaji words too: 森川美穂 = Miho Morikawa.
+        fun names(s: String) = s.split(ARTIST_SPLIT).flatMap { part ->
+            listOfNotNull(words(part), JapaneseReading.romajiWords(part))
+        }.filter { it.isNotEmpty() }
+        val left = names(a)
+        val right = names(b)
         for (x in left) for (y in right) {
             if (x == y) return true
             val shorter = if (x.size <= y.size) x else y
@@ -114,6 +152,10 @@ object OwnFileMatcher {
     @Volatile
     private var indexed: Pair<List<Song>, Map<String, List<Song>>>? = null
 
+    /** Files whose title tag was cut off, by the key it starts with. */
+    @Volatile
+    private var truncated: List<Pair<String, Song>> = emptyList()
+
     /** The alias tables' version the index was built with: new names, new index. */
     @Volatile
     private var indexedNames = -1
@@ -124,6 +166,7 @@ object OwnFileMatcher {
         val names = LyricAliases.version.value * 2 + if (JapaneseReading.ready) 1 else 0
         indexed?.let { (of, map) -> if (of === library && indexedNames == names) return map }
         val map = HashMap<String, MutableList<Song>>()
+        truncated = library.mapNotNull { s -> truncatedKey(s.title)?.let { it to s } }
         for (song in library) {
             val titles = LyricAliases.queries(song.videoId, song.title, song.artist).map { it.title } + song.title
             titles.flatMap(::allKeys).toSet().forEach { k -> map.getOrPut(k) { mutableListOf() } += song }
@@ -157,11 +200,22 @@ object OwnFileMatcher {
         // The song's other names too: your romaji tables pair "星屑" with "Hoshikuzu".
         val wanted = (listOf(title) + LyricAliases.queries("", title, artist).map { it.title })
             .flatMap(::allKeys).toSet()
-        val found = wanted.flatMap { map[it].orEmpty() }.distinctBy { it.videoId }
+        val full = key(cleaned(title))
+        val cutOff = truncated.filter { (k, _) -> full.startsWith(k) }.map { it.second }
+        val found = (wanted.flatMap { map[it].orEmpty() } + cutOff).distinctBy { it.videoId }
+        // An official video runs longer than the song (intro, outro, a skit):
+        // a file up to a quarter shorter (at least a minute) is still it.
+        val videoUpload = VIDEO_UPLOAD.containsMatchIn(title)
         return found
             .filter { file ->
                 val got = file.durationMillis().takeIf { it > 0 }?.let { (it / 1000).toInt() }
-                durationSec == null || got == null || abs(durationSec - got) <= MAX_DRIFT_SEC
+                if (durationSec == null || got == null) return@filter true
+                val limit = if (videoUpload && got < durationSec && got >= durationSec * 6 / 10) {
+                    maxOf(60, durationSec / 4)
+                } else {
+                    MAX_DRIFT_SEC
+                }
+                abs(durationSec - got) <= limit
             }
             .filter { file ->
                 // The tags' artist, its aliases, and the artist folder you
@@ -198,10 +252,15 @@ object OwnFileMatcher {
 
     private const val CONFIRM_DRIFT_SEC = 3
 
+    private val VIDEO_UPLOAD = Regex(
+        """(official|oficial|music|lyric)\s*(music\s*)?(video|vídeo|clip|mv)|music\s*clip|\bm/?v\b|vídeo\s+oficial|video\s+oficial""",
+        RegexOption.IGNORE_CASE,
+    )
+
     /** "The Soul Extreme EP" / "The Soul Extreme EP(初回限定盤)": the same release. */
     fun sameAlbum(a: String?, b: String?): Boolean {
-        val x = a?.replace(NOTE, " ")?.let(FileName::key).orEmpty()
-        val y = b?.replace(NOTE, " ")?.let(FileName::key).orEmpty()
+        val x = a?.replace(NOTE, " ")?.let(::key).orEmpty()
+        val y = b?.replace(NOTE, " ")?.let(::key).orEmpty()
         if (x.isEmpty() || y.isEmpty()) return false
         return x == y || (minOf(x.length, y.length) >= 5 && (x in y || y in x))
     }
@@ -234,9 +293,20 @@ object OwnFileMatcher {
     )
 
     /** The bracketed notes of a title, lower-cased: "(TV Live)" → "tv live". */
+    /** Japanese version notes, read as the words above: （さくらバージョン） is a "version". */
+    private val JAPANESE_VERSION = listOf(
+        "バージョン" to "version", "ヴァージョン" to "version", "ライブ" to "live", "カラオケ" to "karaoke",
+        "インスト" to "instrumental", "リミックス" to "remix", "テレビサイズ" to "tv size", "TVサイズ" to "tv size",
+        "ＴＶサイズ" to "tv size", "アコースティック" to "acoustic",
+    )
+
     private fun versionNotes(title: String): String =
-        Regex("""[(\[（【]([^)\]）】]*)[)\]）】]""").findAll(title)
-            .joinToString(" ") { it.groupValues[1] }
+        (Regex("""[(\[（【<＜]([^)\]）】>＞]*)[)\]）】>＞]""").findAll(
+            JAPANESE_VERSION.fold(title) { t, (jp, en) -> t.replace(jp, " $en ") },
+        ).map { it.groupValues[1] } +
+            // A bracket cut off by the tag still says what it is: "(Directo Pri".
+            listOfNotNull(UNCLOSED.find(title)?.value?.trim()?.drop(1)))
+            .joinToString(" ")
             .lowercase(Locale.ROOT)
             .let { notes -> Regex("""\b(${VERSION_WORDS.joinToString("|") { Regex.escape(it) }})\b""").findAll(notes).joinToString(" ") { it.value } }
 
