@@ -98,7 +98,7 @@ object PreferredSource {
         // for files whose tags the matcher's stricter rules turn away.
         val key = keyOf(song.title, song.artist)
         val named = if (key == null) emptyList() else library.filter { keyOf(it.title, it.artist) == key }
-        val matched = OwnFileMatcher.matches(song.title, song.artist, target.durationSec)
+        val matched = OwnFileMatcher.matches(song.title, song.artist, target.durationSec, song.albumName)
         return (self + matched + ranked + named).distinctBy { it.videoId }
     }
 

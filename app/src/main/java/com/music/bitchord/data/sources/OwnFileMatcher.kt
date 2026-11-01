@@ -106,34 +106,89 @@ object OwnFileMatcher {
      * Your files that are the song [title] by [artist] of [durationSec],
      * best first: lossless, then by bitrate.
      */
-    fun matches(title: String, artist: String, durationSec: Int?): List<Song> {
+    /**
+     * Your files that are the song [title] by [artist] of [durationSec] on
+     * [album], best first: lossless, then by bitrate.
+     *
+     * In stages: files with the song's name (in any of its names); of those,
+     * the ones whose length agrees; then confirmed by any of —
+     *  1. the artist (in either name order, a member list, a near spelling:
+     *     "Porno Graffitti" / "Porno Graffiti");
+     *  2. the album, with the length to [CONFIRM_DRIFT_SEC] seconds — which is
+     *     how "浜崎あゆみ" turns out to be "Ayumi Hamasaki", and the pair is
+     *     remembered ([ArtistLinks]) for every other song of hers;
+     *  3. an artist pair remembered that way;
+     *  4. an upload credited to its channel, by the length to 2 seconds.
+     */
+    fun matches(title: String, artist: String, durationSec: Int?, album: String? = null): List<Song> {
         val map = index()
         if (map.isEmpty()) return emptyList()
         val found = titleKeys(title).flatMap { map[it].orEmpty() }.distinctBy { it.videoId }
         return found
             .filter { file ->
-                val artists = listOf(file.artist) +
-                    LyricAliases.queries(file.videoId, file.title, file.artist).map { it.artist }
-                artists.any { sameArtist(artist, it) } ||
-                    // An upload credited to its channel ("NBCUniversal Music
-                    // Channel", "… - Topic", "Unknown artist"), the singer only
-                    // in the title: the same name and length to 2 seconds.
-                    (UPLOADER.containsMatchIn(artist) && durationSec != null &&
-                        file.durationMillis().takeIf { it > 0 }
-                            ?.let { abs(durationSec - (it / 1000).toInt()) <= UPLOADER_DRIFT_SEC } == true)
-            }
-            .filter { file ->
                 val got = file.durationMillis().takeIf { it > 0 }?.let { (it / 1000).toInt() }
                 durationSec == null || got == null || abs(durationSec - got) <= MAX_DRIFT_SEC
+            }
+            .filter { file ->
+                val artists = listOf(file.artist) +
+                    LyricAliases.queries(file.videoId, file.title, file.artist).map { it.artist }
+                val drift = durationSec?.let { want ->
+                    file.durationMillis().takeIf { it > 0 }?.let { abs(want - (it / 1000).toInt()) }
+                }
+                val close = drift != null && drift <= CONFIRM_DRIFT_SEC
+                when {
+                    artists.any { sameArtist(artist, it) } -> true
+                    close && artists.any { nearSpelling(artist, it) } -> true
+                    close && sameAlbum(album, file.albumName) -> {
+                        ArtistLinks.learn(artist, file.artist)
+                        true
+                    }
+                    artists.any { ArtistLinks.linked(artist, it) } -> true
+                    UPLOADER.containsMatchIn(artist) && drift != null && drift <= UPLOADER_DRIFT_SEC -> true
+                    else -> false
+                }
             }
             // A live take, a TV-size cut, a karaoke or remix isn't the song
             // asked for unless its title says so too.
             .filter { file -> VERSION_WORDS.none { it in versionNotes(file.title) && it !in versionNotes(title) } }
-            // Audio files ahead of video files of the same song.
+            // The same album first, then quality; audio files ahead of video files.
             .sortedWith(
-                compareByDescending<Song> { qualityRank(it, durationSec) }
+                compareByDescending<Song> { if (sameAlbum(album, it.albumName)) 1 else 0 }
+                    .thenByDescending { qualityRank(it, durationSec) }
                     .thenBy { if (isVideoFile(it)) 1 else 0 },
             )
+    }
+
+    private const val CONFIRM_DRIFT_SEC = 3
+
+    /** "The Soul Extreme EP" / "The Soul Extreme EP(初回限定盤)": the same release. */
+    fun sameAlbum(a: String?, b: String?): Boolean {
+        val x = a?.replace(NOTE, " ")?.let(FileName::key).orEmpty()
+        val y = b?.replace(NOTE, " ")?.let(FileName::key).orEmpty()
+        if (x.isEmpty() || y.isEmpty()) return false
+        return x == y || (minOf(x.length, y.length) >= 5 && (x in y || y in x))
+    }
+
+    /** One letter apart, more or less: at least 85% alike as letters and digits. */
+    fun nearSpelling(a: String, b: String): Boolean {
+        val x = FileName.key(a.replace('$', 's'))
+        val y = FileName.key(b.replace('$', 's'))
+        if (x.length < 5 || y.length < 5) return false
+        val d = levenshtein(x, y)
+        return 1.0 - d.toDouble() / maxOf(x.length, y.length) >= 0.85
+    }
+
+    private fun levenshtein(a: String, b: String): Int {
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1)
+            cur[0] = i
+            for (j in 1..b.length) {
+                cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+            }
+            prev = cur
+        }
+        return prev[b.length]
     }
 
     private val VERSION_WORDS = listOf(
@@ -165,7 +220,7 @@ object OwnFileMatcher {
     data class Play(val file: Song) : Verdict
     data class Keep(val reason: String) : Verdict
 
-    fun decide(title: String, artist: String, durationSec: Int?): Verdict {
+    fun decide(title: String, artist: String, durationSec: Int?, album: String? = null): Verdict {
         if (!WebDavRepository.isConfigured()) return Keep("pCloud not connected")
         val library = WebDavRepository.library()
         if (library.isEmpty()) return Keep("pCloud library not loaded yet")
@@ -176,7 +231,7 @@ object OwnFileMatcher {
         }
         val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return Keep("Settings: YouTube first")
-        val all = matches(title, artist, durationSec)
+        val all = matches(title, artist, durationSec, album)
         val best = all.firstOrNull() ?: return Keep("no file of yours matches (${library.size} songs in your library)")
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return Play(best)
         val rank = qualityRank(best, durationSec)
@@ -187,7 +242,7 @@ object OwnFileMatcher {
         }
     }
 
-    fun beatsYouTube(title: String, artist: String, durationSec: Int?): Boolean {
+    fun beatsYouTube(title: String, artist: String, durationSec: Int?, album: String? = null): Boolean {
         when (val choice = PreferredSource.get(title, artist)) {
             PreferredSource.YouTube -> return false
             is PreferredSource.File -> return true
@@ -195,7 +250,7 @@ object OwnFileMatcher {
         }
         val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return false
-        val best = matches(title, artist, durationSec).firstOrNull() ?: return false
+        val best = matches(title, artist, durationSec, album).firstOrNull() ?: return false
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return true
         return qualityRank(best, durationSec) >= RemoteLibrarySource.MIN_KBPS
     }

@@ -311,7 +311,7 @@ object SourceResolver {
         // the song quoted in a video title, names in either order), best
         // copy first; the first that qualifies plays.
         val request = requestForNow()
-        for (file in OwnFileMatcher.matches(target.title, target.artist, target.durationSec).take(3)) {
+        for (file in OwnFileMatcher.matches(target.title, target.artist, target.durationSec, target.album).take(3)) {
             val source = own.first()
             val found = runCatching { source.stream(file.videoId, request) }.getOrNull() ?: continue
             if (!RemoteLibrarySource.qualifies(found, target.durationSec)) continue

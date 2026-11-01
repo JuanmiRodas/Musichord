@@ -102,6 +102,7 @@ object WebDavRepository {
         RemoteTagStore.init(context)
         LibraryFolders.init(context)
         com.music.bitchord.data.sources.PreferredSource.init(context)
+        com.music.bitchord.data.sources.ArtistLinks.init(context)
         // The lyrics folders' file list as last seen, so lyrics are found
         // before the library has been opened this session.
         runCatching { lyricsIndexFile?.takeIf { it.isFile }?.readLines()?.filter { it.isNotBlank() } }
@@ -251,6 +252,18 @@ object WebDavRepository {
         inMemory = songs
         savedFile?.let { SongListStore.save(it, songs) }
         readMissingTags(listing.audio, username, password)
+        // Artist links are learnt from album agreement — walk Liked Music once
+        // so they are known before its songs come up.
+        scope.launch {
+            runCatching {
+                com.music.bitchord.data.LikedMusicCache.load(com.music.bitchord.data.LikedMusicCache.lastProfile)
+                    ?.songs?.forEach { s ->
+                        val sec = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+                            ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+                        com.music.bitchord.data.sources.OwnFileMatcher.matches(s.title, s.artist, sec, s.albumName)
+                    }
+            }
+        }
         songs
     }
 

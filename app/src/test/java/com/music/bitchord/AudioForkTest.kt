@@ -207,4 +207,14 @@ class AudioForkTest {
         assertTrue("$k / $f", (k intersect f).contains("openyourmind"))
         assertTrue(com.music.bitchord.data.sources.OwnFileMatcher.sameArtist("Kesha", "Ke\$ha"))
     }
+
+    @Test
+    fun `album and near spelling confirm a match`() {
+        val m = com.music.bitchord.data.sources.OwnFileMatcher
+        assertTrue(m.sameAlbum("The Soul Extreme EP", "The Soul Extreme EP(初回限定盤)"))
+        assertTrue(!m.sameAlbum("GUILTY", "Secret"))
+        assertTrue(m.nearSpelling("Porno Graffitti", "Porno Graffiti"))
+        assertTrue(m.nearSpelling("boku no lyric no bouyomi", "Boku no Lyric no Boyomi"))
+        assertTrue(!m.nearSpelling("Amaia", "Amaral"))
+    }
 }
