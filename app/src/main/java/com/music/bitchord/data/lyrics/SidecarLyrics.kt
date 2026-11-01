@@ -193,8 +193,64 @@ object SidecarLyrics {
             b(0) == 0xEF && b(1) == 0xBB && b(2) == 0xBF -> String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
             // UTF-16 without a mark still shows itself: every other byte NUL.
             bytes.size > 8 && b(1) == 0 && b(3) == 0 && b(0) != 0 -> String(bytes, Charsets.UTF_16LE)
-            else -> String(bytes, Charset.forName("UTF-8"))
+            else -> utf8OrLegacy(bytes)
         }
+    }
+
+    /**
+     * BitChord Audio: UTF-8 when the bytes are UTF-8; otherwise the older
+     * encoding they make sense in. About one lyrics file in twelve is in one
+     * (GBK from Chinese lyric sites — Japanese songs included — Shift-JIS,
+     * Big5, Windows-1252), and read as UTF-8 they came out garbled.
+     *
+     * Western text has its accented bytes one at a time between letters; the
+     * Asian encodings use them in pairs. So a file whose high bytes stand
+     * alone is Windows-1252 ("won’t" saved there would otherwise decode as
+     * Shift-JIS "won稚"); otherwise each Asian encoding is tried and the one
+     * whose text looks most like text — kana, common kanji, Hangul, no
+     * half-width katakana or replacement marks — is kept.
+     */
+    private fun utf8OrLegacy(bytes: ByteArray): String {
+        runCatching {
+            return Charsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+        }
+        var high = 0
+        var paired = 0
+        var i = 0
+        while (i < bytes.size) {
+            if (bytes[i].toInt() and 0x80 != 0) {
+                high++
+                if (i + 1 < bytes.size && bytes[i + 1].toInt() and 0x80 != 0) {
+                    paired++
+                    i++
+                }
+            }
+            i++
+        }
+        val western = high > 0 && paired * 3 < high
+        if (western) return String(bytes, Charset.forName("windows-1252"))
+        fun score(text: String): Int {
+            var s = 0
+            for (c in text) {
+                s += when (c) {
+                    in '\u3040'..'\u30ff' -> 3 // kana
+                    in '\u4e00'..'\u9fff' -> 2 // common CJK
+                    in '\uac00'..'\ud7af' -> 2 // Hangul
+                    in '\uff61'..'\uff9f' -> -4 // half-width katakana: a wrong guess
+                    '\ufffd' -> -6
+                    in '\ue000'..'\uf8ff' -> -6
+                    else -> 0
+                }
+            }
+            return s
+        }
+        return listOf("GB18030", "Shift_JIS", "Big5", "EUC-KR")
+            .mapNotNull { name -> runCatching { String(bytes, Charset.forName(name)) }.getOrNull() }
+            .maxByOrNull(::score)
+            ?: String(bytes, Charsets.UTF_8)
     }
 
     /**
@@ -207,7 +263,7 @@ object SidecarLyrics {
         val cleaned = text.lineSequence()
             .filterNot { LRCX_EXTRA.containsMatchIn(it) }
             .joinToString("\n")
-        val synced = LrcLib.parseLrc(cleaned)
+        val synced = withoutCredits(applyOffset(LrcLib.parseLrc(cleaned), text), text)
         if (synced.any { it.text.isNotBlank() }) return synced.withBackgroundVocals()
         val plain = text.lineSequence()
             .map { it.trim() }
@@ -217,6 +273,47 @@ object SidecarLyrics {
             .dropLastWhile { it.isEmpty() }
         if (plain.none { it.isNotEmpty() }) return null
         return plain.map { LyricLine(timeMs = 0L, text = it) }
+    }
+
+    /** `[offset:500]`: the lyrics are 500 ms early (positive) or late (negative). */
+    private val OFFSET = Regex("""(?im)^\s*\[offset:\s*([+-]?\d+)\s*]""")
+
+    private fun applyOffset(lines: List<LyricLine>, raw: String): List<LyricLine> {
+        val ms = OFFSET.find(raw)?.groupValues?.get(1)?.toLongOrNull()?.takeIf { it != 0L } ?: return lines
+        return lines.map { line ->
+            line.copy(
+                timeMs = (line.timeMs - ms).coerceAtLeast(0),
+                words = line.words.map { w -> w.copy(startMs = (w.startMs - ms).coerceAtLeast(0), endMs = (w.endMs - ms).coerceAtLeast(0)) },
+            )
+        }
+    }
+
+    /**
+     * Timed lines that are the file's credits, not the song: "Artist: Ke$ha",
+     * "Title: …", "By: m07 (…)", "Lrc by …", 作词：…, 歌手：…, 所属专辑：…, and a
+     * line that is just the song's title or artist (from its [ti:]/[ar:] tags)
+     * in the first half minute.
+     */
+    private val CREDIT = Regex(
+        """^\s*(artist|title|album|by|lrc\s*by|lyrics?(\s*by)?|music(\s*by)?|composer|arranger|written\s*by|""" +
+            """作词|作曲|编曲|作詞|編曲|歌手|演唱|专辑|所属专辑|制作|製作|翻译)\s*[:：]""",
+        RegexOption.IGNORE_CASE,
+    )
+    /** "by (alexcar)", "Lrc by Syazrul": only as a short line in the first half minute. */
+    private val BY_LINE = Regex("""^\s*(lrc\s+by|by)\s+\S""", RegexOption.IGNORE_CASE)
+    private val TAG_VALUE = Regex("""(?im)^\s*\[(ti|ar):([^\]]*)]""")
+
+    private fun withoutCredits(lines: List<LyricLine>, raw: String): List<LyricLine> {
+        val names = TAG_VALUE.findAll(raw).map { key(it.groupValues[2]) }.filter { it.isNotEmpty() }.toSet()
+        fun isCredit(line: LyricLine): Boolean {
+            if (line.text.isBlank()) return false
+            if (CREDIT.containsMatchIn(line.text)) return true
+            if (line.timeMs > 30_000) return false
+            if (line.text.length <= 40 && BY_LINE.containsMatchIn(line.text)) return true
+            val k = key(line.text)
+            return k.isNotEmpty() && (k in names || line.text.split(" - ").map(::key).all { it in names })
+        }
+        return lines.filterNot(::isCredit)
     }
 
     private val LRCX_EXTRA = Regex("""^\s*\[\d+:\d+(?:[.:]\d+)?]\s*\[(?:tr|tt)(?::[^\]]*)?]""")

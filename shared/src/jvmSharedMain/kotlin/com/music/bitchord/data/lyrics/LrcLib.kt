@@ -97,8 +97,19 @@ object LrcLib {
     private val LEADING_STAMPS = Regex("""^\s*((?:\[\d+:\d+(?:[.:]\d+)?]\s*){2,})(.*)$""")
     private val ONE_STAMP = Regex("""\[\d+:\d+(?:[.:]\d+)?]""")
 
+    /** A stamp after text on the same line starts a new line: "…[00:07.20]Title…[00:14.40]…". */
+    private val INLINE_STAMP = Regex("""(?<=\S)\s*(?=\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?])""")
+
     private fun expandRepeatedStamps(lrc: String): String =
-        lrc.lineSequence().flatMap { line ->
+        lrc.lineSequence().map { it.trimStart() }.flatMap { raw ->
+            // Stamps in a row at the start stay together (the repeat below);
+            // a stamp after words is the next line run onto this one.
+            val lead = LEADING_STAMPS.find(raw)?.groupValues?.get(1)?.length ?: 0
+            val head = raw.substring(0, lead)
+            val rest = raw.substring(lead)
+            val split = (head + rest.replace(INLINE_STAMP, "\n")).split('\n')
+            split.asSequence()
+        }.flatMap { line ->
             val m = LEADING_STAMPS.find(line) ?: return@flatMap sequenceOf(line)
             val body = m.groupValues[2]
             ONE_STAMP.findAll(m.groupValues[1]).map { it.value + body }
@@ -110,6 +121,7 @@ object LrcLib {
             val (minutes, seconds, fraction) = match.destructured
             // Two digits mean centiseconds, three mean milliseconds.
             val fractionMs = when (fraction.length) {
+                1 -> fraction.toLong() * 100
                 2 -> fraction.toLong() * 10
                 3 -> fraction.toLong()
                 else -> 0L
@@ -215,7 +227,10 @@ object LrcLib {
         return minutes.toLong() * 60_000 + seconds.toLong() * 1_000 + fractionMs
     }
 
-    private val STAMP = Regex("""\[(\d{1,2}):(\d{2})[.:](\d{2,3})]""")
+    // BitChord Audio: also [01:23] (no fraction), [01:23.4] (tenths) and
+    // [100:12.00] (past 99 minutes) — all common in .lrc files in the wild,
+    // and each was a line silently dropped.
+    private val STAMP = Regex("""\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?]""")
     private val WORD_STAMP = Regex("""<(\d{1,3}):(\d{2})[.:](\d{2,3})>""")
     private val NOISE = Regex(
         """\((?:from|feat\.?|official|lyrical|video|audio|remix)[^)]*\)|\[[^]]*]|""" +

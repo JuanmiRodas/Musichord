@@ -251,4 +251,35 @@ class AudioForkTest {
         assertEquals(2, lines.size)
         assertTrue(lines.all { it.text == "I'll see you next Tuesday" })
     }
+
+    @Test
+    fun `lrc files as found in the wild`() {
+        val raw = """
+            [ar:Ke${'$'}ha]
+            [ti:CUNext Tuesday]
+            [offset:500]
+            [00:00.74]Artist:  Ke${'$'}ha
+            [00:06.11]By: m07 (knock.u.down@msn.com)
+            [00:15]I was looking lost, it was cold outside
+            [00:18.9]The whiskey rocks how you caught my eye
+            [00:38.24][01:41.28]So I'll see you next Tuesday
+            [01:00.00]One line[01:05.00]Run on
+        """.trimIndent()
+        val lines = com.music.bitchord.data.lyrics.SidecarLyrics.parse(raw)!!.filter { it.text.isNotBlank() }
+        val texts = lines.map { it.text }
+        assertTrue(texts.toString(), texts.none { it.startsWith("Artist") || it.startsWith("By:") })
+        assertTrue(texts.toString(), texts.count { it == "So I'll see you next Tuesday" } == 2)
+        assertTrue(texts.toString(), "I was looking lost, it was cold outside" in texts)
+        assertTrue(texts.toString(), "The whiskey rocks how you caught my eye" in texts)
+        assertTrue(texts.toString(), "Run on" in texts && "One line" in texts)
+        assertEquals(14_500L, lines.first { it.text.startsWith("I was looking") }.timeMs)
+    }
+
+    @Test
+    fun `legacy encodings decode as text`() {
+        val sjis = "[00:01.00]君の名は".toByteArray(charset("Shift_JIS"))
+        assertTrue(com.music.bitchord.data.lyrics.SidecarLyrics.decode(sjis).contains("君の名は"))
+        val cp = "[00:01.00]Prison gates won\u2019t open".toByteArray(charset("windows-1252"))
+        assertTrue(com.music.bitchord.data.lyrics.SidecarLyrics.decode(cp).contains("won\u2019t"))
+    }
 }
