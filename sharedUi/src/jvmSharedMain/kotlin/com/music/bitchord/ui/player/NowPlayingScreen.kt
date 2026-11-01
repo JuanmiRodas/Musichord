@@ -3753,6 +3753,17 @@ fun NowPlayingScreen(
                                         onClick = lyricsTranslation.toggleRomanization,
                                     )
                                 }
+                                // BitChord Audio: lyrics earlier / later for this song.
+                                if (!lyrics.isNullOrEmpty()) {
+                                    LyricsOffsetControl(
+                                        offsetMs = lyricsTranslation.offsetMs,
+                                        onNudge = { if (translateShown) lyricsTranslation.nudge(it) },
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .padding(bottom = 6.dp)
+                                            .graphicsLayer { alpha = translateFade },
+                                    )
+                                }
                                 Box(
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)

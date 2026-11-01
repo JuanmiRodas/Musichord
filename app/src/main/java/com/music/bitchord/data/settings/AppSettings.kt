@@ -505,7 +505,7 @@ object AppSettings {
     val lyricsBlur = MutableStateFlow(true)
 
     /** BitChord Audio: romanized lyrics as the main line, fetched as soon as lyrics load. */
-    val romajiFirstLyrics = MutableStateFlow(false)
+    val romajiFirstLyrics = MutableStateFlow(true)
 
     /** BitChord Audio: your own lyrics files (.lrc/.lrcx/.txt) before the online providers. */
     val ownLyricsFirst = MutableStateFlow(true)
@@ -1028,7 +1028,7 @@ object AppSettings {
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
         progressiveBlur.value = prefs.getBoolean(KEY_PROGRESSIVE_BLUR, false)
         lyricsBlur.value = prefs.getBoolean(KEY_LYRICS_BLUR, true)
-        romajiFirstLyrics.value = prefs.getBoolean(KEY_ROMAJI_FIRST, false)
+        romajiFirstLyrics.value = prefs.getBoolean(KEY_ROMAJI_FIRST, true)
         ownLyricsFirst.value = prefs.getBoolean(KEY_OWN_LYRICS_FIRST, true)
         sourcePreference.value = prefs.getString(KEY_SOURCE_PREFERENCE, SOURCE_BEST) ?: SOURCE_BEST
         romajiShowOriginal.value = prefs.getBoolean(KEY_ROMAJI_SHOW_ORIGINAL, true)
@@ -2287,7 +2287,7 @@ object AppSettings {
     private const val KEY_LIQUID_GLASS = "liquid_glass"
     private const val KEY_PROGRESSIVE_BLUR = "progressive_blur"
     private const val KEY_LYRICS_BLUR = "lyrics_blur"
-    private const val KEY_ROMAJI_FIRST = "romaji_first_lyrics"
+    private const val KEY_ROMAJI_FIRST = "romaji_first_lyrics_v2"
     private const val KEY_OWN_LYRICS_FIRST = "own_lyrics_first"
     private const val KEY_SOURCE_PREFERENCE = "source_preference"
     const val SOURCE_BEST = "best"

@@ -116,6 +116,12 @@ interface PlayerHost {
     /** BitChord Audio: "where is this playing from" — the source picker for [song]. */
     fun chooseSource(song: Song) {}
 
+    /** BitChord Audio: how far [trackId]'s lyrics are moved (+ later, − earlier), in ms. */
+    fun lyricsOffset(trackId: String): StateFlow<Long> = MutableStateFlow(0L)
+
+    /** BitChord Audio: moves [trackId]'s lyrics by [deltaMs] and saves it ([lines] as shown, unshifted). */
+    fun nudgeLyrics(trackId: String, lines: List<com.music.bitchord.data.lyrics.LyricLine>, deltaMs: Long) {}
+
     /** The full signal-chain readout, opened from the output drawer. */
     @Composable
     fun AudioPipelineDialog(hazeState: HazeState, isPlaying: Boolean, onDismiss: () -> Unit)

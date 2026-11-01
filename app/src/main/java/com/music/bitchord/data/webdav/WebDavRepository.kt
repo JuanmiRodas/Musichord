@@ -109,6 +109,7 @@ object WebDavRepository {
         com.music.bitchord.data.sources.ArtistLinks.init(context)
         com.music.bitchord.data.LocalLikes.init(context)
         com.music.bitchord.data.sources.SourceMap.init(context)
+        com.music.bitchord.data.lyrics.LyricOffsets.init(context)
         startPrefs = context.getSharedPreferences("bitchord_library_refresh", Context.MODE_PRIVATE)
         if (isConfigured()) com.music.bitchord.data.sources.JapaneseReading.warmUp()
         // The lyrics folders' file list as last seen, so lyrics are found

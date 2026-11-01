@@ -3064,6 +3064,10 @@ internal class LyricsTranslationUi(
     val status: String,
     val toggleTranslation: () -> Unit,
     val toggleRomanization: () -> Unit,
+    /** BitChord Audio: how far the lyrics are moved for this song (+ later, − earlier). */
+    val offsetMs: Long = 0L,
+    /** Moves the lyrics by the given milliseconds, saved for this song. */
+    val nudge: (Long) -> Unit = {},
 )
 
 /**
@@ -3115,6 +3119,12 @@ internal fun rememberLyricsTranslation(
     var lyricsDisplayMode by remember(trackId, translationLanguage, lyrics) {
         mutableStateOf(LyricsDisplayMode.Original)
     }
+    // BitChord Audio: with the romaji leading, the translation joins the
+    // original under it instead of replacing the romaji.
+    var translationOverlay by remember(trackId, translationLanguage, lyrics) { mutableStateOf(false) }
+    // BitChord Audio: the song's lyrics shift, read again once its lyrics have loaded.
+    val offsetFlow = remember(trackId, lyrics) { PlayerPlatform.host.lyricsOffset(trackId) }
+    val offsetMs by offsetFlow.collectAsStateWithLifecycle()
     val showingTranslation = lyricsDisplayMode == LyricsDisplayMode.Translated
     val showingRomanization = lyricsDisplayMode == LyricsDisplayMode.Romanized
     var translationTransition by remember(trackId) { mutableIntStateOf(0) }
@@ -3148,10 +3158,21 @@ internal fun rememberLyricsTranslation(
     val romanizedLines = (romanizationState as? LyricsTranslationUiState.Ready)?.lines
     val romajiLeads = romajiFirst && lyricsDisplayMode == LyricsDisplayMode.Romanized && romanizedLines != null
     val panelLines = if (romajiLeads) romanizedLines.orEmpty() else lyrics.orEmpty()
+    val translatedLines = (translationState as? LyricsTranslationUiState.Ready)?.lines
     val lyricsSubLines = when (lyricsDisplayMode) {
-        LyricsDisplayMode.Translated -> (translationState as? LyricsTranslationUiState.Ready)?.lines
+        LyricsDisplayMode.Translated -> translatedLines
         LyricsDisplayMode.Romanized -> if (romajiLeads) {
-            lyrics.takeIf { romajiShowOriginal }
+            // Original and translation together, small, under the romaji.
+            val original = lyrics.takeIf { romajiShowOriginal }
+            val translated = translatedLines.takeIf { translationOverlay }
+            when {
+                original == null -> translated
+                translated == null || translated.size != original.size -> original
+                else -> original.mapIndexed { i, line ->
+                    val t = translated[i].text
+                    if (t.isBlank() || t == line.text) line else line.copy(text = line.text + "\n" + t, words = emptyList())
+                }
+            }
         } else {
             romanizedLines
         }
@@ -3159,6 +3180,13 @@ internal fun rememberLyricsTranslation(
     }
     val translationScope = rememberCoroutineScope()
     val toggleTranslation: () -> Unit = toggleTranslation@{
+        // Romaji leading: the translation is added under it, not swapped in.
+        if (romajiLeads && translationState is LyricsTranslationUiState.Ready) {
+            translationOverlay = !translationOverlay
+            translationTransition++
+            haptics.play(Haptic.Select)
+            return@toggleTranslation
+        }
         when (val state = translationState) {
             is LyricsTranslationUiState.Ready -> {
                 lyricsDisplayMode = if (showingTranslation) {
@@ -3194,7 +3222,11 @@ internal fun rememberLyricsTranslation(
                     ) {
                         is LyricsTranslationResult.Translated -> {
                             translationState = LyricsTranslationUiState.Ready(result.lines)
-                            lyricsDisplayMode = LyricsDisplayMode.Translated
+                            if (romajiFirst && lyricsDisplayMode == LyricsDisplayMode.Romanized) {
+                                translationOverlay = true
+                            } else {
+                                lyricsDisplayMode = LyricsDisplayMode.Translated
+                            }
                             translationTransition++
                             haptics.play(Haptic.ToggleOn)
                         }
@@ -3232,10 +3264,6 @@ internal fun rememberLyricsTranslation(
                 if (source.isEmpty()) return@toggleRomanization
                 haptics.play(Haptic.Tap)
                 romanizationState = LyricsTranslationUiState.Loading
-                translationJob?.cancel()
-                if (translationState is LyricsTranslationUiState.Loading) {
-                    translationState = LyricsTranslationUiState.Idle
-                }
                 romanizationJob?.cancel()
                 romanizationJob = translationScope.launch {
                     when (
@@ -3300,19 +3328,76 @@ internal fun rememberLyricsTranslation(
     }
 
     return LyricsTranslationUi(
-        displayedLyrics = displayedLyrics,
-        panelLines = panelLines,
-        subLines = lyricsSubLines,
+        displayedLyrics = displayedLyrics.shiftedBy(offsetMs),
+        panelLines = panelLines.shiftedBy(offsetMs),
+        subLines = lyricsSubLines?.shiftedBy(offsetMs),
         translationState = translationState,
         romanizationState = romanizationState,
-        showingTranslation = showingTranslation,
+        showingTranslation = showingTranslation || translationOverlay,
         showingRomanization = showingRomanization,
         transition = translationTransition,
         reduceMotion = reduceTranslationMotion,
         status = status,
         toggleTranslation = toggleTranslation,
         toggleRomanization = toggleRomanization,
+        offsetMs = offsetMs,
+        nudge = { delta -> lyrics?.let { PlayerPlatform.host.nudgeLyrics(trackId, it, delta) } },
     )
+}
+
+/** BitChord Audio: every time in the lines moved by [ms] (+ later, − earlier). */
+internal fun List<LyricLine>.shiftedBy(ms: Long): List<LyricLine> = if (ms == 0L) this else map { it.shiftedBy(ms) }
+
+private fun LyricLine.shiftedBy(ms: Long): LyricLine {
+    fun t(v: Long) = (v + ms).coerceAtLeast(0L)
+    return copy(
+        timeMs = if (timeMs == 0L && text.isEmpty()) 0L else t(timeMs),
+        words = words.map { w ->
+            w.copy(
+                startMs = t(w.startMs),
+                endMs = t(w.endMs),
+                syllables = w.syllables.map { s -> s.copy(startMs = t(s.startMs), endMs = t(s.endMs)) },
+            )
+        },
+        sungUntilMs = sungUntilMs?.let(::t),
+        background = background?.shiftedBy(ms),
+        timingSource = timingSource?.shiftedBy(ms),
+    )
+}
+
+/**
+ * BitChord Audio: "−0.5 s · +0.3 s · +0.5 s" — moves the lyrics earlier or later
+ * for this song; the middle shows how far they are moved, and a tap on it
+ * puts them back.
+ */
+@Composable
+internal fun LyricsOffsetControl(offsetMs: Long, onNudge: (Long) -> Unit, modifier: Modifier = Modifier) {
+    val tint = LocalPlayerTint.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(tint.copy(alpha = 0.12f)),
+    ) {
+        Text(
+            "−0.5",
+            color = tint,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.clickable { onNudge(-500) }.padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+        Text(
+            if (offsetMs == 0L) "0.0 s" else "%+.1f s".format(Locale.ROOT, offsetMs / 1000f),
+            color = tint.copy(alpha = 0.75f),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.clickable(enabled = offsetMs != 0L) { onNudge(-offsetMs) }.padding(horizontal = 4.dp, vertical = 8.dp),
+        )
+        Text(
+            "+0.5",
+            color = tint,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.clickable { onNudge(500) }.padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+    }
 }
 
 /**

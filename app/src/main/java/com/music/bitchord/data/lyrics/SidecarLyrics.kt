@@ -108,6 +108,9 @@ object SidecarLyrics {
             else -> localText(context, localUri, localPath)
         }
         val raw = beside ?: fromFolders(titles, artists) ?: return@withContext null
+        // BitChord Audio: a file's [offset:] is the song's starting shift (see
+        // LyricOffsets), applied once on screen rather than baked in here.
+        offsetOf(raw)?.let { fileOffsets[videoId] = it } ?: fileOffsets.remove(videoId)
         parse(raw)
     }
 
@@ -263,7 +266,7 @@ object SidecarLyrics {
         val cleaned = text.lineSequence()
             .filterNot { LRCX_EXTRA.containsMatchIn(it) }
             .joinToString("\n")
-        val synced = withoutCredits(applyOffset(LrcLib.parseLrc(cleaned), text), text)
+        val synced = withoutCredits(LrcLib.parseLrc(cleaned), text)
         if (synced.any { it.text.isNotBlank() }) return synced.withBackgroundVocals()
         val plain = text.lineSequence()
             .map { it.trim() }
@@ -274,6 +277,48 @@ object SidecarLyrics {
         if (plain.none { it.isNotEmpty() }) return null
         return plain.map { LyricLine(timeMs = 0L, text = it) }
     }
+
+    /** The `[offset:]` of the lyrics file last read for each song. */
+    private val fileOffsets = ConcurrentHashMap<String, Long>()
+
+    fun fileOffset(videoId: String): Long? = fileOffsets[videoId]
+
+    fun offsetOf(raw: String): Long? = OFFSET.find(raw)?.groupValues?.get(1)?.toLongOrNull()
+
+    /** [raw] with its `[offset:]` set to [ms] (added after the header tags if it had none). */
+    fun withOffset(raw: String, ms: Long): String {
+        val tag = "[offset:$ms]"
+        if (OFFSET.containsMatchIn(raw)) return raw.replace(OFFSET, tag)
+        val lines = raw.replace("\r\n", "\n").split('\n')
+        val headerEnd = lines.indexOfFirst { !TAG_LINE.matches(it.trim()) || it.isBlank() }.let { if (it < 0) lines.size else it }
+        return (lines.take(headerEnd) + tag + lines.drop(headerEnd)).joinToString("\n")
+    }
+
+    /** Lines as an .lrc file, with [offset] when not 0. */
+    fun toLrc(lines: List<LyricLine>, title: String?, artist: String?, offset: Long): String = buildString {
+        artist?.let { append("[ar:").append(it).append("]\n") }
+        title?.let { append("[ti:").append(it).append("]\n") }
+        if (offset != 0L) append("[offset:").append(offset).append("]\n")
+        lines.forEach { l ->
+            val ms = l.timeMs
+            append("[%02d:%02d.%02d]".format(java.util.Locale.ROOT, ms / 60_000, ms / 1000 % 60, ms / 10 % 100))
+            append(l.text).append('\n')
+        }
+    }
+
+    /** Where the lyrics file beside [videoId] is (or would go). */
+    fun besideUrl(videoId: String): String? {
+        val fileUrl = WebDavConfig.fileUrlOf(videoId) ?: return null
+        return remote[videoId] ?: (fileUrl.substringBeforeLast('.') + ".lrc")
+    }
+
+    /** Whether a lyrics file was found beside [videoId]. */
+    fun hasBeside(videoId: String): Boolean = videoId !in remoteMisses && WebDavConfig.isWebDavId(videoId)
+
+    /** A lyrics file was just written beside [videoId]. */
+    fun wroteBeside(videoId: String, url: String) = registerRemote(videoId, url)
+
+    suspend fun readBeside(videoId: String): String? = besideUrl(videoId)?.let { readRemote(it) }
 
     /** `[offset:500]`: the lyrics are 500 ms early (positive) or late (negative). */
     private val OFFSET = Regex("""(?im)^\s*\[offset:\s*([+-]?\d+)\s*]""")

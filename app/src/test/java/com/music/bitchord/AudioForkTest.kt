@@ -272,7 +272,24 @@ class AudioForkTest {
         assertTrue(texts.toString(), "I was looking lost, it was cold outside" in texts)
         assertTrue(texts.toString(), "The whiskey rocks how you caught my eye" in texts)
         assertTrue(texts.toString(), "Run on" in texts && "One line" in texts)
-        assertEquals(14_500L, lines.first { it.text.startsWith("I was looking") }.timeMs)
+        // The file's [offset:] is kept apart (the song's starting shift), not baked in.
+        assertEquals(15_000L, lines.first { it.text.startsWith("I was looking") }.timeMs)
+        assertEquals(500L, com.music.bitchord.data.lyrics.SidecarLyrics.offsetOf(raw))
+        val moved = com.music.bitchord.data.lyrics.SidecarLyrics.withOffset(raw, -250)
+        assertTrue(moved, "[offset:-250]" in moved && "[offset:500]" !in moved)
+        val added = com.music.bitchord.data.lyrics.SidecarLyrics.withOffset("[ti:X]\n[00:01.00]a", 300)
+        assertEquals("[ti:X]\n[offset:300]\n[00:01.00]a", added)
+    }
+
+    @Test
+    fun `romaji titles read back as kana`() {
+        val k = com.music.bitchord.data.lyrics.LyricNames
+        assertEquals("きみのなわ", k.kana("Kimi no Na wa"))
+        assertEquals("ろくとうせいのよる", k.kana("Rokutousei no Yoru"))
+        assertEquals("いっしょに", k.kana("Issho ni"))
+        assertEquals("しんでれら", k.kana("Shinderera"))
+        assertEquals(null, k.kana("Open Your Mind"))
+        assertEquals(null, k.kana("Swimmer"))
     }
 
     @Test

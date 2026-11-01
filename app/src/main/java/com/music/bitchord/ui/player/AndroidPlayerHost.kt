@@ -219,6 +219,11 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         main.post { Toast.makeText(app, message, Toast.LENGTH_SHORT).show() }
     }
 
+    override fun lyricsOffset(trackId: String) = com.music.bitchord.data.lyrics.LyricOffsets.flow(trackId)
+
+    override fun nudgeLyrics(trackId: String, lines: List<com.music.bitchord.data.lyrics.LyricLine>, deltaMs: Long) =
+        com.music.bitchord.data.lyrics.LyricOffsets.nudge(trackId, lines, deltaMs)
+
     override fun chooseSource(song: com.music.bitchord.data.model.Song) {
         com.music.bitchord.ui.components.NowPlayingSource.open(song)
     }

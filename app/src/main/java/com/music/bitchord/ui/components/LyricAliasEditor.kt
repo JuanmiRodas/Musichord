@@ -50,6 +50,14 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
     val current = remember(song.videoId) { LyricAliases.userNames(song.videoId, song.title, song.artist) }
     var titles by remember(song.videoId) { mutableStateOf(current.titles.joinToString("\n")) }
     var artists by remember(song.videoId) { mutableStateOf(current.artists.joinToString("\n")) }
+    // Nothing saved yet: start from the names the song goes by — both copies,
+    // romaji of Japanese, and the likely Japanese of a romaji title.
+    androidx.compose.runtime.LaunchedEffect(song.videoId) {
+        if (!current.isEmpty) return@LaunchedEffect
+        val s = com.music.bitchord.data.lyrics.LyricNames.suggest(song)
+        if (titles.isBlank()) titles = s.titles.joinToString("\n")
+        if (artists.isBlank()) artists = s.artists.joinToString("\n")
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.lyric_aliases_title)) },

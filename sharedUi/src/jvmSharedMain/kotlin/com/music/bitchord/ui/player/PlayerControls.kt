@@ -1886,8 +1886,10 @@ private fun ShimmerText(
 internal fun SourceLine(song: Song, modifier: Modifier = Modifier) {
     val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
     val snapshot = nerdStats?.takeIf { it.mediaId == null || it.mediaId == song.videoId }
-    val place = snapshot?.sourceName?.takeIf { it.isNotBlank() }
-        ?: NerdStats.sourceFor(song.videoId)
+    // A file of yours is read by a source with no name of its own ("Unknown").
+    fun known(name: String?) = name?.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) }
+    val place = known(snapshot?.sourceName)
+        ?: known(NerdStats.sourceFor(song.videoId))
         ?: when {
             song.videoId.startsWith("webdav:") -> "pCloud"
             song.localUri != null -> "Phone"
