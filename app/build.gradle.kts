@@ -199,6 +199,13 @@ android {
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
             // The three BouncyCastle jars (bcprov, bcutil, bcpkix) ship one licence between them.
             pickFirsts += setOf("META-INF/LICENSE.md", "META-INF/LICENSE.txt", "META-INF/NOTICE.md")
+            // BitChord Audio: Kuromoji's two jars (core and the IPADIC dictionary)
+            // ship the same licence and notice files, under every common name.
+            pickFirsts += setOf(
+                "META-INF/LICENSE", "META-INF/NOTICE", "META-INF/NOTICE.txt", "META-INF/DEPENDENCIES",
+                "LICENSE", "NOTICE", "LICENSE.md", "NOTICE.md", "LICENSE.txt", "NOTICE.txt",
+                "META-INF/AL2.0", "META-INF/LGPL2.1",
+            )
         }
     }
     buildFeatures {
