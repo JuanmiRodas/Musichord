@@ -1160,6 +1160,15 @@ private fun BitChordApp(
     val lyricsSourceOrder by AppSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
     val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
     val lyricAliasesVersion by com.music.bitchord.data.lyrics.LyricAliases.version.collectAsStateWithLifecycle()
+    // BitChord Audio: a file of yours shows (and sets) the heart of the liked song it is.
+    LaunchedEffect(player.song?.videoId) {
+        val song = player.song ?: return@LaunchedEffect
+        if (!com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(song.videoId)) return@LaunchedEffect
+        if (com.music.bitchord.data.LocalLikes.youTubeOf(song.videoId) != null) return@LaunchedEffect
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { com.music.bitchord.data.sources.SourceMap.likedSongFor(song) }.getOrNull()
+        }?.let { com.music.bitchord.data.LocalLikes.link(song, it) }
+    }
     val editedLyricsVersion by com.music.bitchord.data.lyrics.EditedLyrics.version.collectAsStateWithLifecycle()
     LaunchedEffect(
         player.song?.videoId, player.durationMs, syncedLyricsEnabled, lyricsSources,

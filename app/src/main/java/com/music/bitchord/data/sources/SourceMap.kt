@@ -102,6 +102,52 @@ object SourceMap {
         return library.mapTo(HashSet()) { it.videoId }.also { ids = library to it }
     }
 
+    private val counterparts = ConcurrentHashMap<String, String>()
+    private val noCounterpart: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    @Volatile
+    private var likedIndex: Pair<List<Song>, Map<String, List<Song>>>? = null
+
+    /**
+     * The Liked Music song a file of yours is, so playing the file — from
+     * search, a folder, anywhere — shows the song's heart. First the song the
+     * map plays this file for; else the liked song with the same title (in
+     * any spelling — romaji or Japanese) and artist, nearest in length. A
+     * different recording of a liked song (a live take, a tribute album)
+     * counts as that song.
+     */
+    fun likedSongFor(file: Song): Song? {
+        if (file.videoId in noCounterpart) return null
+        val liked = LikedMusicCache.load(LikedMusicCache.lastProfile)?.songs.orEmpty()
+        if (liked.isEmpty()) return null
+        counterparts[file.videoId]?.let { id -> liked.firstOrNull { it.videoId == id }?.let { return it } }
+        val mapped = entries.entries.firstOrNull { it.value.file == file.videoId }?.key
+        val byMap = mapped?.let { id -> liked.firstOrNull { it.videoId == id } }
+        val found = byMap ?: run {
+            val index = likedIndex?.takeIf { it.first.size == liked.size && it.first.firstOrNull()?.videoId == liked.firstOrNull()?.videoId }?.second ?: buildIndex(liked)
+            val keys = OwnFileMatcher.titleKeys(file.title) + runCatching { OwnFileMatcher.soundKeys(file.title) }.getOrDefault(emptySet())
+            val seconds = seconds(file.durationText)
+            keys.flatMap { index[it].orEmpty() }.distinct()
+                .filter { OwnFileMatcher.sameArtist(file.artist, it.artist) }
+                .minByOrNull { s -> seconds?.let { sec -> seconds(s.durationText)?.let { kotlin.math.abs(it - sec) } } ?: 999 }
+        }
+        if (found == null) noCounterpart += file.videoId else counterparts[file.videoId] = found.videoId
+        return found
+    }
+
+    private fun buildIndex(liked: List<Song>): Map<String, List<Song>> {
+        val map = HashMap<String, MutableList<Song>>()
+        liked.forEach { s ->
+            val keys = OwnFileMatcher.titleKeys(s.title) + runCatching { OwnFileMatcher.soundKeys(s.title) }.getOrDefault(emptySet())
+            keys.forEach { map.getOrPut(it) { ArrayList() }.add(s) }
+        }
+        likedIndex = liked to map
+        return map
+    }
+
+    private fun seconds(text: String?): Int? = text?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+        ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+
     fun fileSong(id: String): Song? = WebDavRepository.library().firstOrNull { it.videoId == id }
 
     fun record(videoId: String, file: Song?) {
