@@ -67,10 +67,14 @@ object JapaneseReading {
         }
     }
 
+    // Consonant spellings first (Hepburn → Kunrei), then vowels and particles:
+    // folded the other way round, "sha" lost its h to the "ha" rule before it
+    // could become "sya", and Jitensha no longer met Jitensya.
     private val FOLDS = listOf(
+        "tsu" to "tu", "shi" to "si", "chi" to "ti", "sha" to "sya", "shu" to "syu", "sho" to "syo",
+        "sh" to "sy", "ja" to "zya", "ju" to "zyu", "jo" to "zyo", "ji" to "zi", "fu" to "hu",
         "ou" to "o", "oo" to "o", "uu" to "u", "ii" to "i", "aa" to "a", "ee" to "e",
         "wo" to "o", "he" to "e", "ha" to "a", "wa" to "a",
-        "tsu" to "tu", "shi" to "si", "chi" to "ti", "sha" to "sya", "sh" to "sy", "ji" to "zi", "fu" to "hu",
     )
 
     /** Letters and digits of the romaji, with its spelling variants folded together. */
