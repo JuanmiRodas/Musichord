@@ -765,7 +765,7 @@
     <string name="pcloud_description">Your pCloud music folder and every folder inside it, with tags, covers and .lrc lyrics. Uses your pCloud email and password; accounts with two-step verification can\'t connect this way.</string>
     <string name="pcloud_email">pCloud email</string>
     <string name="pcloud_folder_hint">Folder, e.g. Music (blank for everything)</string>
-    <string name="lyric_aliases_title">Other names for lyrics</string>
+    <string name="lyric_aliases_title">Search lyrics</string>
     <string name="lyric_aliases_message">Lyrics for “%1$s” by %2$s are also searched by these names, before the ones shown.</string>
     <string name="lyric_aliases_titles">Titles, one per line</string>
     <string name="lyric_aliases_artists">Artists, one per line</string>
@@ -1375,4 +1375,12 @@
     <string name="no_audio_version">No audio version found for this video</string>
     <string name="no_video_version">No video version found for this song</string>
     <string name="version_switch_in_party">Everyone in Listen Together hears the same version</string>
+    <string name="lyric_search_message">Searches every lyrics source with these names (one per line; romaji and Japanese filled in). Tap the right lyrics to keep them for this song.</string>
+    <string name="lyric_search_all">Search all sources</string>
+    <string name="lyric_search_none">No source has lyrics for these names. Try another spelling.</string>
+    <string name="lyric_search_save_names">Save names</string>
+    <string name="lyric_search_word_synced">word by word</string>
+    <string name="lyric_search_timed">timed</string>
+    <string name="lyric_search_untimed">untimed</string>
+    <string name="lyric_search_automatic">Use automatic</string>
 </resources>

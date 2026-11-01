@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
@@ -304,6 +305,40 @@ object LyricsRepository {
      * source's, so the source that started it losing the race doesn't take
      * the other one's copy down with it; [cancel] ends whatever is left.
      */
+    /**
+     * BitChord Audio: every source's answer for one title and artist, for the
+     * listener to choose from — nothing is picked. All sources are asked at
+     * once (switched off or not) and each answer is handed to [onResult] as it
+     * arrives; a source that takes longer than [timeoutMs] is left out.
+     */
+    suspend fun everyAnswer(
+        videoId: String,
+        title: String,
+        artist: String,
+        durationMs: Long,
+        album: String? = null,
+        sources: List<LyricsSource> = LyricsSource.offered,
+        timeoutMs: Long = 15_000,
+        onResult: (Result) -> Unit,
+    ) = coroutineScope {
+        val documents = SharedDocuments(this)
+        try {
+            sources.map { source ->
+                async(Dispatchers.IO) {
+                    val lines = withTimeoutOrNull(timeoutMs) {
+                        runCatching {
+                            fetch(source, videoId, title.forLyricsSearch(), artist.artistForLyricsSearch(),
+                                durationMs, album, null, null, documents::get)
+                        }.getOrNull()
+                    }
+                    if (!lines.isNullOrEmpty() && lines.any { it.text.isNotBlank() }) onResult(result(source, lines))
+                }
+            }.awaitAll()
+        } finally {
+            documents.cancel()
+        }
+    }
+
     private class SharedDocuments(private val scope: CoroutineScope) {
         private val inFlight = ConcurrentHashMap<String, Deferred<String?>>()
 

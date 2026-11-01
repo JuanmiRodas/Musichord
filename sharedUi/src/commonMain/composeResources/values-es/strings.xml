@@ -21,8 +21,8 @@
     <string name="cast_connecting">Connecting…</string>
     <string name="cast_row_subtitle">Chromecast and Google Cast speakers</string>
     <string name="channel_count">%1$d canales</string>
-    <string name="lyrics_search_other_names">Buscar con otros nombres…</string>
-    <string name="lyrics_search_other_names_hint">Título original, romanizado o traducido para encontrar esta letra</string>
+    <string name="lyrics_search_other_names">Buscar letra…</string>
+    <string name="lyrics_search_other_names_hint">Busca en todas las fuentes por nombre en romaji o japonés y elige la letra correcta</string>
     <string name="choose_lyrics_provider">Elegir proveedor de letras</string>
     <string name="clear">Borrar</string>
     <string name="close_lyrics">Cerrar letra</string>

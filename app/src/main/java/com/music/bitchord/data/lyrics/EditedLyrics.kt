@@ -29,6 +29,7 @@ object EditedLyrics {
     private const val REMOTE_DIR = ".bitchord-audio/lyrics/"
 
     private var dir: File? = null
+    private val WORD_STAMP = Regex("""<\d{1,2}:\d{2}""")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _version = MutableStateFlow(0)
 
@@ -62,11 +63,37 @@ object EditedLyrics {
             misses += videoId
             return null
         }
-        return LrcLib.parseLrc(text).takeIf { it.isNotEmpty() }
+        val lines = if (WORD_STAMP.containsMatchIn(text)) EnhancedLrc.parse(text) else LrcLib.parseLrc(text)
+        return lines.takeIf { it.isNotEmpty() }
     }
 
-    fun save(song: Song, lines: List<LyricLine>) {
-        val text = SidecarLyrics.toLrc(lines, song.title, song.artist, 0)
+    /** Whether lyrics were timed or picked for [videoId] on this phone. */
+    fun has(videoId: String): Boolean = dir?.let { File(it, name(videoId)).isFile } == true
+
+    /** Back to the automatic lookup for [videoId] (here and in pCloud). */
+    fun clear(videoId: String) {
+        dir?.let { File(it, name(videoId)).delete() }
+        misses += videoId
+        _version.value += 1
+        scope.launch {
+            remoteDir()?.let { d ->
+                // Emptied rather than deleted: an empty file reads as none.
+                runCatching {
+                    WebDavClient.putFile(d + name(videoId), ByteArray(0).inputStream(), 0L, "text/plain",
+                        AppSettings.webdavUsername.value, AppSettings.webdavPassword.value, overwrite = true)
+                }
+            }
+        }
+    }
+
+    /** Lyrics picked from the search: kept for the song, the .lrc beside your file left alone. */
+    fun choose(song: Song, lines: List<LyricLine>) = save(song, lines, besideFile = false)
+
+    fun save(song: Song, lines: List<LyricLine>, besideFile: Boolean = true) {
+        // Word timings kept (enhanced LRC) in the app's copy; the .lrc beside
+        // your file stays plain LRC, which every player reads.
+        val plain = SidecarLyrics.toLrc(lines, song.title, song.artist, 0)
+        val text = if (lines.any { it.words.isNotEmpty() }) lines.toEnhancedLrc() else plain
         runCatching { dir?.let { File(it, name(song.videoId)).writeText(text) } }
         misses -= song.videoId
         LyricOffsets.reset(song.videoId)
@@ -75,15 +102,17 @@ object EditedLyrics {
             val u = AppSettings.webdavUsername.value
             val p = AppSettings.webdavPassword.value
             val bytes = text.toByteArray(Charsets.UTF_8)
+            val plainBytes = plain.toByteArray(Charsets.UTF_8)
             runCatching {
                 remoteDir()?.let { d ->
                     WebDavClient.ensureCollection(d, u, p)
                     WebDavClient.putFile(d + name(song.videoId), bytes.inputStream(), bytes.size.toLong(), "text/plain", u, p, overwrite = true)
                 }
                 // Beside your file too, as its .lrc.
+                if (!besideFile) return@runCatching
                 val file = if (WebDavConfig.isWebDavId(song.videoId)) song.videoId else SourceMap.lookup(song.videoId)?.file
                 file?.let { SidecarLyrics.besideUrl(it) }?.let { url ->
-                    WebDavClient.putFile(url, bytes.inputStream(), bytes.size.toLong(), "text/plain", u, p, overwrite = true).getOrThrow()
+                    WebDavClient.putFile(url, plainBytes.inputStream(), plainBytes.size.toLong(), "text/plain", u, p, overwrite = true).getOrThrow()
                     SidecarLyrics.wroteBeside(file, url)
                     TrackLog.d(TAG, "timed lyrics written to ${url.substringAfterLast('/')}")
                 }
