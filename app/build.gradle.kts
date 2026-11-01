@@ -364,6 +364,8 @@ dependencies {
 
     // ---- YouTube stream extraction: live-benchmarked client catalog + cipher tiers ----
     implementation("com.github.MetrolistGroup.innertubex:innertubex-android:v0.7.0")
+    // BitChord Audio: kanji readings, to match Japanese titles with romaji file names.
+    implementation("com.atilika.kuromoji:kuromoji-ipadic:0.9.0")
 
     // ---- Stream resolution: NewPipe solves YouTube's signature + `n` throttling ----
     // Pinned to v0.26.3, not the newer v0.26.4: v0.26.4's player-JS parser fails with

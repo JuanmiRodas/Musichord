@@ -54,6 +54,25 @@ object OwnFileMatcher {
         return keysOf(title) + (if (bare != title && bare.isNotBlank()) keysOf(bare) else emptySet())
     }
 
+    /**
+     * How the title sounds, as romaji keys ("~" + [JapaneseReading.soundKey]):
+     * "暁の車" and "Akatsuki no Kuruma" give the same one. Empty while the
+     * kanji dictionary is loading.
+     */
+    fun soundKeys(title: String): Set<String> {
+        val bare = title.replace(TILDE, " ").replace(NOTE, " ").replace(GUEST, "").trim()
+        val names = (listOf(bare) + bare.split(SEPARATOR) +
+            NOTE.findAll(title).map { it.value.trim().trim('(', ')', '[', ']', '（', '）', '【', '】') }
+                .filter { inner -> versionNotes("($inner)").isEmpty() })
+            .map { it.trim() }.filter { it.isNotEmpty() }
+        return names.mapNotNull { n -> JapaneseReading.romaji(n)?.let(JapaneseReading::soundKey) }
+            .filter { it.length >= 4 }
+            .map { "~$it" }
+            .toSet()
+    }
+
+    private fun allKeys(title: String): Set<String> = titleKeys(title) + soundKeys(title)
+
     private fun keysOf(title: String): Set<String> {
         val base = title.replace(NOTE, " ").replace(GUEST, "").trim()
         val names = buildList {
@@ -102,12 +121,12 @@ object OwnFileMatcher {
     /** The library by every name its songs go by; rebuilt when the library changes. */
     private fun index(): Map<String, List<Song>> {
         val library = WebDavRepository.library()
-        val names = LyricAliases.version.value
+        val names = LyricAliases.version.value * 2 + if (JapaneseReading.ready) 1 else 0
         indexed?.let { (of, map) -> if (of === library && indexedNames == names) return map }
         val map = HashMap<String, MutableList<Song>>()
         for (song in library) {
             val titles = LyricAliases.queries(song.videoId, song.title, song.artist).map { it.title } + song.title
-            titles.flatMap(::titleKeys).toSet().forEach { k -> map.getOrPut(k) { mutableListOf() } += song }
+            titles.flatMap(::allKeys).toSet().forEach { k -> map.getOrPut(k) { mutableListOf() } += song }
         }
         indexed = library to map
         indexedNames = names
@@ -137,7 +156,7 @@ object OwnFileMatcher {
         if (map.isEmpty()) return emptyList()
         // The song's other names too: your romaji tables pair "星屑" with "Hoshikuzu".
         val wanted = (listOf(title) + LyricAliases.queries("", title, artist).map { it.title })
-            .flatMap(::titleKeys).toSet()
+            .flatMap(::allKeys).toSet()
         val found = wanted.flatMap { map[it].orEmpty() }.distinctBy { it.videoId }
         return found
             .filter { file ->

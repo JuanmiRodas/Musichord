@@ -225,4 +225,13 @@ class AudioForkTest {
         val v = com.music.bitchord.data.sources.OwnFileMatcher.titleKeys("Swimmer (TV Live)")
         assertTrue(v.toString(), "tvlive" !in v)
     }
+
+    @Test
+    fun `romaji spellings fold together`() {
+        val j = com.music.bitchord.data.sources.JapaneseReading
+        assertEquals(j.soundKey("Shinkokyu"), j.soundKey("Shinkokyuu"))
+        assertEquals(j.soundKey("Jitensya"), j.soundKey("Jitensha"))
+        assertEquals(j.soundKey("Kaze no machi he"), j.soundKey("Kaze no machi e"))
+        assertEquals(j.soundKey(com.music.bitchord.data.sources.TrackMatcher.romajiOf("あかつきのくるま")), j.soundKey("Akatsuki no Kuruma"))
+    }
 }

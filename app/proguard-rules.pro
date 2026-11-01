@@ -88,3 +88,8 @@
 -dontwarn org.conscrypt.**
 -dontwarn com.android.org.conscrypt.**
 -dontwarn io.github.muntashirakon.adb.**
+
+# BitChord Audio: Kuromoji loads its dictionary as resources relative to its
+# own classes, so they keep their names.
+-keep class com.atilika.kuromoji.** { *; }
+-dontwarn com.atilika.kuromoji.**

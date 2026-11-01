@@ -103,6 +103,7 @@ object WebDavRepository {
         LibraryFolders.init(context)
         com.music.bitchord.data.sources.PreferredSource.init(context)
         com.music.bitchord.data.sources.ArtistLinks.init(context)
+        if (isConfigured()) com.music.bitchord.data.sources.JapaneseReading.warmUp()
         // The lyrics folders' file list as last seen, so lyrics are found
         // before the library has been opened this session.
         runCatching { lyricsIndexFile?.takeIf { it.isFile }?.readLines()?.filter { it.isNotBlank() } }
