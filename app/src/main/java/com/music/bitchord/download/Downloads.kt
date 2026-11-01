@@ -1407,6 +1407,7 @@ object Downloads {
                             ?.stream
                     },
                     budgetMs = SOURCE_LOOKUP_MS,
+                    videoId = track.videoId,
                 )
             } catch (e: CancellationException) {
                 throw e

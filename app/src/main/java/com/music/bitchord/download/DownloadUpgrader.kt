@@ -76,7 +76,7 @@ object DownloadUpgrader {
             val seconds = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
                 ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
             val target = TrackMatcher.Target(title = song.title, artist = song.artist, album = song.albumName, durationSec = seconds)
-            val found = runCatching { SourceResolver.forDownload(target) }.getOrNull() ?: continue
+            val found = runCatching { SourceResolver.forDownload(target, videoId = song.videoId) }.getOrNull() ?: continue
             val had = savedKbps(song.downloadFormat) ?: 0
             val better = found.format.isLossless == true || (found.format.kbps ?: 0) >= had + MIN_GAIN_KBPS
             if (!better) continue

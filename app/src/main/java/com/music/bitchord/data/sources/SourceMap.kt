@@ -35,8 +35,25 @@ object SourceMap {
     private const val FILE = "source_map.json"
     private const val REMOTE_DIR = ".bitchord-audio"
 
-    /** [file] null: no file of yours is this song (as of library [gen]). */
-    data class Entry(val file: String?, val kbps: Int, val lossless: Boolean, val gen: Int)
+    /**
+     * [file] null: no file of yours is this song (as of library [gen]).
+     * [saavn]: JioSaavn's copy (a track key, its 320 kbps tier), once
+     * [saavnChecked]; null after a check means JioSaavn hasn't it.
+     */
+    data class Entry(
+        val file: String?,
+        val kbps: Int,
+        val lossless: Boolean,
+        val gen: Int,
+        val saavn: String? = null,
+        val saavnChecked: Boolean = false,
+    )
+
+    /** JioSaavn's tier for every row it returns: 320 kbps AAC. */
+    const val SAAVN_KBPS = 320
+
+    /** The raw entry, JioSaavn part included, without the library checks. */
+    fun entry(videoId: String): Entry? = entries[videoId]
 
     private val entries = ConcurrentHashMap<String, Entry>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -87,7 +104,11 @@ object SourceMap {
     fun record(videoId: String, file: Song?) {
         if (!WebDavConfig.isConfigured(AppSettings.webdavUrl.value)) return
         val rank = file?.let { OwnFileMatcher.qualityRank(it) } ?: 0
-        entries[videoId] = Entry(file?.videoId, if (rank >= 9_000) 0 else rank, rank >= 9_000, gen())
+        val old = entries[videoId]
+        entries[videoId] = Entry(
+            file?.videoId, if (rank >= 9_000) 0 else rank, rank >= 9_000, gen(),
+            saavn = old?.saavn, saavnChecked = old?.saavnChecked == true,
+        )
     }
 
     /**
@@ -101,7 +122,10 @@ object SourceMap {
             val songs = LikedMusicCache.load(LikedMusicCache.lastProfile)?.songs.orEmpty()
             if (songs.isEmpty() || WebDavRepository.library().isEmpty()) return@launch
             val todo = songs.filter { lookup(it.videoId) == null }
-            if (todo.isEmpty()) return@launch
+            if (todo.isEmpty()) {
+                fillSaavn(songs)
+                return@launch
+            }
             // Japanese titles are matched by reading; wait for the dictionary.
             JapaneseReading.tokenizerNow()
             TrackLog.d(TAG, "source map: matching ${todo.size} of ${songs.size} liked songs")
@@ -115,7 +139,51 @@ object SourceMap {
             save()
             upload()
             TrackLog.d(TAG, "source map: ${entries.count { it.value.file != null }} of ${entries.size} songs have a file of yours")
+            fillSaavn(songs)
         }
+    }
+
+    /**
+     * JioSaavn's copy of each liked song, looked up once: on Wi-Fi, a song
+     * every half second or so, saved as it goes and synced to pCloud at the
+     * end. Strict, because JioSaavn files different recordings under one
+     * name: the same title (any of its names), the artist, and the length to
+     * 3 seconds.
+     */
+    private suspend fun fillSaavn(songs: List<Song>) {
+        if (!AppSettings.jioSaavnForDownloads.value) return
+        val saavn = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }
+            ?.let { SourceRegistry.instance(it.id) } ?: return
+        val todo = songs.filter { entries[it.videoId]?.saavnChecked != true }
+        if (todo.isEmpty()) return
+        TrackLog.d(TAG, "source map: looking up ${todo.size} liked songs on JioSaavn")
+        var found = 0
+        todo.forEachIndexed { i, s ->
+            if (AppSettings.meteredConnection.value != false) {
+                save(); upload(); return
+            }
+            val sec = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+                ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+            val target = TrackMatcher.Target(title = s.title, artist = s.artist, album = s.albumName, durationSec = sec)
+            val query = TrackMatcher.queries(target).firstOrNull() ?: "${s.title} ${s.artist}"
+            val rows = runCatching { saavn.search(query, limit = 8) }.getOrNull() ?: return@forEachIndexed
+            val keys = OwnFileMatcher.titleKeys(s.title)
+            val hit = (TrackMatcher.ranked(rows, target) + rows).firstOrNull { row ->
+                val rowSec = row.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+                    ?.fold(0) { acc, p -> acc * 60 + p }
+                sec != null && rowSec != null && kotlin.math.abs(sec - rowSec) <= 3 &&
+                    OwnFileMatcher.sameArtist(s.artist, row.artist) &&
+                    OwnFileMatcher.titleKeys(row.title).any { it in keys }
+            }
+            if (hit != null) found++
+            val old = entries[s.videoId] ?: Entry(null, 0, false, gen())
+            entries[s.videoId] = old.copy(saavn = hit?.videoId, saavnChecked = true)
+            if (i % 100 == 99) save()
+            kotlinx.coroutines.delay(400)
+        }
+        save()
+        upload()
+        TrackLog.d(TAG, "source map: JioSaavn has $found of ${todo.size} liked songs checked")
     }
 
     private fun read(text: String) = runCatching {
@@ -127,6 +195,8 @@ object SourceMap {
                 kbps = e.optInt("k"),
                 lossless = e.optBoolean("l"),
                 gen = e.optInt("g"),
+                saavn = if (e.has("s") && !e.isNull("s")) e.getString("s") else null,
+                saavnChecked = e.optBoolean("sc"),
             )
         }
     }
@@ -139,6 +209,8 @@ object SourceMap {
                 if (e.kbps > 0) put("k", e.kbps)
                 if (e.lossless) put("l", true)
                 put("g", e.gen)
+                e.saavn?.let { put("s", it) }
+                if (e.saavnChecked) put("sc", true)
             })
         }
         return o.toString()

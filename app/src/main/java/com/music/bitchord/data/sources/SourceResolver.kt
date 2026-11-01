@@ -678,7 +678,11 @@ object SourceResolver {
         request: StreamRequest = requestForDownload(),
         keep: suspend (SourceStream) -> SourceStream? = { it },
         budgetMs: Long? = null,
+        videoId: String? = null,
     ): SourceStream? = coroutineScope {
+        // BitChord Audio: a liked song worked out before (see SourceMap) —
+        // your file or JioSaavn's 320 kbps, whichever is better, with no search.
+        videoId?.let { id -> runCatching { mappedForDownload(id, keep) }.getOrNull() }?.let { return@coroutineScope it }
         // BitChord Audio: your own file joins the comparison, found by the
         // own-file matcher, and the best bitrate wins — lossless first, your
         // file on a tie (it is the exact copy). Against YouTube alone it has
@@ -693,6 +697,35 @@ object SourceResolver {
             }.also { if (it != null) TrackLog.d(TAG, "download: '${target.title}' from your library at ${it.format.summary}") }
             isBetter(other.format, mine.format) -> other
             else -> mine.also { TrackLog.d(TAG, "download: '${target.title}' from your library at ${it.format.summary}") }
+        }
+    }
+
+    /**
+     * The download from the source map: lossless of yours first, then the
+     * higher bitrate of your file and JioSaavn's copy, your file on a tie.
+     * Null when the map doesn't know the song, or a choice by hand applies —
+     * the live comparison then decides.
+     */
+    private suspend fun mappedForDownload(
+        videoId: String,
+        keep: suspend (SourceStream) -> SourceStream?,
+    ): SourceStream? {
+        val e = SourceMap.entry(videoId) ?: return null
+        if (e.file == null && !e.saavnChecked) return null
+        val own = e.file?.takeIf { SourceMap.lookup(videoId)?.file == it }
+        val ownKbps = if (own != null && e.lossless) Int.MAX_VALUE else if (own != null) e.kbps else 0
+        val saavnKbps = if (e.saavn != null && AppSettings.jioSaavnForDownloads.value) SourceMap.SAAVN_KBPS else 0
+        if (ownKbps == 0 && saavnKbps == 0) return null
+        return if (ownKbps >= saavnKbps) {
+            val source = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.MY_LIBRARY }
+                ?.let { SourceRegistry.instance(it.id) } ?: return null
+            source.stream(own ?: return null, StreamRequest.Best)?.let { keep(it.copy(sourceConfigId = it.sourceConfigId ?: source.configId)) }
+                ?.also { TrackLog.d(TAG, "download: from your library (mapped) at ${it.format.summary}") }
+        } else {
+            val (configId, trackId) = SourceRegistry.parseTrackKey(e.saavn!!) ?: return null
+            val source = SourceRegistry.instance(configId) ?: return null
+            source.stream(trackId, StreamRequest.Best)?.let { keep(it.copy(sourceConfigId = it.sourceConfigId ?: configId)) }
+                ?.also { TrackLog.d(TAG, "download: from JioSaavn (mapped) at ${it.format.summary}") }
         }
     }
 
