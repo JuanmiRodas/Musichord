@@ -55,6 +55,11 @@ object SettingsSync {
         "bitchord_original_versions",
         "bitchord_merged_choices",
         "bitchord_library_folders",
+        // BitChord Audio: your per-song source picks, learnt artist names and
+        // likes kept on the device.
+        "bitchord_source_choices",
+        "bitchord_artist_links",
+        "bitchord_local_likes",
     )
 
     /** Files in the app's own storage that follow you. */

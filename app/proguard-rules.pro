@@ -93,3 +93,12 @@
 # own classes, so they keep their names.
 -keep class com.atilika.kuromoji.** { *; }
 -dontwarn com.atilika.kuromoji.**
+
+# BitChord Audio: commons-compress (bzip2 for update patches) names optional
+# codecs it is never asked for here.
+-dontwarn org.tukaani.xz.**
+-dontwarn com.github.luben.zstd.**
+-dontwarn org.brotli.dec.**
+-dontwarn org.objectweb.asm.**
+-dontwarn org.osgi.**
+-dontwarn org.apache.commons.compress.**

@@ -54,7 +54,7 @@ internal class OwnFirst(
     private fun fileFor(song: Song): Song? {
         val seconds = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
             ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
-        return when (val v = runCatching { OwnFileMatcher.decide(song.title, song.artist, seconds, song.albumName) }.getOrNull()) {
+        return when (val v = runCatching { OwnFileMatcher.decide(song.title, song.artist, seconds, song.albumName, song.videoId) }.getOrNull()) {
             is OwnFileMatcher.Play -> if (v.file.videoId == song.videoId) null else v.file.also {
                 com.music.bitchord.data.LocalLikes.link(it, song)
             }.copy(

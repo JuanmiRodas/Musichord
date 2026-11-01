@@ -657,6 +657,7 @@ private fun Song.ownFilePlaysInstead(): Boolean = runCatching {
             artist,
             durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 },
             albumName,
+            videoId,
         )
 }.getOrDefault(false)
 

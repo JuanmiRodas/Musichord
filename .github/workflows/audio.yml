@@ -98,6 +98,30 @@ jobs:
           name: BitChord-Audio-${{ github.run_number }}
           path: out/*.apk
 
+      # Patch updates: the new APK as a binary patch (bsdiff) from each of the
+      # last three releases, plus its SHA-256. The app rebuilds the APK from
+      # the one it is installed from and checks it against the hash, falling
+      # back to the full APK when there is no patch from its version.
+      - name: Make update patches
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get install -y -qq bsdiff >/dev/null
+          v="1.9.${AUDIO_BUILD_NUMBER}"
+          new="out/BitChord-v${v}_arm64-v8a.apk"
+          sha256sum "$new" | cut -d' ' -f1 > "${new}.sha256"
+          for tag in $(gh api "repos/${{ github.repository }}/releases?per_page=3" --jq '.[].tag_name'); do
+            rm -rf old && mkdir old
+            gh release download "$tag" -R "${{ github.repository }}" -p '*_arm64-v8a.apk' -D old || continue
+            o=$(ls old/*.apk 2>/dev/null | head -1)
+            [ -f "$o" ] || continue
+            patch="out/BitChord-v${v}_arm64-v8a-from-${tag}.bspatch"
+            bsdiff "$o" "$new" "$patch"
+            echo "::notice::Update patch from ${tag}: $(( $(stat -c%s "$patch") / 1024 )) KB instead of $(( $(stat -c%s "$new") / 1024 )) KB"
+          done
+          ls -l out
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -105,4 +129,7 @@ jobs:
           name: BitChord Audio 1.9.${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           body: ${{ github.event.head_commit.message }}
-          files: out/*.apk
+          files: |
+            out/*.apk
+            out/*.sha256
+            out/*.bspatch

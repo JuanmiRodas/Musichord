@@ -254,7 +254,7 @@ object OwnFileMatcher {
     data class Play(val file: Song) : Verdict
     data class Keep(val reason: String) : Verdict
 
-    fun decide(title: String, artist: String, durationSec: Int?, album: String? = null): Verdict {
+    fun decide(title: String, artist: String, durationSec: Int?, album: String? = null, videoId: String? = null): Verdict {
         // A copy picked by hand from another source holds without pCloud.
         (PreferredSource.get(title, artist) as? PreferredSource.Chosen)?.let { return Play(it.song) }
         if (!WebDavRepository.isConfigured()) return Keep("pCloud not connected")
@@ -268,8 +268,16 @@ object OwnFileMatcher {
         }
         val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return Keep("Settings: YouTube first")
-        val all = matches(title, artist, durationSec, album)
-        val best = all.firstOrNull() ?: return Keep("no file of yours matches (${library.size} songs in your library)")
+        // Worked out before for this song (see SourceMap): no matching again.
+        val known = videoId?.let(SourceMap::lookup)
+        val best = if (known != null) {
+            known.file?.let(SourceMap::fileSong)
+                ?: return Keep("no file of yours matches (${library.size} songs in your library)")
+        } else {
+            matches(title, artist, durationSec, album).firstOrNull()
+                .also { found -> videoId?.let { SourceMap.record(it, found) } }
+                ?: return Keep("no file of yours matches (${library.size} songs in your library)")
+        }
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return Play(best)
         val rank = qualityRank(best, durationSec)
         return if (rank >= RemoteLibrarySource.MIN_KBPS) {
@@ -279,19 +287,8 @@ object OwnFileMatcher {
         }
     }
 
-    fun beatsYouTube(title: String, artist: String, durationSec: Int?, album: String? = null): Boolean {
-        when (val choice = PreferredSource.get(title, artist)) {
-            PreferredSource.YouTube -> return false
-            is PreferredSource.File -> return true
-            is PreferredSource.Chosen -> return true
-            null -> Unit
-        }
-        val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value
-        if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return false
-        val best = matches(title, artist, durationSec, album).firstOrNull() ?: return false
-        if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return true
-        return qualityRank(best, durationSec) >= RemoteLibrarySource.MIN_KBPS
-    }
+    fun beatsYouTube(title: String, artist: String, durationSec: Int?, album: String? = null, videoId: String? = null): Boolean =
+        decide(title, artist, durationSec, album, videoId) is Play
 
     private val KBPS = Regex("""(\d{2,4})\s*kbps""", RegexOption.IGNORE_CASE)
 

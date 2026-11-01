@@ -38,6 +38,10 @@ object AppUpdateChecker {
         val apkUrl: String?,
         /** The release's own Markdown body, shown as this update's "what's new". */
         val notes: String?,
+        /** BitChord Audio: a patch from the version installed now, when the release has one. */
+        val patchUrl: String? = null,
+        /** The full APK's SHA-256, which a patched APK has to match before it is installed. */
+        val sha256Url: String? = null,
     )
 
     private const val CACHE_SUBDIR = "updates"
@@ -78,7 +82,13 @@ object AppUpdateChecker {
             val notes = release["body"]?.jsonPrimitive?.contentOrNull
             val latest = tag.removePrefix("v")
             if (isNewer(latest, BuildConfig.VERSION_NAME)) {
-                _available.value = UpdateInfo(latest, url, apkUrl, notes)
+                val assets = assetUrls(release)
+                val apkName = apkUrl?.substringAfterLast('/')
+                val patchUrl = apkName?.let { name ->
+                    assets["${name.removeSuffix(".apk")}-from-v${BuildConfig.VERSION_NAME}.bspatch"]
+                }
+                val shaUrl = apkName?.let { assets["$it.sha256"] }
+                _available.value = UpdateInfo(latest, url, apkUrl, notes, patchUrl, shaUrl)
             }
         }
     }
@@ -108,6 +118,14 @@ object AppUpdateChecker {
      * [UpdateInfo.apkUrl] null and the UI falls back to opening the releases
      * page.
      */
+    private fun assetUrls(release: JsonObject): Map<String, String> = runCatching {
+        release["assets"]?.jsonArray.orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { asset ->
+            val name = asset["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val url = asset["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            name to url
+        }.toMap()
+    }.getOrDefault(emptyMap())
+
     private fun apkAssetUrl(release: JsonObject): String? = runCatching {
         val apks = release["assets"]?.jsonArray
             ?.mapNotNull { it as? JsonObject }
@@ -137,6 +155,22 @@ object AppUpdateChecker {
         val url = info.apkUrl ?: return@withContext
         downloadCancelled = false
         _download.value = DownloadState.Downloading(0f)
+
+        // BitChord Audio: a patch from the installed APK first — a few MB
+        // instead of the whole app. Anything off (no patch, a different
+        // installed build, a hash that doesn't match) falls back to the full APK.
+        if (info.patchUrl != null && info.sha256Url != null) {
+            val patched = runCatching { downloadByPatch(context, info) }.getOrNull()
+            if (downloadCancelled) {
+                _download.value = DownloadState.Idle
+                return@withContext
+            }
+            if (patched != null) {
+                _download.value = DownloadState.Ready(patched)
+                return@withContext
+            }
+            _download.value = DownloadState.Downloading(0f)
+        }
 
         runCatching {
             val dir = File(context.cacheDir, CACHE_SUBDIR).apply { mkdirs() }
@@ -179,6 +213,65 @@ object AppUpdateChecker {
                 DownloadState.Failed(error.message ?: "Download failed")
             }
         }
+    }
+
+    private fun fetchTo(url: String, target: File, progress: (Float) -> Unit) {
+        val request = Request.Builder().url(url).build()
+        Http.client.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "Download failed: HTTP ${response.code}" }
+            val body = response.body ?: error("Empty download body")
+            val total = body.contentLength().takeIf { it > 0 }
+            body.byteStream().use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var readTotal = 0L
+                    while (true) {
+                        if (downloadCancelled) error("cancelled")
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        readTotal += read
+                        total?.let { progress((readTotal.toFloat() / it).coerceIn(0f, 1f)) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun sha256(file: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(256 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /** The update rebuilt from the installed APK and a patch, or null when that can't be done exactly. */
+    private fun downloadByPatch(context: Context, info: UpdateInfo): File? {
+        val dir = File(context.cacheDir, CACHE_SUBDIR).apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val expected = run {
+            val f = File(dir, "expected.sha256")
+            fetchTo(info.sha256Url ?: return null, f) {}
+            f.readText().trim().substringBefore(' ').lowercase()
+        }
+        val patch = File(dir, "update.bspatch")
+        fetchTo(info.patchUrl ?: return null, patch) { _download.value = DownloadState.Downloading(it * 0.8f) }
+        val installed = File(context.applicationInfo.sourceDir)
+        val target = File(dir, "bitchord-${info.version}.apk")
+        BsPatch.apply(installed, patch, target)
+        patch.delete()
+        _download.value = DownloadState.Downloading(0.95f)
+        if (sha256(target) != expected) {
+            target.delete()
+            return null
+        }
+        return target
     }
 
     /** Stops an in-flight download; the next read loop sees this and bails. */

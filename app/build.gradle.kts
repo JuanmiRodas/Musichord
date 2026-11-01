@@ -194,6 +194,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging {
+        // BitChord Audio: code stored uncompressed in the APK, so an update's
+        // binary patch only carries what changed — a compressed dex differs
+        // all through after any change, which made patches nearly full size.
+        dex { useLegacyPackaging = false }
         resources {
             // SMBJ's BouncyCastle and jspecify both ship this descriptor.
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
@@ -374,6 +378,8 @@ dependencies {
     implementation("com.github.MetrolistGroup.innertubex:innertubex-android:v0.7.0")
     // BitChord Audio: kanji readings, to match Japanese titles with romaji file names.
     implementation("com.atilika.kuromoji:kuromoji-ipadic:0.9.0")
+    // BitChord Audio: bzip2, for applying update patches (bsdiff).
+    implementation("org.apache.commons:commons-compress:1.27.1")
 
     // ---- Stream resolution: NewPipe solves YouTube's signature + `n` throttling ----
     // Pinned to v0.26.3, not the newer v0.26.4: v0.26.4's player-JS parser fails with

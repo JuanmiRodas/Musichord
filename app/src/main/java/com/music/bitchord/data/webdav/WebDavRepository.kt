@@ -51,6 +51,10 @@ object WebDavRepository {
     private const val TAG_READ_PARALLELISM = 4
     private const val MPEG_PROBE_BYTES = 16 * 1024
     private const val STARTUP_REFRESH_DELAY_MS = 20_000L
+    private const val STARTUP_REFRESH_EVERY_MS = 12L * 60 * 60 * 1000
+
+    @Volatile
+    private var startPrefs: android.content.SharedPreferences? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var tagJob: Job? = null
@@ -104,6 +108,8 @@ object WebDavRepository {
         com.music.bitchord.data.sources.PreferredSource.init(context)
         com.music.bitchord.data.sources.ArtistLinks.init(context)
         com.music.bitchord.data.LocalLikes.init(context)
+        com.music.bitchord.data.sources.SourceMap.init(context)
+        startPrefs = context.getSharedPreferences("bitchord_library_refresh", Context.MODE_PRIVATE)
         if (isConfigured()) com.music.bitchord.data.sources.JapaneseReading.warmUp()
         // The lyrics folders' file list as last seen, so lyrics are found
         // before the library has been opened this session.
@@ -116,7 +122,15 @@ object WebDavRepository {
         // playback without the library page having to be opened.
         scope.launch {
             kotlinx.coroutines.delay(STARTUP_REFRESH_DELAY_MS)
-            if (isConfigured()) runCatching { getSongs() }
+            if (!isConfigured()) return@launch
+            // At most twice a day: the saved listing serves in between, and
+            // the liked-songs map only needs the songs added since.
+            val last = startPrefs?.getLong("listed_at", 0L) ?: 0L
+            if (System.currentTimeMillis() - last > STARTUP_REFRESH_EVERY_MS) {
+                runCatching { getSongs() }
+            } else {
+                com.music.bitchord.data.sources.SourceMap.fill()
+            }
         }
     }
 
@@ -274,18 +288,9 @@ object WebDavRepository {
         inMemory = songs
         savedFile?.let { SongListStore.save(it, songs) }
         readMissingTags(listing.audio, username, password)
-        // Artist links are learnt from album agreement — walk Liked Music once
-        // so they are known before its songs come up.
-        scope.launch {
-            runCatching {
-                com.music.bitchord.data.LikedMusicCache.load(com.music.bitchord.data.LikedMusicCache.lastProfile)
-                    ?.songs?.forEach { s ->
-                        val sec = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
-                            ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
-                        com.music.bitchord.data.sources.OwnFileMatcher.matches(s.title, s.artist, sec, s.albumName)
-                    }
-            }
-        }
+        startPrefs?.edit()?.putLong("listed_at", System.currentTimeMillis())?.apply()
+        // Liked Music's best sources: only songs not worked out before.
+        com.music.bitchord.data.sources.SourceMap.fill()
         songs
     }
 
