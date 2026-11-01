@@ -242,6 +242,8 @@ object OwnFileMatcher {
             // A live take, a TV-size cut, a karaoke or remix isn't the song
             // asked for unless its title says so too.
             .filter { file -> VERSION_WORDS.none { it in versionNotes(file.title) && it !in versionNotes(title) } }
+            // A live album, a tribute or covers album holds other recordings.
+            .filter { file -> !otherRecording(title, album, file) }
             // The same album first, then quality; audio files ahead of video files.
             .sortedWith(
                 compareByDescending<Song> { if (sameAlbum(album, it.albumName)) 1 else 0 }
@@ -286,6 +288,27 @@ object OwnFileMatcher {
         }
         return prev[b.length]
     }
+
+    /**
+     * Whether [file] is another recording than the song [title] from [album]:
+     * its album is a live, tribute, cover, remix, acoustic or karaoke release
+     * and the song's own title and album say nothing of the kind.
+     */
+    fun otherRecording(title: String, album: String?, file: Song): Boolean {
+        val fileAlbum = file.albumName?.lowercase(Locale.ROOT) ?: return false
+        val wanted = (title + " " + album.orEmpty()).lowercase(Locale.ROOT)
+        return ALBUM_VERSION.any { it.containsMatchIn(fileAlbum) && !it.containsMatchIn(wanted) }
+    }
+
+    private val ALBUM_VERSION = listOf(
+        """\blive\b|ライブ|ライヴ|\bin concert\b|\ben vivo\b|\bdirecto\b|\bunplugged\b""",
+        """\btribute\b|トリビュート""",
+        """\bcovers?\b|カバー|カヴァー""",
+        """\bremix(es)?\b|リミックス""",
+        """\bacoustic\b|アコースティック""",
+        """\bkaraoke\b|カラオケ|\binstrumental\b|\boff vocal\b""",
+        """\borchestra|\bsymphonic\b|オーケストラ|\bpiano (ver|collection)""",
+    ).map { Regex(it) }
 
     private val VERSION_WORDS = listOf(
         "live", "tv", "size", "karaoke", "instrumental", "inst", "off vocal", "remix", "mix", "acoustic",

@@ -82,11 +82,13 @@ object SourceMap {
     private fun gen(): Int = WebDavRepository.library().size * 100 + MATCHER_VERSION
 
     /** Bumped when matching improves: songs with no file then get another look. */
-    private const val MATCHER_VERSION = 3
+    private const val MATCHER_VERSION = 4
 
     /** The entry for [videoId], if it still holds for the library as it is. */
     fun lookup(videoId: String): Entry? {
         val e = entries[videoId] ?: return null
+        // Matched by an older matcher: matched again (keeping what JioSaavn said).
+        if (e.gen % 100 != MATCHER_VERSION) return null
         if (e.file == null) return e.takeIf { it.gen == gen() }
         // A file that has gone is matched again.
         return e.takeIf { e.file in libraryIds() }
@@ -112,9 +114,9 @@ object SourceMap {
      * The Liked Music song a file of yours is, so playing the file — from
      * search, a folder, anywhere — shows the song's heart. First the song the
      * map plays this file for; else the liked song with the same title (in
-     * any spelling — romaji or Japanese) and artist, nearest in length. A
-     * different recording of a liked song (a live take, a tribute album)
-     * counts as that song.
+     * any spelling — romaji or Japanese) and artist, within 2 seconds. Only the
+     * same recording: a live take, a tribute or covers album, a remix or an
+     * acoustic version is a song of its own, with its own heart.
      */
     fun likedSongFor(file: Song): Song? {
         if (file.videoId in noCounterpart) return null
@@ -123,13 +125,20 @@ object SourceMap {
         counterparts[file.videoId]?.let { id -> liked.firstOrNull { it.videoId == id }?.let { return it } }
         val mapped = entries.entries.firstOrNull { it.value.file == file.videoId }?.key
         val byMap = mapped?.let { id -> liked.firstOrNull { it.videoId == id } }
+            ?.takeIf { !OwnFileMatcher.otherRecording(it.title, it.albumName, file) }
         val found = byMap ?: run {
             val index = likedIndex?.takeIf { it.first.size == liked.size && it.first.firstOrNull()?.videoId == liked.firstOrNull()?.videoId }?.second ?: buildIndex(liked)
             val keys = OwnFileMatcher.titleKeys(file.title) + runCatching { OwnFileMatcher.soundKeys(file.title) }.getOrDefault(emptySet())
             val seconds = seconds(file.durationText)
             keys.flatMap { index[it].orEmpty() }.distinct()
                 .filter { OwnFileMatcher.sameArtist(file.artist, it.artist) }
-                .minByOrNull { s -> seconds?.let { sec -> seconds(s.durationText)?.let { kotlin.math.abs(it - sec) } } ?: 999 }
+                .filter { !OwnFileMatcher.otherRecording(it.title, it.albumName, file) }
+                .filter { s ->
+                    val a = seconds ?: return@filter false
+                    val b = seconds(s.durationText) ?: return@filter false
+                    kotlin.math.abs(a - b) <= 2
+                }
+                .minByOrNull { s -> kotlin.math.abs((seconds(s.durationText) ?: 0) - (seconds ?: 0)) }
         }
         if (found == null) noCounterpart += file.videoId else counterparts[file.videoId] = found.videoId
         return found
