@@ -232,7 +232,9 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
 }
 
 /** [this] in [other]'s place in the queue. */
-internal fun Song.carryingQueueOf(other: Song): Song = copy(
+internal fun Song.carryingQueueOf(other: Song): Song = also {
+    com.music.bitchord.data.LocalLikes.link(it, other)
+}.copy(
     queueTier = other.queueTier,
     queueEntryId = other.queueEntryId,
     radioName = other.radioName,

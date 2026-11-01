@@ -290,6 +290,8 @@ fun SettingsScreen(
     val smartVersionAlignment by AppSettings.smartVersionAlignment.collectAsStateWithLifecycle()
     val audioOnly by AppSettings.audioOnly.collectAsStateWithLifecycle()
     val ownFilesOnMobileData by AppSettings.ownFilesOnMobileData.collectAsStateWithLifecycle()
+    val saavnForDownloads by AppSettings.jioSaavnForDownloads.collectAsStateWithLifecycle()
+    val upgradeDownloads by AppSettings.upgradeDownloads.collectAsStateWithLifecycle()
     val ownLyricsFirst by AppSettings.ownLyricsFirst.collectAsStateWithLifecycle()
     val sourcePreference by AppSettings.sourcePreference.collectAsStateWithLifecycle()
     val libraryFolders by com.music.bitchord.data.webdav.LibraryFolders.folders.collectAsStateWithLifecycle()
@@ -1712,6 +1714,30 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.playlists_import_files_subtitle),
                     enabled = !playlistBusy,
                     onClick = { importFilePicker.launch(arrayOf("*/*")) },
+                )
+            }
+            val saavnDlTitle = stringResource(R.string.saavn_for_downloads)
+            row(saavnDlTitle, "jiosaavn", "download", "descargas", "320") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = saavnDlTitle,
+                    subtitle = stringResource(R.string.saavn_for_downloads_subtitle),
+                    trailing = {
+                        IosSwitch(checked = saavnForDownloads, onCheckedChange = AppSettings::setJioSaavnForDownloads)
+                    },
+                    onClick = { AppSettings.setJioSaavnForDownloads(!saavnForDownloads) },
+                )
+            }
+            val upgradeDlTitle = stringResource(R.string.upgrade_downloads)
+            row(upgradeDlTitle, "download", "descargas", "upgrade", "mejorar", "quality") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = upgradeDlTitle,
+                    subtitle = stringResource(R.string.upgrade_downloads_subtitle),
+                    trailing = {
+                        IosSwitch(checked = upgradeDownloads, onCheckedChange = AppSettings::setUpgradeDownloads)
+                    },
+                    onClick = { AppSettings.setUpgradeDownloads(!upgradeDownloads) },
                 )
             }
             val ownMobileTitle = stringResource(R.string.own_files_mobile_data)

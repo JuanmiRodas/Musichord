@@ -747,11 +747,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     /** Every rating known for this account: the library's, then this session's. */
     val likeStatuses: StateFlow<Map<String, LikeStatus>> =
-        combine(_library, LikeState.overrides) { library, overrides ->
+        combine(
+            _library,
+            LikeState.overrides,
+            com.music.bitchord.data.LocalLikes.links,
+            com.music.bitchord.data.LocalLikes.liked,
+        ) { library, overrides, links, localLiked ->
             val liked = (library as? UiState.Success)?.data?.likedSongs
                 ?.associate { it.videoId to LikeStatus.LIKE }
                 .orEmpty()
-            liked + overrides
+            val known = liked + overrides
+            // BitChord Audio: your file shows the heart of the YouTube song it
+            // plays for, and songs only you have show their own.
+            val viaLinks = links.mapNotNull { (file, yt) -> known[yt]?.let { file to it } }.toMap()
+            viaLinks + localLiked.keys.associateWith { LikeStatus.LIKE } + known
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     fun likeStatusOf(videoId: String): LikeStatus =
@@ -766,6 +775,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * registered, and people tap again.
      */
     fun setLike(videoId: String, status: LikeStatus) {
+        // BitChord Audio: a song that isn't YouTube's (your pCloud file, a
+        // JioSaavn copy) is liked on YouTube when it's there — so Liked Music
+        // stays the one list — and here, on the device, when it isn't.
+        if (!com.music.bitchord.data.LocalLikes.isYouTubeId(videoId)) {
+            setLikeOfOwn(videoId, status)
+            return
+        }
         if (!requireSignIn()) return
         val previous = likeStatusOf(videoId)
         if (previous == status) return
@@ -842,6 +858,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 page
             } else {
                 page.copy(songs = UiState.Success(songs.filterNot { it.videoId == videoId }))
+            }
+        }
+    }
+
+    private fun setLikeOfOwn(id: String, status: LikeStatus) {
+        val local = com.music.bitchord.data.LocalLikes
+        local.youTubeOf(id)?.let { yt ->
+            LikeState.set(id, status)
+            setLike(yt, status)
+            return
+        }
+        val song = local.songFor(id) ?: return
+        LikeState.set(id, status)
+        viewModelScope.launch {
+            val yt = if (_signedIn.value) runCatching { local.findOnYouTube(song) }.getOrNull() else null
+            if (yt != null) {
+                local.link(song, yt)
+                setLike(yt.videoId, status)
+            } else {
+                local.setLocal(song, status == LikeStatus.LIKE)
+                libraryStale = true
             }
         }
     }
@@ -2974,6 +3011,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Music, the two are merged and the remaining pages aren't walked.
             // No overlap (or a week old) and the page fills in as upstream does.
             var pageState = state
+            // BitChord Audio: songs liked here because YouTube doesn't have them.
+            if (browseId in LikedMusicCache.IDS && state is UiState.Success) {
+                val mine = com.music.bitchord.data.LocalLikes.liked.value.values
+                    .filter { m -> state.data.none { it.videoId == m.videoId } }
+                if (mine.isNotEmpty()) pageState = UiState.Success(mine.toList() + state.data)
+            }
             if (browseId in LikedMusicCache.IDS && state is UiState.Success) {
                 val merged = likedSaved?.takeUnless { it.stale }?.let { LikedMusicCache.merge(state.data, it.songs) }
                 if (merged != null) {

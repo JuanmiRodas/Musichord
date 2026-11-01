@@ -679,6 +679,45 @@ object SourceResolver {
         keep: suspend (SourceStream) -> SourceStream? = { it },
         budgetMs: Long? = null,
     ): SourceStream? = coroutineScope {
+        // BitChord Audio: your own file joins the comparison, found by the
+        // own-file matcher, and the best bitrate wins — lossless first, your
+        // file on a tie (it is the exact copy). Against YouTube alone it has
+        // to be lossless or at least 256 kbps.
+        val own = async { runCatching { ownForDownload(target, keep) }.getOrNull() }
+        val other = forDownloadFromSources(target, request, keep, budgetMs)
+        val mine = own.await()
+        when {
+            mine == null -> other
+            other == null -> mine.takeIf {
+                it.format.isLossless == true || (it.format.kbps ?: 0) >= RemoteLibrarySource.MIN_KBPS
+            }.also { if (it != null) TrackLog.d(TAG, "download: '${target.title}' from your library at ${it.format.summary}") }
+            isBetter(other.format, mine.format) -> other
+            else -> mine.also { TrackLog.d(TAG, "download: '${target.title}' from your library at ${it.format.summary}") }
+        }
+    }
+
+    private suspend fun ownForDownload(
+        target: TrackMatcher.Target,
+        keep: suspend (SourceStream) -> SourceStream?,
+    ): SourceStream? {
+        if (target.title.isBlank()) return null
+        val source = SourceRegistry.configs.value
+            .firstOrNull { it.kind == SourceKind.MY_LIBRARY }
+            ?.let { SourceRegistry.instance(it.id) } ?: return null
+        val chosen = (PreferredSource.get(target.title, target.artist) as? PreferredSource.File)?.id
+        if (PreferredSource.prefersYouTube(target.title, target.artist)) return null
+        val file = chosen ?: OwnFileMatcher.matches(target.title, target.artist, target.durationSec, target.album)
+            .firstOrNull()?.videoId ?: return null
+        val stream = source.stream(file, StreamRequest.Best) ?: return null
+        return keep(stream.copy(sourceConfigId = stream.sourceConfigId ?: source.configId))
+    }
+
+    private suspend fun forDownloadFromSources(
+        target: TrackMatcher.Target,
+        request: StreamRequest,
+        keep: suspend (SourceStream) -> SourceStream?,
+        budgetMs: Long?,
+    ): SourceStream? = coroutineScope {
         val until = budgetMs?.let { System.nanoTime() + it * 1_000_000 }
         if (target.title.isBlank()) return@coroutineScope null
         val wantsLossless = when (request) {

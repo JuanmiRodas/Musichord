@@ -158,6 +158,8 @@ object Downloads {
         _collections.value = runCatching {
             json.decodeFromString(collectionSerializer, prefs.getString(KEY_SAVED_COLLECTIONS, null) ?: "{}")
         }.getOrDefault(emptyMap())
+        // BitChord Audio: better copies for what's downloaded, on Wi-Fi.
+        DownloadUpgrader.start(context)
     }
 
     // ---- Asking -------------------------------------------------------------
@@ -1655,6 +1657,9 @@ internal fun resolvedDownloadDates(
 private fun StreamFormat.downloadBadge(): String? = when {
     isDolbyAtmos -> "DOLBY"
     codec.equals("flac", ignoreCase = true) || codec.equals("x-flac", ignoreCase = true) -> "FLAC"
+    // BitChord Audio: a lossy copy says its bitrate too (MP3 · 320 kbps), so
+    // the download upgrader knows it has nothing to do there.
+    kbps != null && kbps > 0 -> "${codec?.uppercase() ?: "AUDIO"} · $kbps kbps"
     else -> null
 }
 

@@ -478,6 +478,12 @@ object AppSettings {
     /** BitChord Audio: your pCloud files also play on mobile data (else YouTube / the download there). */
     val ownFilesOnMobileData = MutableStateFlow(false)
 
+    /** BitChord Audio: JioSaavn's 320 kbps copies for downloads, even while it's off for playback. */
+    val jioSaavnForDownloads = MutableStateFlow(true)
+
+    /** BitChord Audio: replace downloads with a better copy when one turns up (on Wi-Fi). */
+    val upgradeDownloads = MutableStateFlow(true)
+
     /** Drops haze blur (status bar, mini player, bottom fade, lyrics focus) for a solid-fill look. */
     val reduceDynamicBlur = MutableStateFlow(false)
 
@@ -1012,6 +1018,8 @@ object AppSettings {
         smartVersionAlignment.value = prefs.getBoolean(KEY_SMART_VERSION_ALIGNMENT, true)
         audioOnly.value = prefs.getBoolean(KEY_AUDIO_ONLY, true)
         ownFilesOnMobileData.value = prefs.getBoolean(KEY_OWN_FILES_MOBILE, false)
+        jioSaavnForDownloads.value = prefs.getBoolean(KEY_SAAVN_DOWNLOADS, true)
+        upgradeDownloads.value = prefs.getBoolean(KEY_UPGRADE_DOWNLOADS, true)
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
         progressiveBlur.value = prefs.getBoolean(KEY_PROGRESSIVE_BLUR, false)
@@ -1424,6 +1432,16 @@ object AppSettings {
     fun setDontRepeatSuggestions(value: Boolean) {
         dontRepeatSuggestions.value = value
         prefs.edit().putBoolean(KEY_DONT_REPEAT_SUGGESTIONS, value).apply()
+    }
+
+    fun setJioSaavnForDownloads(value: Boolean) {
+        jioSaavnForDownloads.value = value
+        prefs.edit().putBoolean(KEY_SAAVN_DOWNLOADS, value).apply()
+    }
+
+    fun setUpgradeDownloads(value: Boolean) {
+        upgradeDownloads.value = value
+        prefs.edit().putBoolean(KEY_UPGRADE_DOWNLOADS, value).apply()
     }
 
     fun setOwnFilesOnMobileData(value: Boolean) {
@@ -2253,6 +2271,8 @@ object AppSettings {
     private const val KEY_SMART_VERSION_ALIGNMENT = "smart_version_alignment"
     private const val KEY_AUDIO_ONLY = "audio_only"
     private const val KEY_OWN_FILES_MOBILE = "own_files_mobile_data"
+    private const val KEY_SAAVN_DOWNLOADS = "saavn_for_downloads"
+    private const val KEY_UPGRADE_DOWNLOADS = "upgrade_downloads"
     private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"
     private const val KEY_LIQUID_GLASS = "liquid_glass"
     private const val KEY_PROGRESSIVE_BLUR = "progressive_blur"
