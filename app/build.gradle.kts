@@ -206,6 +206,7 @@ android {
                 "LICENSE", "NOTICE", "LICENSE.md", "NOTICE.md", "LICENSE.txt", "NOTICE.txt",
                 "META-INF/AL2.0", "META-INF/LGPL2.1",
             )
+            excludes += setOf("META-INF/CONTRIBUTORS.md", "META-INF/README.md", "META-INF/CHANGES.md")
         }
     }
     buildFeatures {
