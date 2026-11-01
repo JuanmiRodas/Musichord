@@ -297,6 +297,9 @@ object SourceResolver {
         // The listener's pick from the player comes before any rule.
         when (val choice = PreferredSource.get(target.title, target.artist)) {
             PreferredSource.YouTube -> return null
+            // Another source's copy: it is put in the queue in the song's place
+            // (see OwnFirst), not substituted here.
+            is PreferredSource.Chosen -> return null
             is PreferredSource.File -> {
                 val source = own.first()
                 val chosen = runCatching { source.stream(choice.id, requestForNow()) }.getOrNull()

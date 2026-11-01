@@ -135,6 +135,7 @@ object MergedLibrary {
         when (val c = com.music.bitchord.data.sources.PreferredSource.get(versions.first().song)) {
             is com.music.bitchord.data.sources.PreferredSource.File ->
                 versions.firstOrNull { it.song.videoId == c.id }?.let { return it }
+            is com.music.bitchord.data.sources.PreferredSource.Chosen -> Unit
             com.music.bitchord.data.sources.PreferredSource.YouTube ->
                 versions.firstOrNull { it.origin == Origin.YOUTUBE }?.let { return it }
             null -> Unit

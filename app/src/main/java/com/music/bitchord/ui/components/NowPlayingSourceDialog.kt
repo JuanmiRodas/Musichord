@@ -40,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URLDecoder
@@ -74,6 +75,21 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
     fun switchTo(file: Song) {
         PreferredSource.chooseFile(song, file)
         if (file.videoId != song.videoId) controller?.swapToVersion(file.carryingQueueOf(song))
+        onDismiss()
+    }
+
+    // Search box: starts with the song's own name, and searches again as you type.
+    var query by remember(song.videoId) { mutableStateOf(searchName(song)) }
+    var searched by remember(song.videoId) { mutableStateOf<List<Pair<String, Song>>?>(null) }
+    LaunchedEffect(query) {
+        searched = null
+        kotlinx.coroutines.delay(500)
+        searched = withContext(Dispatchers.IO) { searchEverywhere(query, song) }
+    }
+
+    fun pick(hit: Song) {
+        PreferredSource.chooseSong(song, hit)
+        if (hit.videoId != song.videoId) controller?.swapToVersion(hit.carryingQueueOf(song))
         onDismiss()
     }
 
@@ -171,6 +187,42 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                 TextButton(onClick = onBrowse, modifier = Modifier.padding(top = 4.dp)) {
                     Text(stringResource(R.string.source_browse_pcloud))
                 }
+                // Every source, searched with the song's name — or your own words.
+                androidx.compose.material3.OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.source_search)) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                when (val found = searched) {
+                    null -> Text(
+                        stringResource(R.string.browser_loading),
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                    else -> {
+                        if (found.isEmpty()) {
+                            Text(
+                                stringResource(R.string.source_search_none),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 8.dp),
+                            )
+                        }
+                        found.forEach { (place, hit) ->
+                            SourceRow(
+                                label = "$place · ${hit.title} · ${hit.artist}",
+                                detail = listOfNotNull(
+                                    if (WebDavConfig.isWebDavId(hit.videoId)) qualityText(hit, hit.durationText?.let(::secondsIn)) else hit.sourceQuality,
+                                    hit.albumName,
+                                    hit.durationText,
+                                ).joinToString(" · "),
+                                selected = (choice as? PreferredSource.Chosen)?.song?.videoId == hit.videoId,
+                            ) { pick(hit) }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -188,6 +240,74 @@ internal fun Song.carryingQueueOf(other: Song): Song = copy(
     playbackSourceType = other.playbackSourceType,
     playbackSourceId = other.playbackSourceId,
 )
+
+private val BRACKETED = Regex("""\s*[(\[（【][^)\]）】]*[)\]）】]""")
+
+private fun searchName(song: Song): String {
+    val title = song.title.replace(BRACKETED, " ").trim()
+    return "$title ${song.artist}".trim()
+}
+
+/**
+ * [query] on every place a song can play from: your pCloud files (every word
+ * in title, artist, album or file name, or how a Japanese title sounds),
+ * each other source set up — JioSaavn, addons — whether or not it is switched
+ * on for playback, and YouTube Music. Best matches for [song] first within
+ * each place.
+ */
+private suspend fun searchEverywhere(query: String, song: Song): List<Pair<String, Song>> = kotlinx.coroutines.coroutineScope {
+    val q = query.trim()
+    if (q.isEmpty()) return@coroutineScope emptyList()
+    val target = TrackMatcher.Target(
+        title = song.title,
+        artist = song.artist,
+        album = song.albumName,
+        durationSec = song.durationText?.let(::secondsIn),
+    )
+    fun ranked(list: List<Song>): List<Song> {
+        val best = TrackMatcher.ranked(list, target)
+        return (best + list).distinctBy { it.videoId }
+    }
+    val pcloud = async {
+        val words = norm(q).split(' ').filter { it.isNotBlank() }
+        val sound = com.music.bitchord.data.sources.JapaneseReading.romaji(q)
+            ?.let(com.music.bitchord.data.sources.JapaneseReading::soundKey)?.takeIf { it.length >= 4 }
+        com.music.bitchord.data.webdav.WebDavRepository.library().filter { f ->
+            val hay = norm("${f.title} ${f.artist} ${f.albumName.orEmpty()} ${fileLabel(f)}")
+            words.all { it in hay } ||
+                (sound != null && com.music.bitchord.data.sources.OwnFileMatcher.soundKeys(f.title).any { it == "~$sound" })
+        }.take(40).let(::ranked).take(12).map { "pCloud" to it }
+    }
+    val others = com.music.bitchord.data.sources.SourceRegistry.configs.value
+        .mapNotNull { com.music.bitchord.data.sources.SourceRegistry.instance(it.id) }
+        .filter { it.kind != com.music.bitchord.data.sources.SourceKind.MY_LIBRARY && it.kind != com.music.bitchord.data.sources.SourceKind.YOUTUBE }
+        .map { source ->
+            async {
+                kotlinx.coroutines.withTimeoutOrNull(10_000) {
+                    runCatching { source.search(q, limit = 8, waitForAll = false, request = null) }.getOrNull()
+                }.orEmpty().let(::ranked).take(6).map { source.displayName to it }
+            }
+        }
+    val youtube = async {
+        kotlinx.coroutines.withTimeoutOrNull(10_000) {
+            YtMusicRepository.search(q, SearchFilter.SONGS).getOrNull()
+        }.orEmpty().mapNotNull {
+            when (it) {
+                is SearchResult.Track -> it.song
+                is SearchResult.TopTrack -> it.song
+                else -> null
+            }
+        }.let(::ranked).take(6).map { "YouTube" to it }
+    }
+    pcloud.await() + others.flatMap { it.await() } + youtube.await()
+}
+
+private fun norm(s: String): String =
+    java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKD)
+        .replace(Regex("\\p{M}+"), "")
+        .lowercase(java.util.Locale.ROOT)
+        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+        .trim()
 
 private suspend fun youTubeCopyOf(song: Song): Song? {
     val results = YtMusicRepository.search("${song.title} ${song.artist}", SearchFilter.SONGS).getOrNull().orEmpty()

@@ -24,6 +24,9 @@ object PreferredSource {
     data object YouTube : Choice
     data class File(val id: String) : Choice
 
+    /** A copy picked from another source's search — JioSaavn, a YouTube upload, an addon. */
+    data class Chosen(val song: Song) : Choice
+
     private const val PREFS = "bitchord_source_choices"
     private const val YOUTUBE = "youtube"
 
@@ -47,7 +50,11 @@ object PreferredSource {
     fun get(title: String, artist: String): Choice? {
         val key = keyOf(title, artist) ?: return null
         val v = prefs?.getString(key, null) ?: return null
-        return if (v == YOUTUBE) YouTube else File(v)
+        return when {
+            v == YOUTUBE -> YouTube
+            v.startsWith(SONG) -> songFrom(v.removePrefix(SONG))?.let(::Chosen)
+            else -> File(v)
+        }
     }
 
     fun get(song: Song): Choice? = get(song.title, song.artist)
@@ -62,6 +69,43 @@ object PreferredSource {
         edit.apply()
         if (!WebDavConfig.isWebDavId(song.videoId) && song.localUri == null) OriginalVersion.unpin(song.videoId)
     }
+
+    private const val SONG = "song:"
+
+    /** Plays [picked] — from any source — for [song] from now on. */
+    fun chooseSong(song: Song, picked: Song) {
+        if (WebDavConfig.isWebDavId(picked.videoId)) return chooseFile(song, picked)
+        val edit = prefs?.edit() ?: return
+        val value = SONG + songJson(picked)
+        listOfNotNull(keyOf(song.title, song.artist), keyOf(picked.title, picked.artist)).distinct()
+            .forEach { edit.putString(it, value) }
+        edit.apply()
+        if (!WebDavConfig.isWebDavId(song.videoId) && song.localUri == null) OriginalVersion.unpin(song.videoId)
+    }
+
+    private fun songJson(s: Song): String = org.json.JSONObject().apply {
+        put("id", s.videoId)
+        put("title", s.title)
+        put("artist", s.artist)
+        s.albumName?.let { put("album", it) }
+        s.durationText?.let { put("duration", it) }
+        s.thumbnailUrl?.let { put("thumb", it) }
+        s.sourceQuality?.let { put("quality", it) }
+    }.toString()
+
+    private fun songFrom(json: String): Song? = runCatching {
+        val o = org.json.JSONObject(json)
+        fun str(k: String) = if (o.has(k) && !o.isNull(k)) o.getString(k) else null
+        Song(
+            videoId = o.getString("id"),
+            title = o.getString("title"),
+            artist = o.optString("artist"),
+            albumName = str("album"),
+            durationText = str("duration"),
+            thumbnailUrl = str("thumb"),
+            sourceQuality = str("quality"),
+        )
+    }.getOrNull()
 
     /** Plays YouTube's own copy of [song] from now on. */
     fun chooseYouTube(song: Song, youtubeId: String?) {

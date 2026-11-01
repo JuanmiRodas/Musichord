@@ -255,11 +255,14 @@ object OwnFileMatcher {
     data class Keep(val reason: String) : Verdict
 
     fun decide(title: String, artist: String, durationSec: Int?, album: String? = null): Verdict {
+        // A copy picked by hand from another source holds without pCloud.
+        (PreferredSource.get(title, artist) as? PreferredSource.Chosen)?.let { return Play(it.song) }
         if (!WebDavRepository.isConfigured()) return Keep("pCloud not connected")
         val library = WebDavRepository.library()
         if (library.isEmpty()) return Keep("pCloud library not loaded yet")
         when (val choice = PreferredSource.get(title, artist)) {
             PreferredSource.YouTube -> return Keep("you chose YouTube for this song")
+            is PreferredSource.Chosen -> return Play(choice.song)
             is PreferredSource.File -> library.firstOrNull { it.videoId == choice.id }?.let { return Play(it) }
             null -> Unit
         }
@@ -280,6 +283,7 @@ object OwnFileMatcher {
         when (val choice = PreferredSource.get(title, artist)) {
             PreferredSource.YouTube -> return false
             is PreferredSource.File -> return true
+            is PreferredSource.Chosen -> return true
             null -> Unit
         }
         val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value

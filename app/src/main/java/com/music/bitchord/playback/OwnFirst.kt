@@ -55,7 +55,7 @@ internal class OwnFirst(
         val seconds = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
             ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
         return when (val v = runCatching { OwnFileMatcher.decide(song.title, song.artist, seconds, song.albumName) }.getOrNull()) {
-            is OwnFileMatcher.Play -> v.file.copy(
+            is OwnFileMatcher.Play -> if (v.file.videoId == song.videoId) null else v.file.copy(
                 queueTier = song.queueTier,
                 queueEntryId = song.queueEntryId,
                 radioName = song.radioName,
