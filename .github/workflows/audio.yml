@@ -52,9 +52,12 @@ jobs:
       - name: Report compile errors
         if: failure()
         run: |
-          # GitHub shows at most 10 error annotations per step: skip the
-          # library-metadata warnings so the real compile errors are the ones shown.
-          grep -E -A6 '^e: |error: |What went wrong|Execution failed' build.log | grep -v 'incompatible version of Kotlin' | grep -v '^--$' | grep -v '^\s*$' | head -40 | while IFS= read -r line; do
+          # GitHub shows at most 10 error annotations per step, so the lines
+          # that say what failed go first, as one annotation each.
+          {
+            grep -E '^e: |^ERROR|R8: |Missing class|error: ' build.log | grep -v 'incompatible version of Kotlin' | head -12
+            awk '/What went wrong:/{f=1;n=0} f{print; n++} n>14{f=0}' build.log | head -30
+          } | grep -v '^\s*$' | head -40 | while IFS= read -r line; do
             echo "::error::${line}"
           done
 
