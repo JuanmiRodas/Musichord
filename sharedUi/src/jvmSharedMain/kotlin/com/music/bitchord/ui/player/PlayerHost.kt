@@ -113,6 +113,9 @@ interface PlayerHost {
     /** BitChord Audio: edit the other names [song]'s lyrics are looked up by. */
     fun editLyricAliases(song: Song) {}
 
+    /** BitChord Audio: lyrics timed in the editor, to keep as the song's .lrc. */
+    fun saveTimedLyrics(song: Song, lines: List<com.music.bitchord.data.lyrics.LyricLine>) {}
+
     /** BitChord Audio: "where is this playing from" — the source picker for [song]. */
     fun chooseSource(song: Song) {}
 

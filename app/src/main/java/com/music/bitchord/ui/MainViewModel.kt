@@ -424,7 +424,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val key = lyricsLookupKey(
             videoId, sources, AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
-        ) + com.music.bitchord.data.lyrics.LyricAliases.version.value
+        ) + com.music.bitchord.data.lyrics.LyricAliases.version.value +
+            "/" + com.music.bitchord.data.lyrics.EditedLyrics.version.value
         if (lyricsFor == key) return
         // The duration lands a beat after the track, and a database match needs
         // it. Turned away here rather than inside the job below: claiming the
@@ -458,10 +459,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         _lyricsChecked.value = false
         lyricsJob = viewModelScope.launch {
+            // BitChord Audio: lyrics you timed yourself come before everything.
+            com.music.bitchord.data.lyrics.EditedLyrics.get(videoId)?.let { mine ->
+                _lyrics.value = mine
+                _lyricsSource.value = null
+                _lyricsChecked.value = true
+                return@launch
+            }
             // BitChord Audio: your own lyrics files — beside the track, or in a
             // lyrics folder, found by any of the song's names (see
             // [SidecarLyrics]). First unless Settings says online goes first.
-            val nameQueries = com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, artist)
+            // BitChord Audio: also by the romaji / Japanese spelling of the names.
+            val spellings = runCatching {
+                com.music.bitchord.data.lyrics.LyricNames.variants(title, artist)
+            }.getOrDefault(emptyList())
+            val nameQueries = com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, artist, spellings)
             suspend fun ownLyrics() = com.music.bitchord.data.lyrics.SidecarLyrics.forSong(
                 getApplication(), videoId, localUri, localPath,
                 titles = nameQueries.map { it.title }.distinct(),
@@ -499,7 +511,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // then the shown one, then the file's own alternatives — see
             // [com.music.bitchord.data.lyrics.LyricAliases].
             var found: LyricsRepository.Result? = null
-            for (query in com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, artist)) {
+            var untimed: Pair<LyricsRepository.Result, com.music.bitchord.data.lyrics.LyricAliases.Query>? = null
+            for (query in nameQueries) {
                 found = LyricsRepository.lyrics(
                     videoId, query.title, query.artist, durationMs, album, sources,
                     AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
@@ -509,10 +522,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     },
                     onSourceCancelled = { source -> providerCancelled(generation, source) },
                 )
+                // Untimed words are a last resort: another spelling may find timed ones.
+                if (found != null && found.lines.none { it.timeMs > 0 }) {
+                    if (untimed == null) untimed = found to query
+                    found = null
+                    continue
+                }
                 if (found != null) {
                     currentLyricsRequest = LyricsRequest(videoId, query.title, query.artist, durationMs, album)
                     break
                 }
+            }
+            val fallback = untimed
+            if (found == null && fallback != null) {
+                found = fallback.first
+                currentLyricsRequest = LyricsRequest(videoId, fallback.second.title, fallback.second.artist, durationMs, album)
             }
             val selected = selectedLyricsSource?.let(lyricsProviderResults::get) ?: found
             if (selected == null && !ownFirst) {
@@ -752,8 +776,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             LikeState.overrides,
             com.music.bitchord.data.LocalLikes.links,
             com.music.bitchord.data.LocalLikes.liked,
-        ) { library, overrides, links, localLiked ->
-            val liked = (library as? UiState.Success)?.data?.likedSongs
+            com.music.bitchord.data.LikedMusicCache.likedIds,
+        ) { library, overrides, links, localLiked, cachedLiked ->
+            // BitChord Audio: the whole saved Liked Music, not only its first page.
+            val liked = cachedLiked.associateWith { LikeStatus.LIKE } +
+                (library as? UiState.Success)?.data?.likedSongs
                 ?.associate { it.videoId to LikeStatus.LIKE }
                 .orEmpty()
             val known = liked + overrides
@@ -1561,6 +1588,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // BitChord Audio: the saved Liked Music, so every liked song shows its heart.
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.music.bitchord.data.LikedMusicCache.load(_activeProfileId.value)
+        }
         startSearchPipeline()
         startSuggestPipeline()
         startTypeaheadMediaPipeline()

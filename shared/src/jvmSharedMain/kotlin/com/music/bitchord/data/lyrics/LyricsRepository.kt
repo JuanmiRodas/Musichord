@@ -107,6 +107,8 @@ object LyricsRepository {
         val sequence = (order + LyricsSource.offered)
             .distinct()
             .filter { it in sources && !it.hidden }
+            // BitChord Audio: untimed words only after every timed source.
+            .sortedBy { it.untimed }
 
         // Every source but [SimpMusicLyrics] is asked for a name, and
         // YouTube's is not the name anyone catalogued. Cleaned once, here,
@@ -129,7 +131,7 @@ object LyricsRepository {
         // Genius is a plain text web scraper. To preserve bandwidth and avoid rate-limiting,
         // it starts lazily and is only contacted if all higher-priority synced sources miss.
         val racing: List<Pair<LyricsSource, Deferred<Result?>>> = sequence.map { source ->
-            val startMode = if (source == LyricsSource.GENIUS) kotlinx.coroutines.CoroutineStart.LAZY else kotlinx.coroutines.CoroutineStart.DEFAULT
+            val startMode = if (source.untimed) kotlinx.coroutines.CoroutineStart.LAZY else kotlinx.coroutines.CoroutineStart.DEFAULT
             source to async(Dispatchers.IO, start = startMode) {
                 onSourceStarted?.invoke(source)
                 try {
@@ -160,14 +162,17 @@ object LyricsRepository {
             var lineSynced: Result? = null
             for ((source, job) in racing) {
                 // If we already found a line-synced or better result, skip Genius completely
-                if (lineSynced != null && source == LyricsSource.GENIUS) continue
+                if (lineSynced != null && source.untimed) continue
 
                 val found = runCatching { job.await() }.getOrNull() ?: continue
                 if (found.lines.any { it.isWordSynced }) return@coroutineScope found
                 if (!prioritizeSyllableSync && found.lines.any { it.timeMs > 0 }) {
                     return@coroutineScope found
                 }
-                if (lineSynced == null) lineSynced = found
+                // A timed answer beats an untimed one kept earlier.
+                if (lineSynced == null || (lineSynced.lines.none { it.timeMs > 0 } && found.lines.any { it.timeMs > 0 })) {
+                    lineSynced = found
+                }
             }
             lineSynced
         } finally {
@@ -211,6 +216,11 @@ object LyricsRepository {
             LyricsSource.PAXSENIX_SPOTIFY -> PaxSenix.spotifyLyrics(title, artist, durationMs)
             LyricsSource.PAXSENIX_MUSIXMATCH -> PaxSenix.musixmatchLyrics(title, artist, durationMs)
             LyricsSource.KUGOU -> KuGou.lyrics(title, artist, durationMs, album)
+            LyricsSource.NETEASE -> NetEase.lyrics(title, artist, durationMs)
+            LyricsSource.QQ_MUSIC -> QqMusic.lyrics(title, artist, durationMs)
+            LyricsSource.UTATEN -> UtaTen.lyrics(title, artist)
+            LyricsSource.UTA_NET -> UtaNet.lyrics(title, artist)
+            LyricsSource.J_LYRIC -> JLyric.lyrics(title, artist)
             LyricsSource.MEGALOBIZ -> Megalobiz.lyrics(title, artist)
             LyricsSource.GENIUS -> Genius.lyrics(title, artist)
         }

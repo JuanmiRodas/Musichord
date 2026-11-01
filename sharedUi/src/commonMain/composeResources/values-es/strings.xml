@@ -200,4 +200,14 @@
     <string name="search_library_empty">Busca las canciones de tu carpeta de Música local.</string>
     <string name="search_library_hint">Canciones, artistas y álbumes</string>
     <string name="search_library_no_results">Nada en Música local coincide con “%1$s”.</string>
+    <string name="lyrics_time_title">Sincronizar esta letra…</string>
+    <string name="lyrics_time_hint">Toca al ritmo de la canción para fijar o corregir el tiempo de cada línea</string>
+    <string name="lyrics_time_header">Sincronizar letra</string>
+    <string name="lyrics_time_next">Siguiente línea</string>
+    <string name="lyrics_time_back">Línea anterior</string>
+    <string name="lyrics_time_rewind">−5 s</string>
+    <string name="lyrics_time_save">Guardar</string>
+    <string name="lyrics_time_cancel">Cancelar</string>
+    <string name="lyrics_time_help">Toca «Siguiente línea» cuando empiece cada línea</string>
+    <string name="lyrics_time_saved">Guardado — %1$s</string>
 </resources>

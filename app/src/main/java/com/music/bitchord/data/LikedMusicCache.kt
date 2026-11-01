@@ -47,6 +47,20 @@ object LikedMusicCache {
         val f = file(profile) ?: return null
         val saved = SongListStore.load(f) ?: return null
         return Saved(saved.songs, saved.savedAt).takeIf { it.songs.isNotEmpty() }
+            ?.also { if (profile == lastProfile || _likedIds.value.isEmpty()) publish(it.songs) }
+    }
+
+    private val _likedIds = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * Every song in the saved Liked Music — the whole list, not just the first
+     * page the Library fetches — so a song liked long ago still shows its
+     * heart when it plays.
+     */
+    val likedIds: kotlinx.coroutines.flow.StateFlow<Set<String>> = _likedIds
+
+    private fun publish(songs: List<Song>) {
+        _likedIds.value = songs.mapTo(HashSet()) { it.videoId }
     }
 
     /** The profile Liked Music was last saved for — whose list an export takes. */
@@ -57,6 +71,7 @@ object LikedMusicCache {
     fun save(profile: String?, songs: List<Song>) {
         if (songs.isEmpty()) return
         lastProfile = profile
+        publish(songs)
         val f = file(profile) ?: return
         SongListStore.save(f, songs)
     }

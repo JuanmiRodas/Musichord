@@ -831,6 +831,7 @@ fun NowPlayingScreen(
     var showAudioOutput by remember { mutableStateOf(false) }
     var showVideoQuality by remember { mutableStateOf(false) }
     var showLyricsProviders by remember { mutableStateOf(false) }
+    var showLyricsTiming by remember { mutableStateOf(false) }
     // Gated on the Bluetooth permission the first time — see [rememberOutputPicker].
     val openAudioOutput = rememberOutputPicker { showAudioOutput = true }
     // Listening in a party whose host has taken the controls: the transport
@@ -1626,7 +1627,31 @@ fun NowPlayingScreen(
                     showLyricsProviders = false
                     PlayerPlatform.host.editLyricAliases(song)
                 },
+                onTimeLyrics = if (lyrics.isNullOrEmpty()) null else ({
+                    showLyricsProviders = false
+                    showLyricsTiming = true
+                }),
             )
+        }
+        if (showLyricsTiming) {
+            val shown = lyrics
+            if (shown.isNullOrEmpty()) {
+                showLyricsTiming = false
+            } else {
+                LyricsTimingEditor(
+                    lines = remember(shown) { shown.shiftedBy(lyricsTranslation.offsetMs) },
+                    playhead = lyricsPlayhead,
+                    isPlaying = isPlaying,
+                    durationMs = durationMs,
+                    onPlayPause = onPlayPause,
+                    onSeekLyric = seekToLyric,
+                    onSave = { timed ->
+                        PlayerPlatform.host.saveTimedLyrics(song, timed)
+                        showLyricsTiming = false
+                    },
+                    onDismiss = { showLyricsTiming = false },
+                )
+            }
         }
         if (showAudioPipeline) {
             AudioPipelineDialog(

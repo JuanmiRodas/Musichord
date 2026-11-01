@@ -241,6 +241,10 @@ object LyricsTranslation {
         val slots = flatten(lines)
         if (slots.isEmpty()) return RomanizationResult.Unavailable
         if (!hasNonLatinLetters(slots)) return RomanizationResult.AlreadyRomanized
+        // BitChord Audio: the source's own romaji (NetEase, UtaTen) beats any made here.
+        ProvidedRomaji.forLines(slots.map { it.text })?.let { texts ->
+            return RomanizationResult.Romanized(lines = rebuild(lines, slots, texts), sourceLanguage = "ja", fromCache = false)
+        }
         localRomanizer?.let { local ->
             val texts = withContext(Dispatchers.Default) { runCatching { local(slots.map { it.text }) }.getOrNull() }
             if (texts != null && texts.size == slots.size) {

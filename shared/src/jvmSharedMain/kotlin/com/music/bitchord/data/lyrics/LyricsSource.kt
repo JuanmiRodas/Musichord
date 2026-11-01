@@ -21,6 +21,8 @@ enum class LyricsSource(
      * outright would only mean writing it again if it comes back.
      */
     val hidden: Boolean = false,
+    /** BitChord Audio: words without times — asked only once every timed source has missed. */
+    val untimed: Boolean = false,
 ) {
     // Declaration order is the default priority — [AppSettings.lyricsSourceOrder]
     // and [AppSettings.lyricsSources] both fall back to [LyricsSource.entries]
@@ -112,6 +114,16 @@ enum class LyricsSource(
         detail = "Whole lines, strong outside the English catalogue",
         wordSynced = false,
     ),
+    NETEASE(
+        label = "NetEase Cloud Music",
+        detail = "Whole lines, huge J-pop and anime catalogue, often with its own romaji",
+        wordSynced = false,
+    ),
+    QQ_MUSIC(
+        label = "QQ Music",
+        detail = "Whole lines, strong on Japanese and Asian releases",
+        wordSynced = false,
+    ),
     LRCLIB(
         label = "LRCLIB",
         detail = "Whole lines only, and always up",
@@ -126,6 +138,25 @@ enum class LyricsSource(
         label = "Genius",
         detail = "Plain text fallback, massive web catalogue",
         wordSynced = false,
+        untimed = true,
+    ),
+    UTATEN(
+        label = "UtaTen",
+        detail = "Untimed Japanese lyrics, with the kanji readings and romaji",
+        wordSynced = false,
+        untimed = true,
+    ),
+    UTA_NET(
+        label = "Uta-Net",
+        detail = "Untimed Japanese lyrics, nearly every release",
+        wordSynced = false,
+        untimed = true,
+    ),
+    J_LYRIC(
+        label = "J-Lyric.net",
+        detail = "Untimed Japanese lyrics",
+        wordSynced = false,
+        untimed = true,
     ),
     ;
 

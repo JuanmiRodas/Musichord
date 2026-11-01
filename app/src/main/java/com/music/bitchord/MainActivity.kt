@@ -1160,9 +1160,10 @@ private fun BitChordApp(
     val lyricsSourceOrder by AppSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
     val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
     val lyricAliasesVersion by com.music.bitchord.data.lyrics.LyricAliases.version.collectAsStateWithLifecycle()
+    val editedLyricsVersion by com.music.bitchord.data.lyrics.EditedLyrics.version.collectAsStateWithLifecycle()
     LaunchedEffect(
         player.song?.videoId, player.durationMs, syncedLyricsEnabled, lyricsSources,
-        lyricsSourceOrder, prioritizeSyllableSync, lyricAliasesVersion,
+        lyricsSourceOrder, prioritizeSyllableSync, lyricAliasesVersion, editedLyricsVersion,
     ) {
         player.song?.let {
             viewModel.loadLyrics(

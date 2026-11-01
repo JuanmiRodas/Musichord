@@ -103,7 +103,7 @@ object LyricAliases {
      * artist it could go with; capped at [MAX_QUERIES] so a song with many
      * aliases doesn't turn into dozens of requests.
      */
-    fun queries(videoId: String, title: String, artist: String): List<Query> {
+    fun queries(videoId: String, title: String, artist: String, spellings: List<Query> = emptyList()): List<Query> {
         val mine = userNames(videoId, title, artist)
         val fromFile = tags[videoId] ?: Names()
         val out = LinkedHashSet<Query>()
@@ -115,11 +115,13 @@ object LyricAliases {
         add(mine.titles.ifEmpty { listOf(title) }, mine.artists)
         add(mine.titles, listOf(artist))
         out += Query(title, artist)
+        // BitChord Audio: the song's own names in romaji / Japanese (see LyricNames).
+        out += spellings
         add(fromFile.titles, fromFile.artists.ifEmpty { listOf(artist) })
         add(titleNames[titleKey(title)].orEmpty().filter { titleKey(it) != titleKey(title) }, listOf(artist))
         add(fromFile.titles, listOf(artist))
         add(listOf(title), fromFile.artists)
-        return out.filter { it.title.isNotBlank() }.take(MAX_QUERIES)
+        return out.filter { it.title.isNotBlank() }.take(MAX_QUERIES + spellings.size.coerceAtMost(3))
     }
 
     private const val MAX_QUERIES = 6

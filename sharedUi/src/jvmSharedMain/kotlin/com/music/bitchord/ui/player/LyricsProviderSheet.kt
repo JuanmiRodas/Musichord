@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +62,8 @@ internal fun LyricsProviderSheet(
     modifier: Modifier = Modifier,
     /** BitChord Audio: opens the editor for other names to look the lyrics up by. */
     onEditAliases: (() -> Unit)? = null,
+    /** BitChord Audio: opens the tap-to-time editor on the lyrics shown. */
+    onTimeLyrics: (() -> Unit)? = null,
 ) {
     val savedOrder by PlayerSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
     val sources = remember(savedOrder) { LyricsSource.ordered(savedOrder) }
@@ -92,6 +95,14 @@ internal fun LyricsProviderSheet(
                     },
                 )
             }
+            onTimeLyrics?.let { time ->
+                LyricAliasRow(
+                    onClick = time,
+                    icon = Icons.Rounded.Edit,
+                    title = stringResource(Res.string.lyrics_time_title),
+                    hint = stringResource(Res.string.lyrics_time_hint),
+                )
+            }
             onEditAliases?.let { edit -> LyricAliasRow(onClick = edit) }
         }
     }
@@ -99,7 +110,12 @@ internal fun LyricsProviderSheet(
 
 /** BitChord Audio: "Search by other names…", under the providers. */
 @Composable
-private fun LyricAliasRow(onClick: () -> Unit) {
+private fun LyricAliasRow(
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Rounded.Search,
+    title: String = stringResource(Res.string.lyrics_search_other_names),
+    hint: String = stringResource(Res.string.lyrics_search_other_names_hint),
+) {
     val haptics = rememberHaptics()
     Row(
         modifier = Modifier
@@ -124,7 +140,7 @@ private fun LyricAliasRow(onClick: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = Icons.Rounded.Search,
+                imageVector = icon,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.7f),
                 modifier = Modifier.size(20.dp),
@@ -133,14 +149,14 @@ private fun LyricAliasRow(onClick: () -> Unit) {
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                text = stringResource(Res.string.lyrics_search_other_names),
+                text = title,
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color.White.copy(alpha = 0.85f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = stringResource(Res.string.lyrics_search_other_names_hint),
+                text = hint,
                 style = MaterialTheme.typography.labelMedium,
                 color = Color.White.copy(alpha = 0.5f),
                 maxLines = 2,

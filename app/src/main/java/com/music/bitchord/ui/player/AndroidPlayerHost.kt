@@ -228,6 +228,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         com.music.bitchord.ui.components.NowPlayingSource.open(song)
     }
 
+    override fun saveTimedLyrics(song: com.music.bitchord.data.model.Song, lines: List<com.music.bitchord.data.lyrics.LyricLine>) {
+        com.music.bitchord.data.lyrics.EditedLyrics.save(song, lines)
+    }
+
     override fun editLyricAliases(song: com.music.bitchord.data.model.Song) {
         com.music.bitchord.ui.components.LyricAliasEditor.open(song)
     }

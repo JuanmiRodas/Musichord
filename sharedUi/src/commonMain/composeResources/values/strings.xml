@@ -279,4 +279,14 @@
     <string name="mix_view_one_bar">1 Bar</string>
     <string name="mix_view_seconds">%1$d sec</string>
     <string name="mix_view_bpm">%1$d bpm</string>
+    <string name="lyrics_time_title">Time these lyrics…</string>
+    <string name="lyrics_time_hint">Tap along with the song to set or fix each line\'s time</string>
+    <string name="lyrics_time_header">Time lyrics</string>
+    <string name="lyrics_time_next">Next line</string>
+    <string name="lyrics_time_back">Back a line</string>
+    <string name="lyrics_time_rewind">−5 s</string>
+    <string name="lyrics_time_save">Save</string>
+    <string name="lyrics_time_cancel">Cancel</string>
+    <string name="lyrics_time_help">Tap “Next line” as each line starts</string>
+    <string name="lyrics_time_saved">Saved — %1$s</string>
 </resources>

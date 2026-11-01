@@ -54,6 +54,12 @@ object LyricOffsets {
         }
     }
 
+    /** Back to no shift: the lyrics were just timed by hand. */
+    fun reset(trackId: String) {
+        prefs?.edit()?.putLong(trackId, 0L)?.apply()
+        flows[trackId]?.value = 0L
+    }
+
     fun nudge(trackId: String, lines: List<LyricLine>, deltaMs: Long) {
         val flow = flows.getOrPut(trackId) { MutableStateFlow(0L) }
         val value = flow.value + deltaMs

@@ -55,6 +55,43 @@ object LyricNames {
         Suggested(titles.toList().take(6), artists.toList().take(4))
     }
 
+    private val variantCache = java.util.concurrent.ConcurrentHashMap<String, List<LyricAliases.Query>>()
+
+    /**
+     * Other spellings to look the lyrics up by, made automatically: the
+     * Japanese title and artist in romaji, and a romaji title or artist in
+     * the Japanese it most likely is. Japanese catalogues file songs under
+     * the Japanese names, the English ones often under romaji — so each
+     * lookup gets both. Cached per song; the kanji guess waits at most a few
+     * seconds for the network and is skipped offline.
+     */
+    suspend fun variants(title: String, artist: String): List<LyricAliases.Query> {
+        val key = "$title\u0000$artist"
+        variantCache[key]?.let { return it }
+        val out = withContext(Dispatchers.IO) {
+            val titles = otherSpellings(title)
+            val artists = otherSpellings(artist)
+            buildList {
+                for (t in titles) for (a in artists) add(LyricAliases.Query(t, a))
+                for (t in titles) add(LyricAliases.Query(t, artist))
+                for (a in artists) add(LyricAliases.Query(title, a))
+            }.distinct().filterNot { it.title == title && it.artist == artist }
+        }
+        variantCache[key] = out
+        return out
+    }
+
+    private suspend fun otherSpellings(name: String): List<String> {
+        if (name.isBlank()) return emptyList()
+        if (JapaneseReading.isJapanese(name)) {
+            return listOfNotNull(runCatching { JapaneseReading.romaji(name) }.getOrNull())
+        }
+        if (kana(name) == null) return emptyList()
+        return kotlinx.coroutines.withTimeoutOrNull(3_500) {
+            runCatching { japanese(name) }.getOrNull()?.take(1)
+        }.orEmpty()
+    }
+
     /** The other copies of [song]: the YouTube song it stands in for, the file it plays from. */
     private fun others(song: Song): List<Song> {
         val out = ArrayList<Song>()

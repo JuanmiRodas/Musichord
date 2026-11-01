@@ -81,3 +81,17 @@ internal fun lyricsGetAuthorized(url: String, bearer: String): String? = runCatc
         if (response.isSuccessful) response.body?.string() else null
     }
 }.getOrNull()
+
+
+/** A browser's agent, for the Japanese lyrics sites that serve one their pages. */
+internal const val BROWSER_AGENT =
+    "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
+
+/** BitChord Audio: [lyricsGet] with headers of the caller's (a Referer, an agent). */
+internal fun lyricsGetWith(url: String, headers: Map<String, String>): String? = runCatching {
+    val builder = Request.Builder().url(url).header("User-Agent", LYRICS_AGENT)
+    headers.forEach { (k, v) -> builder.header(k, v) }
+    client.newCall(builder.build()).execute().use { response ->
+        if (response.isSuccessful) response.body?.string() else null
+    }
+}.getOrNull()
