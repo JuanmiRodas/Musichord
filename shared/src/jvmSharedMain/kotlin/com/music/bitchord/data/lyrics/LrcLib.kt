@@ -88,8 +88,24 @@ object LrcLib {
      * otherwise the line would blink out between two sung phrases. A stamp
      * with nothing after it closes the final line, so it always survives.
      */
+    /**
+     * BitChord Audio: "[02:04.09][03:25.59]I'll see you next Tuesday" — one
+     * line sung at several times, the way many .lrc files write a repeated
+     * chorus — as one line per time. Read whole, only the first stamp was
+     * taken and the rest stayed in the text on screen.
+     */
+    private val LEADING_STAMPS = Regex("""^\s*((?:\[\d+:\d+(?:[.:]\d+)?]\s*){2,})(.*)$""")
+    private val ONE_STAMP = Regex("""\[\d+:\d+(?:[.:]\d+)?]""")
+
+    private fun expandRepeatedStamps(lrc: String): String =
+        lrc.lineSequence().flatMap { line ->
+            val m = LEADING_STAMPS.find(line) ?: return@flatMap sequenceOf(line)
+            val body = m.groupValues[2]
+            ONE_STAMP.findAll(m.groupValues[1]).map { it.value + body }
+        }.joinToString("\n")
+
     fun parseLrc(lrc: String): List<LyricLine> {
-        val all = lrc.lineSequence().mapNotNull { line ->
+        val all = expandRepeatedStamps(lrc).lineSequence().mapNotNull { line ->
             val match = STAMP.find(line) ?: return@mapNotNull null
             val (minutes, seconds, fraction) = match.destructured
             // Two digits mean centiseconds, three mean milliseconds.

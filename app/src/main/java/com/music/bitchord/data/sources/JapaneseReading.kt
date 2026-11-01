@@ -46,6 +46,13 @@ object JapaneseReading {
         }.start()
     }
 
+    /** The tokenizer, loading it here and now if the background load hasn't finished. Not on the main thread. */
+    @Synchronized
+    fun tokenizerNow(): com.atilika.kuromoji.ipadic.Tokenizer? {
+        tokenizer?.let { return it }
+        return runCatching { com.atilika.kuromoji.ipadic.Tokenizer() }.getOrNull()?.also { tokenizer = it }
+    }
+
     /** [text] in romaji, or null while the dictionary isn't loaded. */
     fun romaji(text: String): String? {
         if (!isJapanese(text)) return text

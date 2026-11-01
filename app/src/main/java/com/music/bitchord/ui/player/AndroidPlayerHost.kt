@@ -197,12 +197,23 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         trackId: String,
         lines: List<LyricLine>,
         targetLanguageTag: String,
-    ): LyricsRomanizationResult =
-        when (val result = LyricsTranslation.romanize(trackId, lines, targetLanguageTag)) {
+    ): LyricsRomanizationResult {
+        // BitChord Audio: Japanese read as words on the device; the rest goes
+        // to the web romanizer as before.
+        LyricsTranslation.localRomanizer = { texts ->
+            if (com.music.bitchord.data.lyrics.JapaneseRomanizer.isJapanese(texts)) {
+                texts.map { com.music.bitchord.data.lyrics.JapaneseRomanizer.romanize(it) ?: return@map null }
+                    .takeIf { all -> all.none { it == null } }?.map { it!! }
+            } else {
+                null
+            }
+        }
+        return when (val result = LyricsTranslation.romanize(trackId, lines, targetLanguageTag)) {
             is LyricsTranslation.RomanizationResult.Romanized -> LyricsRomanizationResult.Romanized(result.lines)
             LyricsTranslation.RomanizationResult.AlreadyRomanized -> LyricsRomanizationResult.AlreadyRomanized
             LyricsTranslation.RomanizationResult.Unavailable -> LyricsRomanizationResult.Unavailable
         }
+    }
 
     override fun showMessage(message: String) {
         main.post { Toast.makeText(app, message, Toast.LENGTH_SHORT).show() }

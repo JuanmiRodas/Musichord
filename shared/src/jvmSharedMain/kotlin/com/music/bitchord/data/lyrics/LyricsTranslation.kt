@@ -223,6 +223,15 @@ object LyricsTranslation {
         }
     }
 
+    /**
+     * BitChord Audio: a romanizer on the device, asked first — the app sets
+     * one for Japanese (read as words from a dictionary). It gets every text
+     * of the lyrics and answers with each in romaji, or null to leave them to
+     * the web romanizer below.
+     */
+    @Volatile
+    var localRomanizer: ((List<String>) -> List<String>?)? = null
+
     suspend fun romanize(
         trackId: String,
         lines: List<LyricLine>,
@@ -232,6 +241,16 @@ object LyricsTranslation {
         val slots = flatten(lines)
         if (slots.isEmpty()) return RomanizationResult.Unavailable
         if (!hasNonLatinLetters(slots)) return RomanizationResult.AlreadyRomanized
+        localRomanizer?.let { local ->
+            val texts = withContext(Dispatchers.Default) { runCatching { local(slots.map { it.text }) }.getOrNull() }
+            if (texts != null && texts.size == slots.size) {
+                return RomanizationResult.Romanized(
+                    lines = rebuild(lines, slots, texts),
+                    sourceLanguage = "ja",
+                    fromCache = false,
+                )
+            }
+        }
 
         // Romanization always ends in Latin script. The translation destination
         // is still sent as `tl` because the web endpoint requires it, but it is

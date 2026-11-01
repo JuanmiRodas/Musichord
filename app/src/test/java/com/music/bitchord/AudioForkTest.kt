@@ -234,4 +234,21 @@ class AudioForkTest {
         assertEquals(j.soundKey("Kaze no machi he"), j.soundKey("Kaze no machi e"))
         assertEquals(j.soundKey(com.music.bitchord.data.sources.TrackMatcher.romajiOf("あかつきのくるま")), j.soundKey("Akatsuki no Kuruma"))
     }
+
+    @Test
+    fun `japanese lyrics read as words`() {
+        val r = com.music.bitchord.data.lyrics.JapaneseRomanizer
+        assertEquals("kimi no na wa", r.romanize("君の名は"))
+        assertEquals("matte", r.romanize("待って"))
+        assertEquals("kasanaru you ni kieta", r.romanize("重なるように消えた"))
+        assertEquals("fuantei na eikou no oto", r.romanize("不安定な栄光の音"))
+    }
+
+    @Test
+    fun `a line sung at several times is several lines`() {
+        val lines = com.music.bitchord.data.lyrics.LrcLib.parseLrc("[02:04.09][03:25.59]I'll see you next Tuesday")
+            .filter { it.text.isNotBlank() }
+        assertEquals(2, lines.size)
+        assertTrue(lines.all { it.text == "I'll see you next Tuesday" })
+    }
 }
