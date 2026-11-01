@@ -1659,7 +1659,7 @@ private fun StreamFormat.downloadBadge(): String? = when {
     codec.equals("flac", ignoreCase = true) || codec.equals("x-flac", ignoreCase = true) -> "FLAC"
     // BitChord Audio: a lossy copy says its bitrate too (MP3 · 320 kbps), so
     // the download upgrader knows it has nothing to do there.
-    kbps != null && kbps > 0 -> "${codec?.uppercase() ?: "AUDIO"} · $kbps kbps"
+    (kbps ?: 0) > 0 -> "${codec?.uppercase() ?: "AUDIO"} · $kbps kbps"
     else -> null
 }
 
