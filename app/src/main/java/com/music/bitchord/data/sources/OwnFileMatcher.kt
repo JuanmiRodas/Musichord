@@ -164,8 +164,11 @@ object OwnFileMatcher {
                 durationSec == null || got == null || abs(durationSec - got) <= MAX_DRIFT_SEC
             }
             .filter { file ->
+                // The tags' artist, its aliases, and the artist folder you
+                // filed it in (a stage name over a real name in the tags).
                 val artists = listOf(file.artist) +
-                    LyricAliases.queries(file.videoId, file.title, file.artist).map { it.artist }
+                    LyricAliases.queries(file.videoId, file.title, file.artist).map { it.artist } +
+                    listOfNotNull(WebDavRepository.artistFolderOf(file.videoId))
                 val drift = durationSec?.let { want ->
                     file.durationMillis().takeIf { it > 0 }?.let { abs(want - (it / 1000).toInt()) }
                 }
@@ -280,10 +283,22 @@ object OwnFileMatcher {
         }
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return Play(best)
         val rank = qualityRank(best, durationSec)
-        return if (rank >= RemoteLibrarySource.MIN_KBPS) {
+        // A better copy than your file, where one plays: JioSaavn's 320 kbps,
+        // when it's on for playback and the map knows it has the song.
+        val saavnPlays = SourceRegistry.activeForPlayback().any { it.kind == SourceKind.JIOSAAVN }
+        val saavn = videoId?.let(SourceMap::entry)?.saavn
+        if (rank < 9_000 && saavnPlays && saavn != null && SourceMap.SAAVN_KBPS > rank) {
+            return Keep("JioSaavn has a better copy (${SourceMap.SAAVN_KBPS} kbps) than your file ($rank kbps)")
+        }
+        // Your file: lossless, at or above your threshold, or simply better than YouTube's.
+        val youtube = RemoteLibrarySource.youTubeKbps(videoId)
+        return if (rank >= RemoteLibrarySource.MIN_KBPS || rank > youtube) {
             Play(best)
         } else {
-            Keep("best file of yours is ${if (rank > 0) "$rank kbps" else "of unknown bitrate"}, below ${RemoteLibrarySource.MIN_KBPS}")
+            Keep(
+                "best file of yours is ${if (rank > 0) "$rank kbps" else "of unknown bitrate"}, " +
+                    "not above YouTube's $youtube kbps",
+            )
         }
     }
 

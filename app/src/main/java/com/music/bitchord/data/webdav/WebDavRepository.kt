@@ -382,8 +382,19 @@ object WebDavRepository {
     }
 
     /** The first folder under the music folder this file is in: the artist, in an artist-first layout. */
+    /**
+     * The artist folder a file sits in ("Donny Montell" for
+     * Donny Montell/Donny Montell/04. Nenuleisk akių….mp3) — the name you
+     * filed the artist under, which can differ from the tags (a real name).
+     */
+    fun artistFolderOf(videoId: String): String? = WebDavConfig.fileUrlOf(videoId)?.let(::artistFolder)
+
     private fun artistFolder(fileUrl: String): String? {
-        val root = roots.firstOrNull { fileUrl.startsWith(it) } ?: return null
+        val known = roots.ifEmpty {
+            LibraryFolders.musicFolders().map { WebDavConfig.normalizeUrl(it.url).trimEnd('/') + "/" }
+                .ifEmpty { listOf(WebDavConfig.normalizeUrl(AppSettings.webdavUrl.value).trimEnd('/') + "/") }
+        }
+        val root = known.firstOrNull { fileUrl.startsWith(it) } ?: return null
         val rel = fileUrl.removePrefix(root).split('/').filter { it.isNotEmpty() }
         if (rel.size < 2) return null
         return runCatching { URLDecoder.decode(rel[0], "UTF-8") }.getOrNull()

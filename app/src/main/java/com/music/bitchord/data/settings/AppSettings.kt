@@ -481,6 +481,9 @@ object AppSettings {
     /** BitChord Audio: JioSaavn's 320 kbps copies for downloads, even while it's off for playback. */
     val jioSaavnForDownloads = MutableStateFlow(true)
 
+    /** BitChord Audio: the lowest bitrate at which a lossy file of yours plays over YouTube. */
+    val ownFileMinKbps = MutableStateFlow(256)
+
     /** BitChord Audio: replace downloads with a better copy when one turns up (on Wi-Fi). */
     val upgradeDownloads = MutableStateFlow(true)
 
@@ -1019,6 +1022,7 @@ object AppSettings {
         audioOnly.value = prefs.getBoolean(KEY_AUDIO_ONLY, true)
         ownFilesOnMobileData.value = prefs.getBoolean(KEY_OWN_FILES_MOBILE, false)
         jioSaavnForDownloads.value = prefs.getBoolean(KEY_SAAVN_DOWNLOADS, true)
+        ownFileMinKbps.value = prefs.getInt(KEY_OWN_MIN_KBPS, 256)
         upgradeDownloads.value = prefs.getBoolean(KEY_UPGRADE_DOWNLOADS, true)
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
@@ -1432,6 +1436,11 @@ object AppSettings {
     fun setDontRepeatSuggestions(value: Boolean) {
         dontRepeatSuggestions.value = value
         prefs.edit().putBoolean(KEY_DONT_REPEAT_SUGGESTIONS, value).apply()
+    }
+
+    fun setOwnFileMinKbps(value: Int) {
+        ownFileMinKbps.value = value
+        prefs.edit().putInt(KEY_OWN_MIN_KBPS, value).apply()
     }
 
     fun setJioSaavnForDownloads(value: Boolean) {
@@ -2272,6 +2281,7 @@ object AppSettings {
     private const val KEY_AUDIO_ONLY = "audio_only"
     private const val KEY_OWN_FILES_MOBILE = "own_files_mobile_data"
     private const val KEY_SAAVN_DOWNLOADS = "saavn_for_downloads"
+    private const val KEY_OWN_MIN_KBPS = "own_file_min_kbps"
     private const val KEY_UPGRADE_DOWNLOADS = "upgrade_downloads"
     private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"
     private const val KEY_LIQUID_GLASS = "liquid_glass"

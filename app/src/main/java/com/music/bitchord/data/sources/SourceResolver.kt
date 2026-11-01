@@ -693,7 +693,8 @@ object SourceResolver {
         when {
             mine == null -> other
             other == null -> mine.takeIf {
-                it.format.isLossless == true || (it.format.kbps ?: 0) >= RemoteLibrarySource.MIN_KBPS
+                it.format.isLossless == true || (it.format.kbps ?: 0) >= RemoteLibrarySource.MIN_KBPS ||
+                    (it.format.kbps ?: 0) > RemoteLibrarySource.YOUTUBE_TYPICAL_KBPS
             }.also { if (it != null) TrackLog.d(TAG, "download: '${target.title}' from your library at ${it.format.summary}") }
             isBetter(other.format, mine.format) -> other
             else -> mine.also { TrackLog.d(TAG, "download: '${target.title}' from your library at ${it.format.summary}") }

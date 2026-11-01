@@ -157,8 +157,10 @@ object MergedLibrary {
         val kbps = KBPS.find(q)?.groupValues?.get(1)?.toIntOrNull()
         return when {
             v.origin != Origin.YOUTUBE && lossless -> 0
-            v.origin != Origin.YOUTUBE && kbps != null &&
-                kbps >= com.music.bitchord.data.sources.RemoteLibrarySource.MIN_KBPS -> 1
+            v.origin != Origin.YOUTUBE && kbps != null && (
+                kbps >= com.music.bitchord.data.sources.RemoteLibrarySource.MIN_KBPS ||
+                    kbps > com.music.bitchord.data.sources.RemoteLibrarySource.YOUTUBE_TYPICAL_KBPS
+                ) -> 1
             v.origin == Origin.YOUTUBE -> 2
             v.origin != Origin.YOUTUBE && kbps == null -> 3
             else -> 4

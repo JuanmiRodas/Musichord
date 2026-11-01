@@ -292,6 +292,7 @@ fun SettingsScreen(
     val ownFilesOnMobileData by AppSettings.ownFilesOnMobileData.collectAsStateWithLifecycle()
     val saavnForDownloads by AppSettings.jioSaavnForDownloads.collectAsStateWithLifecycle()
     val upgradeDownloads by AppSettings.upgradeDownloads.collectAsStateWithLifecycle()
+    val ownMinKbps by AppSettings.ownFileMinKbps.collectAsStateWithLifecycle()
     val ownLyricsFirst by AppSettings.ownLyricsFirst.collectAsStateWithLifecycle()
     val sourcePreference by AppSettings.sourcePreference.collectAsStateWithLifecycle()
     val libraryFolders by com.music.bitchord.data.webdav.LibraryFolders.folders.collectAsStateWithLifecycle()
@@ -1714,6 +1715,19 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.playlists_import_files_subtitle),
                     enabled = !playlistBusy,
                     onClick = { importFilePicker.launch(arrayOf("*/*")) },
+                )
+            }
+            val minKbpsTitle = stringResource(R.string.own_min_kbps)
+            row(minKbpsTitle, "kbps", "bitrate", "calidad", "quality", "pcloud") {
+                val steps = listOf(128, 192, 224, 256, 320)
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = minKbpsTitle,
+                    subtitle = stringResource(R.string.own_min_kbps_subtitle, ownMinKbps),
+                    onClick = {
+                        val next = steps.firstOrNull { it > ownMinKbps } ?: steps.first()
+                        AppSettings.setOwnFileMinKbps(next)
+                    },
                 )
             }
             val saavnDlTitle = stringResource(R.string.saavn_for_downloads)

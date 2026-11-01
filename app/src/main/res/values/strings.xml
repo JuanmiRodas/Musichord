@@ -807,7 +807,7 @@
     <string name="source_title">Source</string>
     <string name="source_playing_now">Playing now from %1$s</string>
     <string name="source_auto">Automatic</string>
-    <string name="source_auto_detail">Your file when it is lossless or at least 256 kbps, otherwise YouTube</string>
+    <string name="source_auto_detail">Your file when it is lossless, at or above your threshold, or better than YouTube; else the best other copy</string>
     <string name="source_no_files">No matching files of yours found</string>
     <string name="source_browse_pcloud">Choose a file from pCloud…</string>
     <string name="browser_loading">Loading…</string>
@@ -824,6 +824,8 @@
     <string name="saavn_for_downloads_subtitle">Downloads may use JioSaavn\'s 320 kbps copies even while JioSaavn is off for playback. The best bitrate wins: lossless, then your files and JioSaavn by bitrate, then YouTube</string>
     <string name="upgrade_downloads">Upgrade downloads on Wi-Fi</string>
     <string name="upgrade_downloads_subtitle">In the background, replaces downloaded songs with a better copy (your pCloud file, JioSaavn 320 kbps) when one exists</string>
+    <string name="own_min_kbps">Lowest bitrate for my files</string>
+    <string name="own_min_kbps_subtitle">%1$d kbps — your files at or above this always play; below it, they still play when better than YouTube. Tap to change</string>
     <string name="pinned">Pinned</string>
     <string name="replay_across">Across </string>
     <string name="replay_album_end"> held your attention.</string>

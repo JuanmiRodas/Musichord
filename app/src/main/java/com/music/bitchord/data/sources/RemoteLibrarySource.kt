@@ -88,7 +88,8 @@ class RemoteLibrarySource(
 
     companion object {
         /** Below this a lossy file of yours loses to YouTube's own stream. */
-        const val MIN_KBPS = 256
+        /** Your choice in Settings: 256 unless changed. */
+        val MIN_KBPS: Int get() = com.music.bitchord.data.settings.AppSettings.ownFileMinKbps.value
 
         /**
          * Whether your copy should play instead of YouTube's, under the
@@ -107,8 +108,16 @@ class RemoteLibrarySource(
                     targetDurationSec?.takeIf { it > 0 }?.let { (size * 8 / 1000 / it).toInt() }
                 }
                 ?: return false
-            return kbps >= MIN_KBPS
+            return kbps >= MIN_KBPS || kbps > youTubeKbps(null)
         }
+
+        /** YouTube's usual audio: Opus at about 160 kbps. */
+        const val YOUTUBE_TYPICAL_KBPS = 160
+
+        /** YouTube's bitrate for [videoId]: as measured when it last played, else the usual. */
+        fun youTubeKbps(videoId: String?): Int =
+            videoId?.let { com.music.bitchord.data.NerdStats.pickedBitrateKbps(it) }?.takeIf { it > 0 }
+                ?: YOUTUBE_TYPICAL_KBPS
     }
 
     private fun norm(s: String): String =

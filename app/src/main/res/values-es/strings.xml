@@ -590,7 +590,7 @@
     <string name="source_title">Fuente</string>
     <string name="source_playing_now">Sonando ahora desde %1$s</string>
     <string name="source_auto">Automático</string>
-    <string name="source_auto_detail">Tu archivo si es sin pérdida o de 256 kbps o más; si no, YouTube</string>
+    <string name="source_auto_detail">Tu archivo si es sin pérdida, si llega a tu mínimo o si es mejor que YouTube; si no, la mejor otra copia</string>
     <string name="source_no_files">No se encontraron archivos tuyos que coincidan</string>
     <string name="source_browse_pcloud">Elegir un archivo de pCloud…</string>
     <string name="browser_loading">Cargando…</string>
@@ -607,6 +607,8 @@
     <string name="saavn_for_downloads_subtitle">Las descargas pueden usar las copias de 320 kbps de JioSaavn aunque esté desactivado para reproducir. Gana la mejor calidad: sin pérdida, luego tus archivos y JioSaavn por bitrate, luego YouTube</string>
     <string name="upgrade_downloads">Mejorar las descargas con Wi-Fi</string>
     <string name="upgrade_downloads_subtitle">En segundo plano, sustituye las canciones descargadas por una copia mejor (tu archivo de pCloud, JioSaavn 320 kbps) cuando exista</string>
+    <string name="own_min_kbps">Bitrate mínimo de mis archivos</string>
+    <string name="own_min_kbps_subtitle">%1$d kbps — tus archivos desde este bitrate suenan siempre; por debajo, suenan si son mejores que YouTube. Toca para cambiar</string>
     <string name="pinned">Fijado</string>
     <string name="replay_across"> repartidas en </string>
     <string name="replay_album_end"> concentró tu atención.</string>
