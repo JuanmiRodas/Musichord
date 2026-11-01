@@ -1160,6 +1160,24 @@ private fun BitChordApp(
     val lyricsSourceOrder by AppSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
     val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
     val lyricAliasesVersion by com.music.bitchord.data.lyrics.LyricAliases.version.collectAsStateWithLifecycle()
+    // BitChord Audio: playing Liked Music, a song un-liked (from YouTube or
+    // pCloud) leaves the rest of the queue too; the one playing finishes.
+    LaunchedEffect(controller) {
+        val active = controller ?: return@LaunchedEffect
+        var before = viewModel.likeStatuses.value
+        viewModel.likeStatuses.collect { now ->
+            val gone = before.filter { (id, st) -> st == com.music.bitchord.data.model.LikeStatus.LIKE && now[id] != com.music.bitchord.data.model.LikeStatus.LIKE }.keys
+            before = now
+            if (gone.isEmpty()) return@collect
+            val links = com.music.bitchord.data.LocalLikes.links.value
+            for (i in active.mediaItemCount - 1 downTo active.currentMediaItemIndex + 1) {
+                val item = active.getMediaItemAt(i)
+                val song = item.toSong()
+                val fromLiked = song.playbackSourceId in com.music.bitchord.data.LikedMusicCache.IDS
+                if (fromLiked && (item.mediaId in gone || links[item.mediaId] in gone)) active.removeMediaItem(i)
+            }
+        }
+    }
     // BitChord Audio: a file of yours shows (and sets) the heart of the liked song it is.
     LaunchedEffect(player.song?.videoId) {
         val song = player.song ?: return@LaunchedEffect

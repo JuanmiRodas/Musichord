@@ -896,6 +896,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             setLike(yt, status)
             return
         }
+        // Liked here (YouTube hasn't it): un-liked here, and gone from Liked Music.
+        if (status != LikeStatus.LIKE && id in local.liked.value) {
+            LikeState.set(id, status)
+            local.liked.value[id]?.let { local.setLocal(it, false) }
+            dropFromLikedLists(id)
+            return
+        }
         val song = local.songFor(id) ?: return
         LikeState.set(id, status)
         viewModelScope.launch {
@@ -905,6 +912,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 setLike(yt.videoId, status)
             } else {
                 local.setLocal(song, status == LikeStatus.LIKE)
+                if (status != LikeStatus.LIKE) dropFromLikedLists(id)
                 libraryStale = true
             }
         }
@@ -3042,12 +3050,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Music, the two are merged and the remaining pages aren't walked.
             // No overlap (or a week old) and the page fills in as upstream does.
             var pageState = state
-            // BitChord Audio: songs liked here because YouTube doesn't have them.
-            if (browseId in LikedMusicCache.IDS && state is UiState.Success) {
-                val mine = com.music.bitchord.data.LocalLikes.liked.value.values
-                    .filter { m -> state.data.none { it.videoId == m.videoId } }
-                if (mine.isNotEmpty()) pageState = UiState.Success(mine.toList() + state.data)
-            }
             if (browseId in LikedMusicCache.IDS && state is UiState.Success) {
                 val merged = likedSaved?.takeUnless { it.stale }?.let { LikedMusicCache.merge(state.data, it.songs) }
                 if (merged != null) {
@@ -3057,6 +3059,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } else if (more == null) {
                     LikedMusicCache.save(likedProfile, state.data)
                 }
+                // BitChord Audio: songs liked here because YouTube doesn't have
+                // them — added after the merge, which would otherwise drop them.
+                val shown = (pageState as? UiState.Success)?.data ?: state.data
+                val mine = com.music.bitchord.data.LocalLikes.liked.value.values
+                    .filter { m -> shown.none { it.videoId == m.videoId } }
+                if (mine.isNotEmpty()) pageState = UiState.Success(mine.toList() + shown)
             }
             // Update by id — the user may have pushed another page meanwhile.
             // A page showing its downloaded copy takes only a real listing: a
