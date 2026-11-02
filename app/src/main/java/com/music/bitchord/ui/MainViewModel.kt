@@ -1626,6 +1626,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+        // BitChord Audio: the library's songs, for "the rest of the album from this source".
+        viewModelScope.launch {
+            _library.collect { state ->
+                (state as? UiState.Success)?.data?.let {
+                    com.music.bitchord.data.sources.AlbumSources.librarySongs = it.likedSongs + it.librarySongs
+                }
+            }
+        }
         // BitChord Audio: the saved Liked Music, so every liked song shows its heart.
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             com.music.bitchord.data.LikedMusicCache.load(_activeProfileId.value)

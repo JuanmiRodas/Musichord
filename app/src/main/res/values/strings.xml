@@ -1391,4 +1391,6 @@
     <string name="download_skips_none">No songs skipped.</string>
     <string name="download_skips_share">Share CSV</string>
     <string name="download_skips_clear">Clear</string>
+    <string name="source_album_too">Also match the other %1$d songs of this album (Liked Music and library) in the same source</string>
+    <string name="source_album_done">Album: %1$d of %2$d songs matched in the same source</string>
 </resources>

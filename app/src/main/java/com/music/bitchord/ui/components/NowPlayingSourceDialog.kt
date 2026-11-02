@@ -72,8 +72,34 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
         ?: if (WebDavConfig.isWebDavId(song.videoId)) "pCloud" else "YouTube"
     val isFile = WebDavConfig.isWebDavId(song.videoId) || song.localUri != null
 
+    // BitChord Audio: the rest of the album from the same source, when ticked.
+    var wholeAlbum by remember(song.videoId) { mutableStateOf(true) }
+    var albumMates by remember(song.videoId) { mutableStateOf<List<Song>>(emptyList()) }
+    LaunchedEffect(song.videoId) {
+        albumMates = withContext(Dispatchers.Default) {
+            runCatching { com.music.bitchord.data.sources.AlbumSources.albumMates(song) }.getOrDefault(emptyList())
+        }
+    }
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    fun alsoAlbum(picked: Song) {
+        if (!wholeAlbum) return
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            val mates = com.music.bitchord.data.sources.AlbumSources.albumMates(song, picked)
+            if (mates.isEmpty()) return@launch
+            val n = runCatching { com.music.bitchord.data.sources.AlbumSources.apply(song, picked, mates) }.getOrDefault(0)
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    appContext,
+                    appContext.getString(R.string.source_album_done, n, mates.size),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
     fun switchTo(file: Song) {
         PreferredSource.chooseFile(song, file)
+        alsoAlbum(file)
         if (file.videoId != song.videoId) controller?.swapToVersion(file.carryingQueueOf(song))
         onDismiss()
     }
@@ -89,6 +115,7 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
 
     fun pick(hit: Song) {
         PreferredSource.chooseSong(song, hit)
+        alsoAlbum(hit)
         if (hit.videoId != song.videoId) controller?.swapToVersion(hit.carryingQueueOf(song))
         onDismiss()
     }
@@ -145,6 +172,19 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
+                }
+                if (albumMates.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { wholeAlbum = !wholeAlbum }.padding(vertical = 2.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.Checkbox(checked = wholeAlbum, onCheckedChange = null)
+                        Text(
+                            stringResource(R.string.source_album_too, albumMates.size),
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
                 }
                 SourceRow(
                     label = stringResource(R.string.source_auto),
