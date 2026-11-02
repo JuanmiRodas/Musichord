@@ -227,7 +227,7 @@ object SourceMap {
      * 3 seconds.
      */
     private suspend fun fillSaavn(songs: List<Song>) {
-        if (!AppSettings.jioSaavnDownloadsOn) return
+        if (!saavnUsable()) return
         val saavnConfig = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN } ?: return
         val saavn = SourceRegistry.instance(saavnConfig.id) ?: return
         val todo = songs.filter { s ->
@@ -315,7 +315,7 @@ object SourceMap {
     suspend fun ensureSaavn(song: Song) {
         val e = entries[song.videoId]
         if (e != null && e.saavnChecked && (e.saavn != null || e.saavnVersion >= SAAVN_VERSION)) return
-        if (!AppSettings.jioSaavnDownloadsOn && SourceRegistry.activeForPlayback().none { it.kind == SourceKind.JIOSAAVN }) return
+        if (!saavnUsable()) return
         val config = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN } ?: return
         val saavn = SourceRegistry.instance(config.id) ?: return
         val job = ensuring.getOrPut(song.videoId) {
@@ -333,6 +333,52 @@ object SourceMap {
             }
         }
         kotlinx.coroutines.withTimeoutOrNull(3_500) { job.await() }
+    }
+
+    /**
+     * Whether JioSaavn's strictly matched copies may play: JioSaavn set up,
+     * and on for playback or allowed for downloads (where the same strict
+     * match is trusted).
+     */
+    fun saavnUsable(): Boolean {
+        if (SourceRegistry.configs.value.none { it.kind == SourceKind.JIOSAAVN }) return false
+        return AppSettings.jioSaavnDownloadsOn || SourceRegistry.activeForPlayback().any { it.kind == SourceKind.JIOSAAVN }
+    }
+
+    /**
+     * Whether a JioSaavn copy can actually play: JioSaavn switched on for
+     * playback (a queued JioSaavn row is refused while it is off).
+     */
+    fun saavnPlayable(): Boolean = SourceRegistry.activeForPlayback().any { it.kind == SourceKind.JIOSAAVN }
+
+    /** For the source picker: what the map knows about JioSaavn and [videoId], in a few words. */
+    fun saavnStatus(videoId: String): String = when {
+        SourceRegistry.configs.value.none { it.kind == SourceKind.JIOSAAVN } -> "not set up"
+        !saavnPlayable() -> "off for playback (Settings → Sources) — its copies can't play automatically"
+        else -> when (val e = entries[videoId]) {
+            null -> "not looked up yet"
+            else -> when {
+                e.saavn != null -> "has this song (320 kbps)"
+                !e.saavnChecked -> "not looked up yet"
+                else -> "not found by name, artist and length"
+            }
+        }
+    }
+
+    /**
+     * JioSaavn's copy of YouTube song [song] as a song to queue, when the map
+     * has (or, asked now, finds) one; null when JioSaavn hasn't it.
+     */
+    suspend fun saavnSongFor(song: Song): Song? {
+        if (!saavnPlayable()) return null
+        ensureSaavn(song)
+        val key = entries[song.videoId]?.saavn ?: return null
+        return song.copy(
+            videoId = key,
+            sourceQuality = "MP3 $SAAVN_KBPS kbps",
+            localUri = null,
+            isVideo = false,
+        )
     }
 
     /** What was playing turned out to be JioSaavn's copy of [videoId] (track key [saavnKey]). */

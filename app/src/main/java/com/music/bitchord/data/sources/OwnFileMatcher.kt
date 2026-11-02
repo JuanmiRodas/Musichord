@@ -387,7 +387,7 @@ object OwnFileMatcher {
         val rank = qualityRank(best, durationSec)
         // A better copy than your file, where one plays: JioSaavn's 320 kbps,
         // when it's on for playback and the map knows it has the song.
-        val saavnPlays = SourceRegistry.activeForPlayback().any { it.kind == SourceKind.JIOSAAVN }
+        val saavnPlays = SourceMap.saavnPlayable()
         val saavn = videoId?.let(SourceMap::entry)?.saavn
         if (rank < 9_000 && saavnPlays && saavn != null && SourceMap.SAAVN_KBPS > rank) {
             return Keep("JioSaavn has a better copy (${SourceMap.SAAVN_KBPS} kbps) than your file ($rank kbps)")

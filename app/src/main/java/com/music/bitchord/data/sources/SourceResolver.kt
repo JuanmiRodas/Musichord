@@ -342,8 +342,7 @@ object SourceResolver {
     suspend fun mappedSaavnFor(videoId: String, target: TrackMatcher.Target): SourceStream? {
         if (target.title.isBlank() || target.isVideo) return null
         if (PreferredSource.get(target.title, target.artist) != null) return null
-        val saavnActive = SourceRegistry.activeForPlayback().any { it.kind == SourceKind.JIOSAAVN }
-        if (!saavnActive) return null
+        if (!SourceMap.saavnPlayable()) return null
         val e = SourceMap.entry(videoId)
         val saavnKey = e?.saavn
         if (e == null || saavnKey == null) {

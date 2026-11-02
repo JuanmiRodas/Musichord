@@ -187,6 +187,17 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                         "pCloud: $why",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // BitChord Audio: and what JioSaavn has, asked now if not yet.
+                    var saavn by remember(song.videoId) { mutableStateOf(com.music.bitchord.data.sources.SourceMap.saavnStatus(song.videoId)) }
+                    LaunchedEffect(song.videoId) {
+                        withContext(Dispatchers.IO) { runCatching { com.music.bitchord.data.sources.SourceMap.ensureSaavn(song) } }
+                        saavn = com.music.bitchord.data.sources.SourceMap.saavnStatus(song.videoId)
+                    }
+                    Text(
+                        "JioSaavn: $saavn",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                 }

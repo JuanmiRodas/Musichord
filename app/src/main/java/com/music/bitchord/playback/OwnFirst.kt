@@ -48,9 +48,38 @@ internal class OwnFirst(
             AppSettings.sourcePreference.value != AppSettings.SOURCE_YOUTUBE_FIRST &&
             !ListenTogether.state.value.inParty
 
+    /**
+     * BitChord Audio: JioSaavn's strictly matched copy (see [SourceMap]) may
+     * stand in for a YouTube song even while JioSaavn is off for live
+     * substitution — on any connection, the way a download may use it.
+     */
+    private val saavnEnabled: Boolean
+        get() = AppSettings.sourcePreference.value != AppSettings.SOURCE_YOUTUBE_FIRST &&
+            !ListenTogether.state.value.inParty &&
+            AppSettings.meteredConnection.value != null &&
+            SourceMap.saavnPlayable()
+
+    /** The best copy for [song]: your file when it is the best, else JioSaavn's when better than YouTube's. */
+    private suspend fun bestFor(song: Song): Song? {
+        if (enabled) fileFor(song)?.let { return it }
+        if (!saavnEnabled) return null
+        if (com.music.bitchord.data.sources.PreferredSource.get(song) != null) return null
+        val copy = SourceMap.saavnSongFor(song) ?: return null
+        com.music.bitchord.data.LocalLikes.link(copy, song)
+        return copy.copy(
+            queueTier = song.queueTier,
+            queueEntryId = song.queueEntryId,
+            radioName = song.radioName,
+            playbackSource = song.playbackSource,
+            playbackSourceType = song.playbackSourceType,
+            playbackSourceId = song.playbackSourceId,
+        )
+    }
+
     private fun wants(song: Song): Boolean =
         !song.isVideo &&
             !WebDavConfig.isWebDavId(song.videoId) &&
+            SourceRegistry.parseTrackKey(song.videoId) == null &&
             song.localUri == null &&
             !OriginalVersion.isPinned(song.videoId)
 
@@ -65,7 +94,7 @@ internal class OwnFirst(
         val candidate = (verdict as? OwnFileMatcher.Play)?.file
         if (candidate != null && WebDavConfig.isWebDavId(candidate.videoId) &&
             OwnFileMatcher.qualityRank(candidate, seconds) < SourceMap.SAAVN_KBPS &&
-            SourceRegistry.activeForPlayback().any { it.kind == SourceKind.JIOSAAVN }
+            SourceMap.saavnPlayable()
         ) {
             runCatching { SourceMap.ensureSaavn(song) }
             verdict = decide()
@@ -87,18 +116,18 @@ internal class OwnFirst(
 
     /** The item a play request starts on, as your file. */
     suspend fun resolveStart(items: List<MediaItem>, startIndex: Int): List<MediaItem> {
-        if (!enabled) return items
+        if (!enabled && !saavnEnabled) return items
         val item = items.getOrNull(startIndex) ?: return items
         val song = item.toSong()
         if (!wants(song)) return items
-        val file = withContext(Dispatchers.Default) { fileFor(song) } ?: return items
+        val file = withContext(Dispatchers.Default) { bestFor(song) } ?: return items
         TrackLog.d(TAG, "own-first: '${song.title}' starts from your file", about = song.videoId)
         return items.toMutableList().also { it[startIndex] = file.toMediaItem() }
     }
 
     /** The next few items, replaced by your files while still upcoming. Main thread. */
     fun lookAhead(player: Player) {
-        if (!enabled) return
+        if (!enabled && !saavnEnabled) return
         val count = player.mediaItemCount
         if (count == 0) return
         val current = player.currentMediaItemIndex.coerceAtLeast(0)
@@ -110,7 +139,7 @@ internal class OwnFirst(
             if (!wants(song) || !inFlight.add(item.mediaId)) continue
             scope.launch {
                 val file = try {
-                    withContext(Dispatchers.Default) { fileFor(song) }
+                    withContext(Dispatchers.Default) { bestFor(song) }
                 } finally {
                     inFlight -= item.mediaId
                 }
@@ -127,12 +156,12 @@ internal class OwnFirst(
 
     /** A song that became current from YouTube anyway: cross-faded to your file. Main thread. */
     fun onBecameCurrent(item: MediaItem?) {
-        if (!enabled || item == null) return
+        if ((!enabled && !saavnEnabled) || item == null) return
         val song = item.toSong()
         if (!wants(song) || !inFlight.add(item.mediaId)) return
         scope.launch {
             val file = try {
-                withContext(Dispatchers.Default) { fileFor(song) }
+                withContext(Dispatchers.Default) { bestFor(song) }
             } finally {
                 inFlight -= item.mediaId
             }
@@ -142,7 +171,7 @@ internal class OwnFirst(
             // Already playing a better copy (JioSaavn's 320 kbps found at play
             // time): not swapped down to the file.
             val playingFrom = com.music.bitchord.data.NerdStats.sourceFor(item.mediaId).orEmpty()
-            val fileRank = OwnFileMatcher.qualityRank(file)
+            val fileRank = if (WebDavConfig.isWebDavId(file.videoId)) OwnFileMatcher.qualityRank(file) else SourceMap.SAAVN_KBPS
             if (playingFrom.contains("JioSaavn", ignoreCase = true) && fileRank < 9_000 && fileRank <= SourceMap.SAAVN_KBPS) {
                 TrackLog.d(TAG, "own-first: '${song.title}' stays on JioSaavn (better than your $fileRank kbps file)", about = song.videoId)
                 return@launch
