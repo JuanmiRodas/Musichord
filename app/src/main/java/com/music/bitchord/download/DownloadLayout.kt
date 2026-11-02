@@ -147,7 +147,7 @@ object DownloadLayout {
             if (uri.lastPathSegment == "playlist.m3u8") continue
             val now = DownloadStore.placeOf(context, uri) ?: continue
             val ext = now.second.substringAfterLast('.', "m4a")
-            val song = Song(videoId = meta.videoId, title = meta.title, artist = meta.artist, albumName = meta.albumName)
+            val song = Song(videoId = meta.videoId, title = meta.title, artist = meta.artist, thumbnailUrl = meta.thumbnailUrl, durationText = meta.durationText, albumName = meta.albumName)
             val target = place(song, ext, albumFolderFor(meta.artist, meta.albumName))
             if (now.first == target.folder && now.second == target.name) continue
             val to = DownloadStore.move(context, uri, target.folder, target.name) ?: continue
