@@ -32,11 +32,25 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - Source map (`data/sources/SourceMap.kt`): Liked Music → best file / JioSaavn copy, computed once, saved on the
   phone and in pCloud `.bitchord-audio/source_map.json`. `MATCHER_VERSION` / `SAAVN_VERSION` bumps trigger a
   re-match. JioSaavn misses are retried on the album's track list (`albumPass`).
+- Japanese names (`data/sources/JapaneseNames.kt`): a romaji title/artist's Japanese spelling, confirmed by
+  sound (Kuromoji read-back) or by a paired catalogue entry — from your own copies (tags, file names, `.lrc`
+  `[ti:]/[ar:]`, lyrics folders), the lyrics' own words (`JapaneseReading.spanSounding`), Apple (JP storefront,
+  same track id in en/ja), MusicBrainz, Wikipedia (en→ja langlinks, ja search), Vocaloid Lyrics wiki (Fandom),
+  VGMdb, NetEase, Google IME. Kept in `japanese_names.json` (phone + pCloud). Used by the source picker search
+  ("Also searched as"), the JioSaavn source map (`SAAVN_VERSION` 3) and playback lookups (`SourceResolver`).
 - Now Playing source line + picker (`ui/components/NowPlayingSourceDialog.kt`): choose pCloud file / YouTube
   Music / any source search; remembered (`PreferredSource.kt`); checkbox "rest of the album from this source"
   (`AlbumSources.kt`, covers pCloud folders, JioSaavn albums, YouTube Music albums).
 - pCloud browser with search box (`ui/components/PcloudBrowser.kt`).
 - System media controls/lock screen covers for pCloud songs (`playback/ArtworkBitmapLoader.kt`).
+
+**Covers**
+- Cover button beside the source line (and in the source picker) → `ui/components/CoverPickerDialog.kt`:
+  covers from `data/covers/CoverSources.kt` (pCloud file/folder, YouTube Music, JioSaavn, Apple JP/US, Deezer,
+  Cover Art Archive, NetEase, VGMdb); album songs ticked to share it; "save into pCloud files" (default on)
+  rewrites MP3 ID3 / FLAC PICTURE (`CoverTags.kt`, tested in `CoverTagsTest`) via temp upload + MOVE
+  (`CoverWriter.kt`). Choice by title+artist in `CoverOverrides.kt` (`covers.json`, phone + pCloud), applied
+  through `ArtworkOverrides` (shared `Song.artworkAt`) and `rememberRemoteArtworkUrl`.
 
 **Likes**
 - Liked Music saved on the phone (`LikedMusicCache.kt`); hearts use the whole saved list.
@@ -56,7 +70,8 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
   `EditedLyrics.kt` (phone + pCloud `.bitchord-audio/lyrics/`); "Use automatic" undoes.
 - Tap-to-time editor: Start line, Break (…), Back, ±5 s (`sharedUi/.../LyricsTimingEditor.kt`).
 - "These lyrics are wrong" flags a source per song (`BadLyrics.kt`).
-- OLED mode (moon button): black, no system bars, cover/title rotate corners every 30 s, screen stays on
+- OLED mode (moon button): black, status bar kept (time + notification icons), nav bar hidden, big clock + date
+  with cover/title rotating corners every 30 s, screen kept on by the dialog window's own FLAG_KEEP_SCREEN_ON
   (`sharedUi/.../OledLyrics.kt`).
 
 **Downloads**
