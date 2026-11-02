@@ -49,6 +49,8 @@ object AlbumSources {
                     f.videoId.substringBeforeLast('/') == folder || OwnFileMatcher.sameAlbum(picked.albumName, f.albumName)
                 }
             }
+            // YouTube Music: the album's own track list there.
+            LocalLikes.isYouTubeId(picked.videoId) -> youTubeMusicAlbum(song, picked)
             else -> SourceRegistry.parseTrackKey(picked.videoId)?.let { (configId, _) ->
                 if (SourceRegistry.config(configId)?.kind == SourceKind.JIOSAAVN) saavnAlbum(configId, picked) else null
             }
@@ -57,12 +59,40 @@ object AlbumSources {
         for (mate in mates) {
             val pool = candidates ?: searchSource(picked, mate) ?: continue
             val best = best(mate, pool) ?: continue
-            PreferredSource.chooseSong(mate, best)
-            LocalLikes.link(best, mate)
+            when {
+                // The YouTube song itself: YouTube Music from now on (not your file or JioSaavn).
+                LocalLikes.isYouTubeId(best.videoId) && best.videoId == mate.videoId -> PreferredSource.chooseYouTube(mate, mate.videoId)
+                else -> {
+                    PreferredSource.chooseSong(mate, best)
+                    LocalLikes.link(best, mate)
+                }
+            }
             matched++
         }
         TrackLog.d(TAG, "album sources: ${picked.albumName}: $matched of ${mates.size} songs matched in the same source")
         return matched
+    }
+
+    /**
+     * The YouTube Music album of [picked]: its own album id when the row
+     * carries one, else the album found by name and artist in YouTube Music's
+     * album search.
+     */
+    private suspend fun youTubeMusicAlbum(song: Song, picked: Song): List<Song>? {
+        val album = picked.albumName?.takeIf { it.isNotBlank() } ?: song.albumName ?: return null
+        val albumId = picked.albumId ?: song.albumId?.takeIf { LocalLikes.isYouTubeId(song.videoId) } ?: run {
+            val results = com.music.bitchord.data.YtMusicRepository.search(
+                "$album ${picked.artist.substringBefore(',')}",
+                com.music.bitchord.data.model.SearchFilter.ALBUMS,
+            ).getOrNull().orEmpty()
+            val albums = results.mapNotNull { (it as? com.music.bitchord.data.model.SearchResult.Browse)?.item }
+            (albums.firstOrNull { OwnFileMatcher.sameAlbum(album, it.title) && OwnFileMatcher.sameArtist(picked.artist, it.subtitle.substringBefore(" • ").substringAfterLast(" • ")) }
+                ?: albums.firstOrNull { OwnFileMatcher.sameAlbum(album, it.title) && it.subtitle.contains(picked.artist.substringBefore(','), ignoreCase = true) }
+                ?: albums.firstOrNull { OwnFileMatcher.sameAlbum(album, it.title) })?.browseId
+        } ?: return null
+        return com.music.bitchord.data.YtMusicRepository.browseSongs(albumId).getOrNull()?.songs
+            ?.map { if (it.albumName.isNullOrBlank()) it.copy(albumName = album) else it }
+            ?.takeIf { it.isNotEmpty() }
     }
 
     /** JioSaavn's album of [picked], as songs of that source. */

@@ -123,6 +123,7 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
     fun switchToYouTube() {
         if (!isFile) {
             PreferredSource.chooseYouTube(song, song.videoId)
+            alsoAlbum(song)
             controller?.revertToOriginal()
             onDismiss()
             return
@@ -131,6 +132,7 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
         scope.launch {
             val yt = withContext(Dispatchers.IO) { youTubeCopyOf(song) }
             PreferredSource.chooseYouTube(song, yt?.videoId)
+            if (yt != null) alsoAlbum(yt)
             if (yt != null) controller?.swapToVersion(yt.carryingQueueOf(song))
             onDismiss()
         }
