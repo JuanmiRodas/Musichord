@@ -68,6 +68,7 @@ import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.IosShare
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -832,6 +833,7 @@ fun NowPlayingScreen(
     var showVideoQuality by remember { mutableStateOf(false) }
     var showLyricsProviders by remember { mutableStateOf(false) }
     var showLyricsTiming by remember { mutableStateOf(false) }
+    var oledLyrics by remember { mutableStateOf(false) }
     // Gated on the Bluetooth permission the first time — see [rememberOutputPicker].
     val openAudioOutput = rememberOutputPicker { showAudioOutput = true }
     // Listening in a party whose host has taken the controls: the transport
@@ -1635,6 +1637,18 @@ fun NowPlayingScreen(
                     showLyricsProviders = false
                     PlayerPlatform.host.flagWrongLyrics(song, lyricsSource)
                 }),
+            )
+        }
+        if (oledLyrics) {
+            PlayerBackHandler(enabled = true) { oledLyrics = false }
+            OledLyrics(
+                lines = lyricsTranslation.displayedLyrics,
+                playhead = lyricsPlayhead,
+                isPlaying = isPlaying,
+                title = song.title,
+                artist = song.artist,
+                artworkUrl = remoteArt ?: song.thumbnailUrl,
+                onDismiss = { oledLyrics = false },
             )
         }
         if (showLyricsTiming) {
@@ -3642,6 +3656,15 @@ fun NowPlayingScreen(
                                 }
                             }
                             Spacer(Modifier.width(10.dp))
+                            // BitChord Audio: the OLED view of the lyrics — black, one line.
+                            if (lyricsOpen && collapseDone && !lyrics.isNullOrEmpty()) {
+                                CircleGlyph(
+                                    icon = Icons.Rounded.DarkMode,
+                                    contentDescription = stringResource(Res.string.lyrics_oled),
+                                    onClick = { oledLyrics = true },
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
                             // Beside the credits rather than down in the toggle row:
                             // liking is about *this song*, and the row below is about
                             // how the queue plays. Guests get nothing to tap, since
