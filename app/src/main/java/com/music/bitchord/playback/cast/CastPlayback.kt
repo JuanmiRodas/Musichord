@@ -301,6 +301,7 @@ class CastPlayback(
     /** A new track became the phone's current one. */
     override fun onLocalTransition(item: MediaItem?, reason: Int) {
         if (!active || item == null) return
+        lastLocalMoveAt = SystemClock.elapsedRealtime()
         val remote = client ?: return
         if (item.mediaId == remoteMediaId()) {
             // Already there: the receiver moved first and this is the phone
@@ -344,6 +345,9 @@ class CastPlayback(
 
     // ---- the receiver moved -------------------------------------------------
 
+    /** When the phone last moved to another track (a skip, a tap in the queue). */
+    private var lastLocalMoveAt = 0L
+
     private fun onStatus() {
         val remote = client ?: return
         val status = remote.mediaStatus ?: return
@@ -364,7 +368,19 @@ class CastPlayback(
             MediaStatus.PLAYER_STATE_IDLE -> {
                 if (!loading && status.idleReason == MediaStatus.IDLE_REASON_FINISHED) {
                     wantsPlay = false
-                    onReceiverFinished()
+                    // BitChord Audio: only a track the phone is still on can
+                    // have finished. Right after the phone moves (a skip), the
+                    // receiver may still report the track it was told to leave
+                    // as "finished" — taking that as the end of the new one
+                    // skipped a second track.
+                    val finishedId = status.getQueueItemById(status.currentItemId)?.mediaId()
+                    val phoneId = localPlayer()?.currentMediaItem?.mediaId
+                    val justMoved = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
+                    if (justMoved || (finishedId != null && phoneId != null && finishedId != phoneId)) {
+                        Log.d(TAG, "receiver finished $finishedId, phone is on $phoneId: not moving on")
+                    } else {
+                        onReceiverFinished()
+                    }
                 } else if (status.idleReason == MediaStatus.IDLE_REASON_ERROR) {
                     // BitChord Audio: a track the receiver couldn't fetch by
                     // itself is tried once more, served by the phone.
@@ -374,7 +390,8 @@ class CastPlayback(
                     val index = failedId?.let { id -> player?.let { indexOfMediaId(it, id) } }
                     if (failedId != null && player != null && index != null && CastRouting.proxyOnly.add(failedId)) {
                         Log.w(TAG, "receiver couldn't play $failedId directly; serving it from the phone")
-                        if (player.currentMediaItemIndex != index) player.seekTo(index, 0L)
+                        val movedJustNow = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
+                        if (!movedJustNow && player.currentMediaItemIndex != index) player.seekTo(index, 0L)
                         load(player.getMediaItemAt(index), status.streamPosition.coerceAtLeast(0L), play = true)
                         return
                     }
@@ -390,7 +407,10 @@ class CastPlayback(
             lastItemId = itemId
             val mediaId = status.getQueueItemById(itemId)?.mediaId()
             val player = localPlayer()
-            if (mediaId != null && player != null && player.currentMediaItem?.mediaId != mediaId) {
+            // Right after the phone moved, the receiver is catching up: what it
+            // reports then is the old track, not a move of its own to follow.
+            val catchingUp = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
+            if (!catchingUp && mediaId != null && player != null && player.currentMediaItem?.mediaId != mediaId) {
                 indexOfMediaId(player, mediaId)?.let { player.seekTo(it, 0L) }
             }
             scheduleReconcile()
@@ -623,6 +643,9 @@ class CastPlayback(
         private const val AHEAD = 3
         private const val RECONCILE_DELAY_MS = 300L
         private const val SEEK_GRACE_MS = 1_500L
+
+        /** How long after the phone moves a "finished" from the receiver is taken as stale. */
+        private const val LOCAL_MOVE_GRACE_MS = 4_000L
 
         /**
          * What a stream is, for a receiver that is told rather than left to

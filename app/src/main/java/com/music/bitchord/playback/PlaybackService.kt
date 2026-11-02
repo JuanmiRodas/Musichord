@@ -1036,8 +1036,14 @@ class PlaybackService : MediaLibraryService() {
             // BitChord Audio: a video that reached the player despite the
             // look-ahead keeps playing as sound and is cross-faded onto its
             // audio release once that is found.
-            audioFirst.onBecameCurrent(mediaItem)
-            ownFirst.onBecameCurrent(mediaItem)
+            // Not while a speaker plays: a swap there is a second track change
+            // the receiver has to follow, mid-skip. Upcoming tracks are still
+            // replaced ahead of time (lookAhead), and the receiver is handed
+            // whatever is current.
+            if (!castPlayback.active && !CastController.state.value.casting) {
+                audioFirst.onBecameCurrent(mediaItem)
+                ownFirst.onBecameCurrent(mediaItem)
+            }
 
             // A receiver, if it is the speaker, is put on whatever became
             // current — or it is the one that moved, and this is the phone
