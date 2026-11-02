@@ -64,7 +64,10 @@ internal class OwnFirst(
             SourceMap.saavnPlayable()
 
     /** The best copy for [song]: your file when it is the best, else JioSaavn's when better than YouTube's. */
-    private suspend fun bestFor(song: Song): Song? {
+    private suspend fun bestFor(song: Song): Song? =
+        bestForUnchecked(song)?.takeIf { it.videoId !in broken }
+
+    private suspend fun bestForUnchecked(song: Song): Song? {
         // A copy you picked by hand comes first, on any connection: it is
         // your choice, not the own-files rule (which waits for Wi-Fi).
         when (val choice = com.music.bitchord.data.sources.PreferredSource.get(song)) {
@@ -204,8 +207,11 @@ internal class OwnFirst(
         }
     }
 
-    private companion object {
-        const val TAG = "BitChord"
-        const val LOOK_AHEAD = 3
+    companion object {
+        private const val TAG = "BitChord"
+
+        /** Copies that wouldn't play this session: not put back in a song's place. */
+        val broken: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+        private const val LOOK_AHEAD = 3
     }
 }

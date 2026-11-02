@@ -4028,6 +4028,39 @@ class PlaybackService : MediaLibraryService() {
      * connection to begin with. Such a failure says nothing against what is
      * cached, so recovery keeps every complete entry — see [AudioCache.discard].
      */
+    /** BitChord Audio: waits between tries that grow — 0.35, 1, 2, 4, 6 s. */
+    private fun recoveryDelayMs(attempt: Int): Long = when (attempt) {
+        1 -> RECOVERY_DELAY_MS
+        2 -> 1_000L
+        3 -> 2_000L
+        4 -> 4_000L
+        else -> 6_000L
+    }
+
+    /**
+     * BitChord Audio: the YouTube song a stand-in copy (your file, JioSaavn's)
+     * is playing for — the liked song it is linked to — as a queue item; null
+     * for anything else.
+     */
+    private fun youTubeSongFor(item: MediaItem): MediaItem? {
+        val song = item.toSong()
+        val isStandIn = song.videoId.startsWith("webdav:") || SourceRegistry.parseTrackKey(song.videoId) != null
+        if (!isStandIn) return null
+        val liked = com.music.bitchord.data.LikedMusicCache.load(com.music.bitchord.data.LikedMusicCache.lastProfile)?.songs.orEmpty()
+        val yt = com.music.bitchord.data.LocalLikes.youTubeOf(song.videoId)?.let { id -> liked.firstOrNull { it.videoId == id } }
+            ?: runCatching { com.music.bitchord.data.sources.SourceMap.likedSongInQueue(song) }.getOrNull()
+            ?: return null
+        if (yt.videoId == song.videoId || yt.videoId.startsWith("webdav:") || SourceRegistry.parseTrackKey(yt.videoId) != null) return null
+        return yt.copy(
+            queueTier = song.queueTier,
+            queueEntryId = song.queueEntryId,
+            radioName = song.radioName,
+            playbackSource = song.playbackSource,
+            playbackSourceType = song.playbackSourceType,
+            playbackSourceId = song.playbackSourceId,
+        ).toMediaItem()
+    }
+
     private fun isNetworkFault(error: PlaybackException): Boolean =
         error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
@@ -4127,7 +4160,13 @@ class PlaybackService : MediaLibraryService() {
         // more full walks for an answer already in hand — and in the report they
         // were exactly that, at roughly seventeen youtubei requests each.
         val verdict = permanentReason(error)
-        val givingUp = verdict != null || attempts > MAX_RECOVERIES
+        // BitChord Audio: a stream from your pCloud, JioSaavn or another
+        // source, or one failing on the network, is usually a moment's hiccup
+        // (a slow first byte, a throttled request): more tries, further apart
+        // ([recoveryDelayMs]), before anything is given up.
+        val ownOrSource = mediaId.startsWith("webdav:") || SourceRegistry.parseTrackKey(mediaId) != null
+        val maxAttempts = if (ownOrSource || isNetworkFault(error)) MAX_NETWORK_RECOVERIES else MAX_RECOVERIES
+        val givingUp = verdict != null || attempts > maxAttempts
         // A track that has never made a sound has *failed to start*, whatever
         // the error was, and the queue should move past it once the attempts are
         // spent — see [skipReason]. Read here rather than after the delay below,
@@ -4203,7 +4242,7 @@ class PlaybackService : MediaLibraryService() {
         scope.launch(TrackLog.about(mediaId)) {
             // Long enough for the released source to let go of the cache keys
             // about to be removed, short enough to read as a stutter.
-            delay(RECOVERY_DELAY_MS)
+            delay(recoveryDelayMs(attempts))
             uri?.let { withContext(Dispatchers.IO) { AudioCache.discard(it, keepComplete = networkFault) } }
             // The bytes go even when nothing is going to be prepared after
             // them. A half-filled entry whose owner has just been forgotten is
@@ -4219,6 +4258,28 @@ class PlaybackService : MediaLibraryService() {
                 // the outside that is indistinguishable from a hung app — which
                 // is what the report describes and what "it was stuck on my
                 // phone too" means. Moving on is the only honest answer.
+                //
+                // BitChord Audio: unless it was a copy standing in for a
+                // YouTube song (your file, JioSaavn's): then the YouTube song
+                // itself plays, at the same moment, and the queue stays put.
+                if (verdict == null) {
+                    val standIn = withContext(Dispatchers.Default) { youTubeSongFor(item) }
+                    if (standIn != null) {
+                        val moved = withContext(Dispatchers.Main) {
+                            val live = this@PlaybackService.player ?: return@withContext false
+                            if (live.currentMediaItem?.mediaId != mediaId) return@withContext false
+                            OwnFirst.broken += mediaId
+                            recoveries.remove(mediaId)
+                            TrackLog.w("BitChord", "$mediaId won't play; YouTube's copy plays instead", about = mediaId)
+                            swappingMediaId = standIn.mediaId
+                            live.replaceMediaItem(live.currentMediaItemIndex, standIn)
+                            live.seekTo(live.currentMediaItemIndex, position)
+                            live.prepare()
+                            true
+                        }
+                        if (moved) return@launch
+                    }
+                }
                 skipReason(verdict, error, neverStarted, attempts)?.let { reason ->
                     withContext(Dispatchers.Main) { skipPastUnplayable(mediaId, reason) }
                 }
@@ -9657,6 +9718,9 @@ class PlaybackService : MediaLibraryService() {
 
         /** How many times one track is picked up off the floor — see [recoverFrom]. */
         const val MAX_RECOVERIES = 2
+
+        /** BitChord Audio: tries for a stream failing on the network, or your file / a source's copy. */
+        const val MAX_NETWORK_RECOVERIES = 5
 
         /**
          * How many tracks in a row may be skipped for a plain playback error
