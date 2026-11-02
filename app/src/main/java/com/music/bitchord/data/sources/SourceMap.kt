@@ -47,7 +47,12 @@ object SourceMap {
         val gen: Int,
         val saavn: String? = null,
         val saavnChecked: Boolean = false,
+        /** Which JioSaavn matching found (or missed) [saavn]: a miss is looked at again when it improves. */
+        val saavnVersion: Int = 0,
     )
+
+    /** Bumped when JioSaavn matching improves: songs it missed are looked up again. */
+    private const val SAAVN_VERSION = 2
 
     /** JioSaavn's tier for every row it returns: 320 kbps AAC. */
     const val SAAVN_KBPS = 320
@@ -222,9 +227,12 @@ object SourceMap {
      */
     private suspend fun fillSaavn(songs: List<Song>) {
         if (!AppSettings.jioSaavnDownloadsOn) return
-        val saavn = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }
-            ?.let { SourceRegistry.instance(it.id) } ?: return
-        val todo = songs.filter { entries[it.videoId]?.saavnChecked != true }
+        val saavnConfig = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN } ?: return
+        val saavn = SourceRegistry.instance(saavnConfig.id) ?: return
+        val todo = songs.filter { s ->
+            val e = entries[s.videoId]
+            e?.saavnChecked != true || (e.saavn == null && e.saavnVersion < SAAVN_VERSION)
+        }
         if (todo.isEmpty()) return
         TrackLog.d(TAG, "source map: looking up ${todo.size} liked songs on JioSaavn")
         var found = 0
@@ -247,13 +255,83 @@ object SourceMap {
             }
             if (hit != null) found++
             val old = entries[s.videoId] ?: Entry(null, 0, false, gen())
-            entries[s.videoId] = old.copy(saavn = hit?.videoId, saavnChecked = true)
+            entries[s.videoId] = old.copy(saavn = hit?.videoId, saavnChecked = true, saavnVersion = SAAVN_VERSION)
             if (i % 100 == 99) save()
             kotlinx.coroutines.delay(400)
         }
         save()
-        upload()
         TrackLog.d(TAG, "source map: JioSaavn has $found of ${todo.size} liked songs checked")
+        found += albumPass(songs, saavnConfig.id)
+        save()
+        upload()
+    }
+
+    /**
+     * The songs JioSaavn search missed, looked for on their album instead: an
+     * album JioSaavn has is there whole, so a song of it is matched among the
+     * album's tracks even when its name differs a little (another
+     * romanisation, a "(2022 Remaster)", a typo) — as long as the length
+     * agrees. Albums are found by name and artist; each is fetched once.
+     */
+    private suspend fun albumPass(songs: List<Song>, configId: String): Int {
+        val missing = songs.filter { s ->
+            val e = entries[s.videoId]
+            e != null && e.saavnChecked && e.saavn == null && !s.albumName.isNullOrBlank()
+        }
+        if (missing.isEmpty()) return 0
+        var found = 0
+        val groups = missing.groupBy { OwnFileMatcher.key(it.albumName.orEmpty()) + "|" + OwnFileMatcher.key(it.artist.substringBefore(',')) }
+        for ((_, group) in groups) {
+            if (AppSettings.meteredConnection.value != false) break
+            val sample = group.first()
+            val album = sample.albumName.orEmpty()
+            val hits = runCatching {
+                com.music.bitchord.data.jiosaavn.JioSaavnService.searchAlbums("$album ${sample.artist.substringBefore(',')}")
+            }.getOrDefault(emptyList())
+            val hit = hits.firstOrNull { h ->
+                OwnFileMatcher.sameAlbum(album, h.title) && (h.artists.isBlank() || OwnFileMatcher.sameArtist(sample.artist, h.artists))
+            } ?: hits.firstOrNull { h -> OwnFileMatcher.sameAlbum(album, h.title) }
+            if (hit == null) {
+                kotlinx.coroutines.delay(300)
+                continue
+            }
+            val tracks = runCatching { com.music.bitchord.data.jiosaavn.JioSaavnService.albumSongs(hit.id) }.getOrDefault(emptyList())
+            for (s in group) {
+                val sec = seconds(s.durationText)
+                val keys = OwnFileMatcher.titleKeys(s.title) + runCatching { OwnFileMatcher.soundKeys(s.title) }.getOrDefault(emptySet())
+                val best = tracks.mapNotNull { t ->
+                    val tSec = t.moreInfo.duration.toIntOrNull() ?: return@mapNotNull null
+                    val drift = if (sec == null) 0 else kotlin.math.abs(sec - tSec)
+                    if (drift > 6) return@mapNotNull null
+                    val tKeys = OwnFileMatcher.titleKeys(t.title) + runCatching { OwnFileMatcher.soundKeys(t.title) }.getOrDefault(emptySet())
+                    val score = when {
+                        tKeys.any { it in keys } -> 3
+                        OwnFileMatcher.nearSpelling(s.title, t.title) -> 2
+                        wordOverlap(s.title, t.title) >= 0.5 -> 1
+                        // Same album, same length to the second: the same song by another name.
+                        sec != null && drift <= 1 -> 1
+                        else -> 0
+                    }
+                    if (score == 0) null else Triple(t, score, drift)
+                }.sortedWith(compareByDescending<Triple<com.music.bitchord.data.jiosaavn.RawSongItem, Int, Int>> { it.second }.thenBy { it.third }).firstOrNull()
+                if (best != null) {
+                    val raw = best.first
+                    entries[s.videoId] = entries[s.videoId]!!.copy(saavn = SourceRegistry.trackKey(configId, raw.id), saavnVersion = SAAVN_VERSION)
+                    found++
+                }
+            }
+            kotlinx.coroutines.delay(400)
+        }
+        TrackLog.d(TAG, "source map: JioSaavn albums found $found more liked songs")
+        return found
+    }
+
+    private fun wordOverlap(a: String, b: String): Double {
+        fun words(s: String) = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length > 1 }.toSet()
+        val x = words(a)
+        val y = words(b)
+        if (x.isEmpty() || y.isEmpty()) return 0.0
+        return x.intersect(y).size.toDouble() / minOf(x.size, y.size)
     }
 
     private fun read(text: String) = runCatching {
@@ -267,6 +345,7 @@ object SourceMap {
                 gen = e.optInt("g"),
                 saavn = if (e.has("s") && !e.isNull("s")) e.getString("s") else null,
                 saavnChecked = e.optBoolean("sc"),
+                saavnVersion = e.optInt("sv"),
             )
         }
     }
@@ -281,6 +360,7 @@ object SourceMap {
                 put("g", e.gen)
                 e.saavn?.let { put("s", it) }
                 if (e.saavnChecked) put("sc", true)
+                if (e.saavnVersion > 0) put("sv", e.saavnVersion)
             })
         }
         return o.toString()
