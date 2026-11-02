@@ -5544,8 +5544,15 @@ class PlaybackService : MediaLibraryService() {
      */
     private suspend fun resolveWithModulePriority(
         videoId: String,
-        target: TrackMatcher.Target,
+        asked: TrackMatcher.Target,
     ): Resolved {
+        // BitChord Audio: a liked song's album, when the queue item didn't
+        // carry it — without one, a catalogue holding the song on two
+        // releases is refused as ambiguous and the song stays on YouTube.
+        val target = if (!asked.album.isNullOrBlank()) asked else asked.copy(
+            album = com.music.bitchord.data.LikedMusicCache.load(com.music.bitchord.data.LikedMusicCache.lastProfile)
+                ?.songs?.firstOrNull { it.videoId == videoId }?.albumName?.takeIf { it.isNotBlank() },
+        )
         // A substitute already broke this track once — see
         // [StreamChoice.refuseSubstitutes]. Racing the modules again would find
         // the same catalogue holding the same unplayable URL, so there is
@@ -5557,6 +5564,12 @@ class PlaybackService : MediaLibraryService() {
         if (StreamChoice.substitutesRefused(videoId)) {
             return Resolved.YouTube(StreamResolver.resolve(videoId))
         }
+        // BitChord Audio: JioSaavn's copy the source map already matched,
+        // when it beats your file — the best copy plays from the start.
+        runCatching { SourceResolver.mappedSaavnFor(videoId, target) }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrNull()
+            ?.let { return Resolved.Module(it) }
         // BitChord Audio: your own file, when it qualifies, plays from the
         // start — no race against YouTube, nothing to swap later.
         runCatching { SourceResolver.ownFileFor(target) }

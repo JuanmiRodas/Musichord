@@ -159,12 +159,21 @@ object JapaneseNames {
     /** What has been learnt for this song, without looking anything up. */
     fun cached(title: String, artist: String): Names? {
         val t = titleKey(title, artist)?.let { titles[it] }.orEmpty()
-        val a = artists[artistKey(artist)].orEmpty()
+        val japaneseSong = t.isNotEmpty() || JapaneseReading.isJapanese(title) || (title.isBlank() || mayHaveJapanese(title))
+        val a = if (japaneseSong) artists[artistKey(artist)].orEmpty() else emptyList()
         return Names(t, a).takeUnless { it.isEmpty }
     }
 
     /** The Japanese spellings learnt for [artist], without looking anything up. */
-    fun cachedArtist(artist: String): List<String> = artists[artistKey(artist)].orEmpty()
+    fun cachedArtist(artist: String): List<String> = artists[artistKey(artist)].orEmpty().filterNot(::katakanaOnly)
+
+    /**
+     * A name written only in katakana — how Japanese spells a foreign name
+     * (ケシャ for Kesha). Not offered for an artist on its own: without a
+     * Japanese song to go with it, it is far likelier a foreign artist.
+     */
+    private fun katakanaOnly(name: String): Boolean =
+        name.isNotBlank() && name.all { it in '\u30a0'..'\u30ff' || it == '・' || it.isWhitespace() }
 
     // ── Finding ──────────────────────────────────────────────────────────
 
@@ -179,7 +188,9 @@ object JapaneseNames {
         val title = song.title
         val artist = song.artist
         val wantTitle = mayHaveJapanese(title) || JapaneseReading.isJapanese(title)
-        val wantArtist = mayHaveJapaneseArtist(artist)
+        // An artist's Japanese name only for a Japanese song: "Kesha" singing
+        // "Backstabber" isn't asked for as ケシャ.
+        val wantArtist = wantTitle && mayHaveJapaneseArtist(artist)
         if (!wantTitle && !wantArtist) return@withContext Names.NONE
         JapaneseReading.tokenizerNow()
         val sound = soundOf(title)
@@ -220,14 +231,14 @@ object JapaneseNames {
     /** The Japanese spellings of an artist alone ("Mika Nakashima" → 中島美嘉). */
     suspend fun ofArtist(artist: String, online: Boolean = true): List<String> = withContext(Dispatchers.IO) {
         if (!mayHaveJapaneseArtist(artist)) return@withContext emptyList()
-        artists[artistKey(artist)]?.let { return@withContext it }
+        artists[artistKey(artist)]?.filterNot(::katakanaOnly)?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
         val missKey = "artist|${artistKey(artist)}|$online"
         if (missKey in missed) return@withContext emptyList()
         JapaneseReading.tokenizerNow()
         val found = Found(null, artist, null)
         runCatching { artistFromLibrary(artist, found) }
         if (online && AppSettings.meteredConnection.value != null) runCatching { artistFromCatalogues(artist, found) }
-        val names = found.result().artists
+        val names = found.result().artists.filterNot(::katakanaOnly)
         if (names.isEmpty()) missed += missKey else {
             artists[artistKey(artist)] = names
             persist()
@@ -244,7 +255,7 @@ object JapaneseNames {
         val q = query.trim()
         if (q.isBlank() || JapaneseReading.isJapanese(q) || LyricNames.kana(q) == null) return@withContext emptyList()
         val out = LinkedHashSet<String>()
-        artists[artistKey(q)]?.let(out::addAll)
+        artists[artistKey(q)]?.filterNot(::katakanaOnly)?.let(out::addAll)
         soundOf(q)?.let { s -> titles.entries.filter { it.key.startsWith("$s|") }.forEach { out += it.value } }
         if (out.isEmpty()) {
             withTimeoutOrNull(3_500) { runCatching { LyricNames.japanese(q) }.getOrNull() }?.firstOrNull()?.let(out::add)

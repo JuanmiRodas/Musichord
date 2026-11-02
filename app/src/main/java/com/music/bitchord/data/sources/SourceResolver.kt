@@ -1,5 +1,6 @@
 package com.music.bitchord.data.sources
 
+import kotlinx.coroutines.launch
 import android.net.Uri
 import android.util.Log
 import com.music.bitchord.data.TrackLog
@@ -327,6 +328,48 @@ object SourceResolver {
         TrackLog.d(TAG, "own file: '${target.title}' plays from your library at ${stream.format.summary}")
         return stream
     }
+
+    /**
+     * BitChord Audio: JioSaavn's copy of YouTube song [videoId] as the source
+     * map knows it (strictly matched: name in any spelling, artist, length to
+     * 3 s), when it is better than what else would play — so a song JioSaavn
+     * has at 320 kbps never stays on YouTube's ~130 kbps just because a live
+     * search found two releases of it and declined to choose. Not when you
+     * picked a copy by hand, or your own file is lossless or at least as good.
+     * A song the map hasn't looked up yet is looked up in the background, for
+     * next time.
+     */
+    suspend fun mappedSaavnFor(videoId: String, target: TrackMatcher.Target): SourceStream? {
+        if (target.title.isBlank() || target.isVideo) return null
+        if (PreferredSource.get(target.title, target.artist) != null) return null
+        val saavnActive = SourceRegistry.activeForPlayback().any { it.kind == SourceKind.JIOSAAVN }
+        if (!saavnActive) return null
+        val e = SourceMap.entry(videoId)
+        val saavnKey = e?.saavn
+        if (e == null || saavnKey == null) {
+            if (e == null || !e.saavnChecked) {
+                val song = com.music.bitchord.data.model.Song(
+                    videoId = videoId,
+                    title = target.title,
+                    artist = target.artist,
+                    thumbnailUrl = null,
+                    durationText = target.durationSec?.let { "%d:%02d".format(it / 60, it % 60) },
+                    albumName = target.album,
+                )
+                mappedScope.launch { runCatching { SourceMap.ensureSaavn(song) } }
+            }
+            return null
+        }
+        val own = e.file?.takeIf { SourceMap.lookup(videoId)?.file == it }
+        if (own != null && (e.lossless || e.kbps >= SourceMap.SAAVN_KBPS)) return null
+        val (configId, trackId) = SourceRegistry.parseTrackKey(saavnKey) ?: return null
+        val source = SourceRegistry.instance(configId) ?: return null
+        val stream = runCatching { source.stream(trackId, requestForNow()) }.getOrNull() ?: return null
+        TrackLog.d(TAG, "mapped: '${target.title}' plays JioSaavn's copy at ${stream.format.summary}")
+        return stream.copy(sourceConfigId = stream.sourceConfigId ?: configId)
+    }
+
+    private val mappedScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     suspend fun substituteForYouTube(target: TrackMatcher.Target): SourceStream? {
         // Video rows always use YouTube's own stream unless the listener
