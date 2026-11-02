@@ -87,7 +87,7 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
         covers = runCatching { CoverSources.find(app, song) }.getOrDefault(emptyList())
     }
 
-    fun apply() {
+    fun applyCover() {
         val url = picked ?: return
         val targets = listOf(song) + albumSongs.filter { it.videoId in chosen }
         CoverOverrides.set(targets, url)
@@ -210,7 +210,7 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = ::apply, enabled = picked != null) {
+            TextButton(onClick = { applyCover() }, enabled = picked != null) {
                 Text(stringResource(R.string.cover_apply))
             }
         },
