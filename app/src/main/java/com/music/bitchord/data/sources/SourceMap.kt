@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
@@ -240,38 +241,9 @@ object SourceMap {
             if (AppSettings.meteredConnection.value != false) {
                 save(); upload(); return
             }
-            val sec = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
-                ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
-            val target = TrackMatcher.Target(title = s.title, artist = s.artist, album = s.albumName, durationSec = sec)
-            val query = TrackMatcher.queries(target).firstOrNull() ?: "${s.title} ${s.artist}"
-            val rows = runCatching { saavn.search(query, limit = 8) }.getOrNull() ?: return@forEachIndexed
-            val keys = OwnFileMatcher.titleKeys(s.title) + runCatching { OwnFileMatcher.soundKeys(s.title) }.getOrDefault(emptySet())
-            fun same(row: Song, japaneseArtists: List<String>): Boolean {
-                val rowSec = row.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
-                    ?.fold(0) { acc, p -> acc * 60 + p }
-                val rowKeys = OwnFileMatcher.titleKeys(row.title) + runCatching { OwnFileMatcher.soundKeys(row.title) }.getOrDefault(emptySet())
-                return sec != null && rowSec != null && kotlin.math.abs(sec - rowSec) <= 3 &&
-                    (OwnFileMatcher.sameArtist(s.artist, row.artist) || ArtistLinks.linked(s.artist, row.artist) ||
-                        japaneseArtists.any { OwnFileMatcher.sameArtist(it, row.artist) }) &&
-                    rowKeys.any { it in keys }
-            }
-            var hit = (TrackMatcher.ranked(rows, target) + rows).firstOrNull { same(it, emptyList()) }
-            // Not found by its romaji: asked again by its Japanese names (see JapaneseNames).
-            if (hit == null && (JapaneseNames.mayHaveJapanese(s.title) || !JapaneseReading.isJapanese(s.artist))) {
-                val names = runCatching { JapaneseNames.of(s) }.getOrDefault(JapaneseNames.Names.NONE)
-                if (!names.isEmpty) {
-                    for (q in names.queries(s.artist).take(4)) {
-                        val more = runCatching { saavn.search(q, limit = 12) }.getOrNull().orEmpty()
-                        hit = more.firstOrNull { same(it, names.artists) }
-                        if (hit != null) {
-                            JapaneseNames.learn(s.title, s.artist, hit.title.takeIf(JapaneseReading::isJapanese), hit.artist.takeIf(JapaneseReading::isJapanese))
-                            if (!OwnFileMatcher.sameArtist(s.artist, hit.artist)) ArtistLinks.learn(s.artist, hit.artist)
-                            TrackLog.d(TAG, "source map: JioSaavn has '${s.title}' as '${hit.title}' ('$q')")
-                            break
-                        }
-                        kotlinx.coroutines.delay(300)
-                    }
-                }
+            val hit = saavnCopyOf(s, saavn) ?: run {
+                if (lastLookupFailed) return@forEachIndexed
+                null
             }
             if (hit != null) found++
             val old = entries[s.videoId] ?: Entry(null, 0, false, gen())
@@ -284,6 +256,91 @@ object SourceMap {
         found += albumPass(songs, saavnConfig.id)
         save()
         upload()
+    }
+
+    /** Set when the last [saavnCopyOf] couldn't ask JioSaavn at all (offline, an error). */
+    @Volatile
+    private var lastLookupFailed = false
+
+    /**
+     * JioSaavn's copy of [s], strictly matched (title in any of its names,
+     * artist, length to 3 seconds), asked by its romaji and then its Japanese
+     * names; null when JioSaavn hasn't it.
+     */
+    private suspend fun saavnCopyOf(s: Song, saavn: MusicSource): Song? {
+        lastLookupFailed = false
+        val sec = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+            ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+        val target = TrackMatcher.Target(title = s.title, artist = s.artist, album = s.albumName, durationSec = sec)
+        val query = TrackMatcher.queries(target).firstOrNull() ?: "${s.title} ${s.artist}"
+        val rows = runCatching { saavn.search(query, limit = 8) }.getOrNull() ?: run { lastLookupFailed = true; return null }
+        val keys = OwnFileMatcher.titleKeys(s.title) + runCatching { OwnFileMatcher.soundKeys(s.title) }.getOrDefault(emptySet())
+        fun same(row: Song, japaneseArtists: List<String>): Boolean {
+            val rowSec = row.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+                ?.fold(0) { acc, p -> acc * 60 + p }
+            val rowKeys = OwnFileMatcher.titleKeys(row.title) + runCatching { OwnFileMatcher.soundKeys(row.title) }.getOrDefault(emptySet())
+            return sec != null && rowSec != null && kotlin.math.abs(sec - rowSec) <= 3 &&
+                (OwnFileMatcher.sameArtist(s.artist, row.artist) || ArtistLinks.linked(s.artist, row.artist) ||
+                    japaneseArtists.any { OwnFileMatcher.sameArtist(it, row.artist) }) &&
+                rowKeys.any { it in keys }
+        }
+        var hit = (TrackMatcher.ranked(rows, target) + rows).firstOrNull { same(it, emptyList()) }
+        // Not found by its romaji: asked again by its Japanese names (see JapaneseNames).
+        if (hit == null && (JapaneseNames.mayHaveJapanese(s.title) || !JapaneseReading.isJapanese(s.artist))) {
+            val names = runCatching { JapaneseNames.of(s) }.getOrDefault(JapaneseNames.Names.NONE)
+            if (!names.isEmpty) {
+                for (q in names.queries(s.artist).take(4)) {
+                    val more = runCatching { saavn.search(q, limit = 12) }.getOrNull().orEmpty()
+                    hit = more.firstOrNull { same(it, names.artists) }
+                    if (hit != null) {
+                        JapaneseNames.learn(s.title, s.artist, hit.title.takeIf(JapaneseReading::isJapanese), hit.artist.takeIf(JapaneseReading::isJapanese))
+                        if (!OwnFileMatcher.sameArtist(s.artist, hit.artist)) ArtistLinks.learn(s.artist, hit.artist)
+                        TrackLog.d(TAG, "source map: JioSaavn has '${s.title}' as '${hit.title}' ('$q')")
+                        break
+                    }
+                    kotlinx.coroutines.delay(300)
+                }
+            }
+        }
+        return hit
+    }
+
+    private val ensuring = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Unit>>()
+
+    /**
+     * Makes sure the map knows whether JioSaavn has [song] — asked now when it
+     * hasn't been yet — so your file is never chosen over a better JioSaavn
+     * copy just because the background lookup hadn't reached the song.
+     */
+    suspend fun ensureSaavn(song: Song) {
+        val e = entries[song.videoId]
+        if (e != null && e.saavnChecked && (e.saavn != null || e.saavnVersion >= SAAVN_VERSION)) return
+        if (!AppSettings.jioSaavnDownloadsOn && SourceRegistry.activeForPlayback().none { it.kind == SourceKind.JIOSAAVN }) return
+        val config = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN } ?: return
+        val saavn = SourceRegistry.instance(config.id) ?: return
+        val job = ensuring.getOrPut(song.videoId) {
+            scope.async {
+                try {
+                    val hit = saavnCopyOf(song, saavn)
+                    if (!lastLookupFailed) {
+                        val old = entries[song.videoId] ?: Entry(null, 0, false, gen())
+                        entries[song.videoId] = old.copy(saavn = hit?.videoId, saavnChecked = true, saavnVersion = SAAVN_VERSION)
+                        save()
+                    }
+                } finally {
+                    ensuring.remove(song.videoId)
+                }
+            }
+        }
+        kotlinx.coroutines.withTimeoutOrNull(3_500) { job.await() }
+    }
+
+    /** What was playing turned out to be JioSaavn's copy of [videoId] (track key [saavnKey]). */
+    fun recordSaavn(videoId: String, saavnKey: String) {
+        val old = entries[videoId] ?: Entry(null, 0, false, gen())
+        if (old.saavn == saavnKey) return
+        entries[videoId] = old.copy(saavn = saavnKey, saavnChecked = true, saavnVersion = SAAVN_VERSION)
+        save()
     }
 
     /**

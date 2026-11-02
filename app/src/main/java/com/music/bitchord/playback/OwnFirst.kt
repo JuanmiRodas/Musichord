@@ -7,6 +7,9 @@ import com.music.bitchord.data.listentogether.ListenTogether
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.OwnFileMatcher
+import com.music.bitchord.data.sources.SourceKind
+import com.music.bitchord.data.sources.SourceMap
+import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.webdav.WebDavConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,10 +54,23 @@ internal class OwnFirst(
             song.localUri == null &&
             !OriginalVersion.isPinned(song.videoId)
 
-    private fun fileFor(song: Song): Song? {
+    private suspend fun fileFor(song: Song): Song? {
         val seconds = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
             ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
-        return when (val v = runCatching { OwnFileMatcher.decide(song.title, song.artist, seconds, song.albumName, song.videoId) }.getOrNull()) {
+        fun decide() = runCatching { OwnFileMatcher.decide(song.title, song.artist, seconds, song.albumName, song.videoId) }.getOrNull()
+        var verdict = decide()
+        // BitChord Audio: a lossy file below JioSaavn's 320 kbps is only chosen
+        // once JioSaavn has been asked for the song — the background lookup may
+        // not have reached it yet, and a better copy there wins.
+        val candidate = (verdict as? OwnFileMatcher.Play)?.file
+        if (candidate != null && WebDavConfig.isWebDavId(candidate.videoId) &&
+            OwnFileMatcher.qualityRank(candidate, seconds) < SourceMap.SAAVN_KBPS &&
+            SourceRegistry.activeForPlayback().any { it.kind == SourceKind.JIOSAAVN }
+        ) {
+            runCatching { SourceMap.ensureSaavn(song) }
+            verdict = decide()
+        }
+        return when (val v = verdict) {
             is OwnFileMatcher.Play -> if (v.file.videoId == song.videoId) null else v.file.also {
                 com.music.bitchord.data.LocalLikes.link(it, song)
             }.copy(
@@ -123,6 +139,14 @@ internal class OwnFirst(
             file ?: return@launch
             val live = currentPlayer() ?: return@launch
             if (live.currentMediaItem?.mediaId != item.mediaId) return@launch
+            // Already playing a better copy (JioSaavn's 320 kbps found at play
+            // time): not swapped down to the file.
+            val playingFrom = com.music.bitchord.data.NerdStats.sourceFor(item.mediaId).orEmpty()
+            val fileRank = OwnFileMatcher.qualityRank(file)
+            if (playingFrom.contains("JioSaavn", ignoreCase = true) && fileRank < 9_000 && fileRank <= SourceMap.SAAVN_KBPS) {
+                TrackLog.d(TAG, "own-first: '${song.title}' stays on JioSaavn (better than your $fileRank kbps file)", about = song.videoId)
+                return@launch
+            }
             if (swapCurrent(file.toMediaItem())) {
                 TrackLog.d(TAG, "own-first: '${song.title}' cross-faded to your file", about = song.videoId)
             }
