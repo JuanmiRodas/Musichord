@@ -3113,7 +3113,6 @@ internal fun rememberLyricsTranslation(
     val alreadyInLanguageMessage = stringResource(Res.string.lyrics_already_in_language, translationLanguageName)
     val translationUnavailableMessage = stringResource(Res.string.lyrics_translation_unavailable)
     val alreadyRomanizedMessage = stringResource(Res.string.lyrics_already_romanized)
-    val romanizationUnavailableMessage = stringResource(Res.string.lyrics_romanization_unavailable)
     var translationState by remember(trackId, translationLanguage, lyrics) {
         mutableStateOf<LyricsTranslationUiState>(LyricsTranslationUiState.Idle)
     }
@@ -3283,13 +3282,13 @@ internal fun rememberLyricsTranslation(
                             translationTransition++
                             haptics.play(Haptic.ToggleOn)
                         }
+                        // BitChord Audio: nothing to say when there is nothing
+                        // to romanize — usually the lyrics are Latin already.
                         LyricsRomanizationResult.AlreadyRomanized -> {
                             romanizationState = LyricsTranslationUiState.SameLanguage
-                            PlayerPlatform.host.showMessage(alreadyRomanizedMessage)
                         }
                         LyricsRomanizationResult.Unavailable -> {
                             romanizationState = LyricsTranslationUiState.Idle
-                            PlayerPlatform.host.showMessage(romanizationUnavailableMessage)
                         }
                     }
                 }
@@ -3312,8 +3311,6 @@ internal fun rememberLyricsTranslation(
             stringResource(Res.string.lyrics_romanized)
         translationState is LyricsTranslationUiState.SameLanguage ->
             stringResource(Res.string.lyrics_already_in_language, translationLanguageName)
-        romanizationState is LyricsTranslationUiState.SameLanguage ->
-            stringResource(Res.string.lyrics_already_romanized)
         lyricsSource != null -> stringResource(Res.string.lyrics_by, lyricsSource.label)
         lyricsUnavailable -> stringResource(Res.string.no_lyrics_found)
         lyrics.isNullOrEmpty() -> loadingText

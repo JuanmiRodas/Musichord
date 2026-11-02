@@ -101,11 +101,14 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
 
     // Nothing saved yet: start from the names the song goes by — both copies,
     // romaji of Japanese, and the likely Japanese of a romaji title.
+    // Fields typed in (or cleared) by hand are left as they are.
+    var titlesTouched by remember(song.videoId) { mutableStateOf(false) }
+    var artistsTouched by remember(song.videoId) { mutableStateOf(false) }
     LaunchedEffect(song.videoId) {
         if (!current.isEmpty) return@LaunchedEffect
         val s = LyricNames.suggest(song)
-        if (titles.isBlank()) titles = s.titles.joinToString("\n")
-        if (artists.isBlank()) artists = s.artists.joinToString("\n")
+        if (titles.isBlank() && !titlesTouched) titles = s.titles.joinToString("\n")
+        if (artists.isBlank() && !artistsTouched) artists = s.artists.joinToString("\n")
     }
 
     fun saveNames() = LyricAliases.setUser(
@@ -119,8 +122,10 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
         searching?.cancel()
         results.clear()
         searched = true
-        val ts = titles.lines().map(String::trim).filter(String::isNotEmpty).ifEmpty { listOf(song.title) }.take(3)
-        val ars = artists.lines().map(String::trim).filter(String::isNotEmpty).ifEmpty { listOf(song.artist) }.take(2)
+        // Exactly what is in the boxes: an artist box left empty searches by title alone.
+        val ts = titles.lines().map(String::trim).filter(String::isNotEmpty).take(3)
+        if (ts.isEmpty()) { searched = false; return }
+        val ars = artists.lines().map(String::trim).filter(String::isNotEmpty).ifEmpty { listOf("") }.take(2)
         val duration = song.durationMillis()
         searching = scope.launch {
             val jobs = ts.flatMap { t -> ars.map { a -> t to a } }.map { (t, a) ->
@@ -153,7 +158,7 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
                 )
                 OutlinedTextField(
                     value = titles,
-                    onValueChange = { titles = it },
+                    onValueChange = { titles = it; titlesTouched = true },
                     label = { Text(stringResource(R.string.lyric_aliases_titles)) },
                     minLines = 2,
                     maxLines = 4,
@@ -161,7 +166,7 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
                 )
                 OutlinedTextField(
                     value = artists,
-                    onValueChange = { artists = it },
+                    onValueChange = { artists = it; artistsTouched = true },
                     label = { Text(stringResource(R.string.lyric_aliases_artists)) },
                     minLines = 1,
                     maxLines = 3,
@@ -195,7 +200,7 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    "${r.title} — ${r.artist}",
+                                    if (r.artist.isBlank()) r.title else "${r.title} — ${r.artist}",
                                     style = MaterialTheme.typography.labelSmall,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
