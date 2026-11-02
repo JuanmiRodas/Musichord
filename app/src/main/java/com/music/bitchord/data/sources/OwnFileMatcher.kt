@@ -182,7 +182,7 @@ object OwnFileMatcher {
      */
     /**
      * Your files that are the song [title] by [artist] of [durationSec] on
-     * [album], best first: lossless, then by bitrate.
+     * [album], best first: the same length, then lossless, then by bitrate.
      *
      * In stages: files with the song's name (in any of its names); of those,
      * the ones whose length agrees; then confirmed by any of —
@@ -244,10 +244,19 @@ object OwnFileMatcher {
             .filter { file -> VERSION_WORDS.none { it in versionNotes(file.title) && it !in versionNotes(title) } }
             // A live album, a tribute or covers album holds other recordings.
             .filter { file -> !otherRecording(title, album, file) }
-            // The same album first, then quality; audio files ahead of video files.
+            // BitChord Audio: the best copy of the recording wins, whichever
+            // release it is filed under (a "Complete Best" at 320 kbps over the
+            // original album at 160) — the versions that are other recordings
+            // are already out above. The length agreeing to the second or so
+            // comes first (it is that recording), then quality; the same album
+            // only breaks a tie; audio files ahead of video files.
             .sortedWith(
-                compareByDescending<Song> { if (sameAlbum(album, it.albumName)) 1 else 0 }
+                compareByDescending<Song> { file ->
+                    val got = file.durationMillis().takeIf { it > 0 }?.let { (it / 1000).toInt() }
+                    if (durationSec == null || got == null || abs(durationSec - got) <= CONFIRM_DRIFT_SEC) 1 else 0
+                }
                     .thenByDescending { qualityRank(it, durationSec) }
+                    .thenByDescending { if (sameAlbum(album, it.albumName)) 1 else 0 }
                     .thenBy { if (isVideoFile(it)) 1 else 0 },
             )
     }
