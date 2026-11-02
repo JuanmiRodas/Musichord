@@ -544,6 +544,9 @@ private const val EXTRA_SET_VIDEO_ID = "bitchord.setVideoId"
 /** @see Song.localUri */
 internal const val EXTRA_LOCAL_URI = "bitchord.localUri"
 
+/** BitChord Audio: the item's id, for [ArtworkBitmapLoader] to find a file's own cover by. */
+internal const val EXTRA_MEDIA_ID = "bitchord.mediaId"
+
 /** @see Song.localPath */
 internal const val EXTRA_LOCAL_PATH = "bitchord.localPath"
 
@@ -760,7 +763,7 @@ fun Song.toMediaItem(): MediaItem {
                     offlineUri != null || durationText != null ||
                     artistId != null || albumId != null || setVideoId != null ||
                     isExplicit != null || isVideo || isVideoOrigin || radioName != null ||
-                    sourceQuality != null ||
+                    sourceQuality != null || videoId.startsWith("webdav:") || videoId.startsWith("smb:") ||
                     playbackSource != null || playbackSourceType != null || playbackSourceId != null
                 ) {
                     setExtras(
@@ -783,6 +786,7 @@ fun Song.toMediaItem(): MediaItem {
                             EXTRA_VIDEO_ORIGIN to isVideoOrigin,
                             EXTRA_SOURCE_QUALITY to sourceQuality,
                             EXTRA_SOURCE_HI_RES to sourceHiRes,
+                            EXTRA_MEDIA_ID to videoId,
                         ),
                     )
                 }

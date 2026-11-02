@@ -1896,6 +1896,8 @@ class PlaybackService : MediaLibraryService() {
         )
             .setId(SESSION_ID)
             .setSessionActivity(sessionActivity())
+            // BitChord Audio: covers from pCloud (signed) and from inside your files.
+            .setBitmapLoader(ArtworkBitmapLoader(this))
             .build()
         refreshCustomLayouts()
 
