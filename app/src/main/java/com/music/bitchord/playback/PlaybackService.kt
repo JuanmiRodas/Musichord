@@ -1708,7 +1708,7 @@ class PlaybackService : MediaLibraryService() {
             val won = runBlocking(about) {
                 resolveWithModulePriority(
                     videoId = videoId,
-                    target = SourceResolver.targetIn(dataSpec.uri),
+                    asked = SourceResolver.targetIn(dataSpec.uri),
                 )
             }
             when (won) {
