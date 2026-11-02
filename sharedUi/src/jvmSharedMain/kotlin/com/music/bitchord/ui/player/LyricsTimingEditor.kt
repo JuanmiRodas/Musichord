@@ -63,6 +63,9 @@ import java.util.Locale
  * Works the same on untimed lyrics and on timed ones that need fixing.
  * Saved as the song's .lrc (see PlayerHost.saveTimedLyrics).
  */
+/** One row of the editor: a sung line, or an instrumental break ("…"). */
+private class Entry(val text: String, var timeMs: Long?, val isBreak: Boolean = false)
+
 @Composable
 internal fun LyricsTimingEditor(
     lines: List<LyricLine>,
@@ -75,14 +78,17 @@ internal fun LyricsTimingEditor(
     onSave: (List<LyricLine>) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val texts = remember(lines) { lines.filter { it.text.isNotBlank() }.map { it.text } }
     val untimed = remember(lines) { lines.none { it.timeMs > 0 } }
-    val times = remember(lines) {
-        mutableStateListOf<Long?>().apply {
-            lines.filter { it.text.isNotBlank() }.forEach { add(if (untimed) null else it.timeMs) }
+    // Blank lines are dropped: breaks are marked here, with the Break button.
+    val entries = remember(lines) {
+        mutableStateListOf<Entry>().apply {
+            lines.filter { it.text.isNotBlank() }.forEach { add(Entry(it.text, if (untimed) null else it.timeMs)) }
         }
     }
+    // [cursor]: the line "Start line" will start. [sung]: the line started last.
     var cursor by remember(lines) { mutableIntStateOf(0) }
+    var inBreak by remember(lines) { mutableStateOf(false) }
+    var revision by remember { mutableIntStateOf(0) }
     var nowMs by remember { mutableLongStateOf(0L) }
     var scrubbing by remember { mutableStateOf<Float?>(null) }
     val listState = rememberLazyListState()
@@ -91,6 +97,41 @@ internal fun LyricsTimingEditor(
         val elapsed = if (isPlaying) (System.nanoTime() - playhead.sampledAtNanos) / 1_000_000 else 0
         return (playhead.positionMs + elapsed.coerceIn(0, 2_000)).coerceAtLeast(0)
     }
+    fun seekBy(deltaMs: Long) = onSeekLyric((now() + deltaMs).coerceIn(0, durationMs.coerceAtLeast(0)))
+    fun startLine() {
+        if (cursor >= entries.size) return
+        inBreak = false
+        entries[cursor].timeMs = now()
+        cursor += 1
+        revision++
+    }
+    fun toggleBreak() {
+        if (inBreak) {
+            // Break over: the next line is up; "Start line" when the singing does.
+            inBreak = false
+        } else {
+            entries.add(cursor, Entry("", now(), isBreak = true))
+            cursor += 1
+            inBreak = true
+        }
+        revision++
+    }
+    fun back() {
+        inBreak = false
+        if (cursor == 0) return
+        cursor -= 1
+        // Stepping back over a break takes the break out.
+        if (entries[cursor].isBreak) {
+            entries.removeAt(cursor)
+            revision++
+            if (cursor == 0) { onSeekLyric(0); return }
+            cursor -= 1
+        }
+        val before = entries.getOrNull(cursor - 1)?.timeMs ?: entries[cursor].timeMs?.minus(3_000) ?: (now() - 5_000)
+        onSeekLyric(before.coerceAtLeast(0))
+        revision++
+    }
+
     LaunchedEffect(isPlaying, playhead) {
         while (true) {
             withFrameNanos { }
@@ -98,7 +139,7 @@ internal fun LyricsTimingEditor(
         }
     }
     LaunchedEffect(cursor) {
-        if (texts.isNotEmpty()) listState.animateScrollToItem((cursor - 2).coerceAtLeast(0))
+        if (entries.isNotEmpty()) listState.animateScrollToItem((cursor - 2).coerceAtLeast(0))
     }
 
     Dialog(
@@ -122,9 +163,9 @@ internal fun LyricsTimingEditor(
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
-                TextButton(onClick = {
-                    onSave(finish(texts, times))
-                }) { Text(stringResource(Res.string.lyrics_time_save), color = Color.White, fontWeight = FontWeight.Bold) }
+                TextButton(onClick = { onSave(finish(entries)) }) {
+                    Text(stringResource(Res.string.lyrics_time_save), color = Color.White, fontWeight = FontWeight.Bold)
+                }
             }
             Text(
                 stringResource(Res.string.lyrics_time_help),
@@ -132,37 +173,53 @@ internal fun LyricsTimingEditor(
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
+            // Read so the list redraws when an entry's time changes.
+            val shownRevision = revision
             LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
-                itemsIndexed(texts) { i, text ->
-                    val active = i == cursor
-                    val done = i < cursor
+                itemsIndexed(entries, key = { i, e -> "$i:${e.isBreak}:$shownRevision" }) { i, entry ->
+                    val upNext = i == cursor
+                    val singing = i == cursor - 1
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(vertical = 2.dp)
                             .background(
-                                if (active) Color.White.copy(alpha = 0.14f) else Color.Transparent,
+                                when {
+                                    singing -> Color.White.copy(alpha = 0.18f)
+                                    upNext -> Color.White.copy(alpha = 0.06f)
+                                    else -> Color.Transparent
+                                },
                                 RoundedCornerShape(10.dp),
                             )
                             .clickable {
+                                inBreak = false
                                 cursor = i
-                                times[i]?.let { onSeekLyric((it - 2_000).coerceAtLeast(0)) }
+                                entry.timeMs?.let { onSeekLyric((it - 2_000).coerceAtLeast(0)) }
                             }
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            times[i]?.let(::stamp) ?: "--:--.--",
-                            color = Color.White.copy(alpha = if (done) 0.75f else 0.4f),
+                            entry.timeMs?.let(::stamp) ?: "--:--.--",
+                            color = Color.White.copy(alpha = if (i < cursor) 0.75f else 0.4f),
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier.width(72.dp),
                         )
-                        Text(
-                            text,
-                            color = Color.White.copy(alpha = if (active) 1f else if (done) 0.7f else 0.5f),
-                            style = if (active) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                        )
+                        Column(Modifier.weight(1f)) {
+                            if (upNext) {
+                                Text(
+                                    stringResource(Res.string.lyrics_time_up_next),
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                            Text(
+                                if (entry.isBreak) "♪ •••" else entry.text,
+                                color = Color.White.copy(alpha = if (singing) 1f else if (upNext) 0.85f else if (i < cursor) 0.6f else 0.45f),
+                                style = if (singing) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
+                                fontWeight = if (singing) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        }
                     }
                 }
             }
@@ -183,20 +240,12 @@ internal fun LyricsTimingEditor(
                 Text(stamp(durationMs), color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelMedium)
             }
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                FilledTonalButton(onClick = {
-                    // Step back: the line before is timed again, from just before it.
-                    cursor = (cursor - 1).coerceAtLeast(0)
-                    val from = times.getOrNull(cursor - 1) ?: times.getOrNull(cursor)?.minus(3_000) ?: (now() - 5_000)
-                    onSeekLyric(from.coerceAtLeast(0))
-                }) { Text(stringResource(Res.string.lyrics_time_back)) }
-                FilledTonalButton(onClick = { onSeekLyric((now() - 5_000).coerceAtLeast(0)) }) {
-                    Text(stringResource(Res.string.lyrics_time_rewind))
-                }
-                Spacer(Modifier.weight(1f))
+                FilledTonalButton(onClick = ::back) { Text(stringResource(Res.string.lyrics_time_back)) }
+                FilledTonalButton(onClick = { seekBy(-5_000) }) { Text(stringResource(Res.string.lyrics_time_rewind)) }
                 IconButton(onClick = onPlayPause) {
                     Icon(
                         if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -204,21 +253,32 @@ internal fun LyricsTimingEditor(
                         tint = Color.White,
                     )
                 }
+                FilledTonalButton(onClick = { seekBy(5_000) }) { Text(stringResource(Res.string.lyrics_time_forward)) }
             }
-            Button(
-                onClick = {
-                    if (cursor < texts.size) {
-                        times[cursor] = now()
-                        cursor += 1
-                    }
-                },
-                enabled = cursor < texts.size,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                modifier = Modifier.fillMaxWidth().height(72.dp).padding(bottom = 8.dp),
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(stringResource(Res.string.lyrics_time_next), style = MaterialTheme.typography.titleLarge)
+                FilledTonalButton(
+                    onClick = ::toggleBreak,
+                    colors = if (inBreak) ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFE0A030)) else ButtonDefaults.filledTonalButtonColors(),
+                    modifier = Modifier.weight(1f).height(72.dp),
+                ) {
+                    Text(
+                        stringResource(if (inBreak) Res.string.lyrics_time_break_end else Res.string.lyrics_time_break),
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+                Button(
+                    onClick = ::startLine,
+                    enabled = cursor < entries.size,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                    modifier = Modifier.weight(2f).height(72.dp),
+                ) {
+                    Text(stringResource(Res.string.lyrics_time_next), style = MaterialTheme.typography.titleLarge)
+                }
             }
-            Box(Modifier.height(4.dp))
         }
     }
 }
@@ -231,14 +291,15 @@ private fun stamp(ms: Long): String {
 }
 
 /**
- * The lines as timed: each keeps the time it was given; a line never reached
- * comes a little after the one before, so the order always holds.
+ * The lines as timed, breaks as blank lines (shown as "•••"): each keeps the
+ * time it was given; a line never reached comes a little after the one before,
+ * so the order always holds.
  */
-private fun finish(texts: List<String>, times: List<Long?>): List<LyricLine> {
+private fun finish(entries: List<Entry>): List<LyricLine> {
     var last = -1L
-    return texts.mapIndexed { i, text ->
-        val t = times[i]?.takeIf { it > last } ?: (last + 1_000).coerceAtLeast(0)
+    return entries.map { e ->
+        val t = e.timeMs?.takeIf { it > last } ?: (last + 1_000).coerceAtLeast(0)
         last = t
-        LyricLine(timeMs = t, text = text)
+        LyricLine(timeMs = t, text = if (e.isBreak) "" else e.text)
     }
 }

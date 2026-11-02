@@ -203,11 +203,15 @@
     <string name="lyrics_time_title">Sincronizar esta letra…</string>
     <string name="lyrics_time_hint">Toca al ritmo de la canción para fijar o corregir el tiempo de cada línea</string>
     <string name="lyrics_time_header">Sincronizar letra</string>
-    <string name="lyrics_time_next">Siguiente línea</string>
+    <string name="lyrics_time_next">Empezar línea</string>
     <string name="lyrics_time_back">Línea anterior</string>
     <string name="lyrics_time_rewind">−5 s</string>
     <string name="lyrics_time_save">Guardar</string>
     <string name="lyrics_time_cancel">Cancelar</string>
-    <string name="lyrics_time_help">Toca «Siguiente línea» cuando empiece cada línea</string>
+    <string name="lyrics_time_help">Toca «Empezar línea» justo cuando empiece la línea marcada SIGUIENTE. «Pausa» marca una parte instrumental (…), desde que la tocas hasta que la vuelves a tocar.</string>
     <string name="lyrics_time_saved">Guardado — %1$s</string>
+    <string name="lyrics_time_forward">+5 s</string>
+    <string name="lyrics_time_break">Pausa …</string>
+    <string name="lyrics_time_break_end">Fin pausa</string>
+    <string name="lyrics_time_up_next">SIGUIENTE</string>
 </resources>

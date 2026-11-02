@@ -282,11 +282,15 @@
     <string name="lyrics_time_title">Time these lyrics…</string>
     <string name="lyrics_time_hint">Tap along with the song to set or fix each line\'s time</string>
     <string name="lyrics_time_header">Time lyrics</string>
-    <string name="lyrics_time_next">Next line</string>
+    <string name="lyrics_time_next">Start line</string>
     <string name="lyrics_time_back">Back a line</string>
     <string name="lyrics_time_rewind">−5 s</string>
     <string name="lyrics_time_save">Save</string>
     <string name="lyrics_time_cancel">Cancel</string>
-    <string name="lyrics_time_help">Tap “Next line” as each line starts</string>
+    <string name="lyrics_time_help">Tap “Start line” the moment the line marked UP NEXT begins. “Break” marks an instrumental part (…), from the tap until you tap it again.</string>
     <string name="lyrics_time_saved">Saved — %1$s</string>
+    <string name="lyrics_time_forward">+5 s</string>
+    <string name="lyrics_time_break">Break …</string>
+    <string name="lyrics_time_break_end">End break</string>
+    <string name="lyrics_time_up_next">UP NEXT</string>
 </resources>
