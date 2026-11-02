@@ -76,6 +76,16 @@ object LocalLikes {
 
     fun youTubeOf(id: String): String? = _links.value[id]
 
+    /**
+     * [id] is the same recording as the liked song [likedId] (another upload
+     * of it on YouTube, your file, JioSaavn's copy) — found for a search or
+     * the player, not stored: worked out again next time.
+     */
+    fun alias(id: String, likedId: String) {
+        if (id == likedId || _links.value[id] == likedId) return
+        _links.value = _links.value + (id to likedId)
+    }
+
     /** A song seen playing, so a heart tapped on it knows its name. */
     fun saw(song: Song) {
         seen[song.videoId] = song

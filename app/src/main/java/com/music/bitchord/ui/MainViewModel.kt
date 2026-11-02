@@ -809,6 +809,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             setLikeOfOwn(videoId, status, shown)
             return
         }
+        // BitChord Audio: another upload of a liked song — the heart is the liked one's.
+        com.music.bitchord.data.LocalLikes.youTubeOf(videoId)?.takeIf { it != videoId }?.let { liked ->
+            LikeState.set(videoId, status)
+            setLike(liked, status, shown)
+            return
+        }
         if (!requireSignIn()) return
         // BitChord Audio: what the heart showed (a Liked Music song is liked).
         val previous = shown ?: likeStatusOf(videoId)
@@ -1597,6 +1603,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // BitChord Audio: a search result that is a liked song — another
+        // YouTube upload, your file, JioSaavn's copy, but the same recording
+        // (not a live or other version) — shows liked too.
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            _results.collectLatest { state ->
+                val songs = (state as? UiState.Success)?.data.orEmpty().mapNotNull {
+                    when (it) {
+                        is SearchResult.Track -> it.song
+                        is SearchResult.TopTrack -> it.song
+                        else -> null
+                    }
+                }
+                val statuses = likeStatuses.value
+                for (song in songs) {
+                    if (statuses[song.videoId] != null) continue
+                    val liked = runCatching { com.music.bitchord.data.sources.SourceMap.likedSongFor(song) }.getOrNull() ?: continue
+                    if (liked.videoId != song.videoId) com.music.bitchord.data.LocalLikes.alias(song.videoId, liked.videoId)
+                }
+            }
+        }
         // BitChord Audio: the saved Liked Music, so every liked song shows its heart.
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             com.music.bitchord.data.LikedMusicCache.load(_activeProfileId.value)

@@ -1203,7 +1203,9 @@ private fun BitChordApp(
     LaunchedEffect(player.song?.videoId) {
         val song = player.song ?: return@LaunchedEffect
         // Your files and other sources' copies (JioSaavn) alike.
-        if (com.music.bitchord.data.LocalLikes.isYouTubeId(song.videoId)) return@LaunchedEffect
+        val isYouTube = com.music.bitchord.data.LocalLikes.isYouTubeId(song.videoId)
+        // A YouTube song liked itself needs nothing; another upload of a liked one does.
+        if (isYouTube && viewModel.likeStatuses.value[song.videoId] != null) return@LaunchedEffect
         com.music.bitchord.data.LocalLikes.saw(song)
         if (com.music.bitchord.data.LocalLikes.youTubeOf(song.videoId) != null) return@LaunchedEffect
         // In a Liked Music queue the copy stands for a liked song by
@@ -1214,7 +1216,10 @@ private fun BitChordApp(
                 if (inLiked) com.music.bitchord.data.sources.SourceMap.likedSongInQueue(song)
                 else com.music.bitchord.data.sources.SourceMap.likedSongFor(song)
             }.getOrNull()
-        }?.let { com.music.bitchord.data.LocalLikes.link(song, it) }
+        }?.takeIf { it.videoId != song.videoId }?.let {
+            if (isYouTube) com.music.bitchord.data.LocalLikes.alias(song.videoId, it.videoId)
+            else com.music.bitchord.data.LocalLikes.link(song, it)
+        }
     }
     val editedLyricsVersion by com.music.bitchord.data.lyrics.EditedLyrics.version.collectAsStateWithLifecycle()
     LaunchedEffect(
