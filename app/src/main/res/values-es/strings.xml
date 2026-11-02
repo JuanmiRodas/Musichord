@@ -1501,4 +1501,5 @@
     <string name="download_skips_clear">Borrar</string>
     <string name="source_album_too">Emparejar también las otras %1$d canciones de este álbum (Me gusta y biblioteca) en la misma fuente</string>
     <string name="source_album_done">Álbum: %1$d de %2$d canciones emparejadas en la misma fuente</string>
+    <string name="pcloud_search">Buscar en tus archivos (título, artista, álbum, carpeta)</string>
 </resources>

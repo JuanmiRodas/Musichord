@@ -13,6 +13,10 @@ internal expect val renderEffectBlurSupported: Boolean
 @Composable
 internal expect fun KeepScreenOn(enabled: Boolean)
 
+/** BitChord Audio: the status and navigation bars hidden while this is shown (swipe brings them back briefly). */
+@Composable
+internal expect fun ImmersiveScreen()
+
 /** The app's language, as a BCP 47 tag. */
 @Composable
 internal expect fun appLanguageTag(): String

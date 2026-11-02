@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -52,8 +53,9 @@ import com.music.bitchord.data.lyrics.LyricLine
  * the title and artist, the line being sung and — dimmed and blurred — the
  * one after it. The screen stays on; tap anywhere (or Back) to leave.
  *
- * Whatever is drawn drifts a few pixels every minute, so no pixel lights the
- * same spot for hours.
+ * No status or navigation bar. The cover, title and artist move to the next
+ * corner every 30 seconds with a fade, and the lyrics drift a few pixels
+ * every minute, so no pixel lights the same spot for long.
  */
 @Composable
 internal fun OledLyrics(
@@ -96,38 +98,63 @@ internal fun OledLyrics(
     }
     val next = (index + 1 until lines.size).map { lines[it] }.firstOrNull { it.text.isNotBlank() }?.text
 
+    // The cover, title and artist move to the next corner every 30 seconds.
+    var corner by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000)
+            corner = (corner + 1) % 4
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        // No status or navigation bar: nothing lit but what is drawn here.
+        ImmersiveScreen()
         Box(
             Modifier
                 .fillMaxSize()
                 .background(Color.Black)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
         ) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .offset { drift }
-                    .padding(horizontal = 28.dp, vertical = 48.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AsyncImage(
-                        model = artworkUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(52.dp).clip(RoundedCornerShape(8.dp)).alpha(0.85f),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(title, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(artist, color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+            androidx.compose.animation.Crossfade(
+                targetState = corner,
+                animationSpec = androidx.compose.animation.core.tween(1_500),
+                label = "oled-corner",
+                modifier = Modifier.fillMaxSize(),
+            ) { c ->
+                Box(
+                    Modifier.fillMaxSize().offset { drift }.padding(horizontal = 24.dp, vertical = 28.dp),
+                    contentAlignment = when (c) {
+                        0 -> Alignment.TopStart
+                        1 -> Alignment.TopEnd
+                        2 -> Alignment.BottomEnd
+                        else -> Alignment.BottomStart
+                    },
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(
+                            model = artworkUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).alpha(0.8f),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.widthIn(max = 220.dp)) {
+                            Text(title, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(artist, color = Color.White.copy(alpha = 0.45f), style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
-                Spacer(Modifier.weight(1f))
+            }
+            Box(
+                Modifier.fillMaxSize().offset { drift }.padding(horizontal = 28.dp, vertical = 110.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
                 AnimatedContent(
                     targetState = currentText to next,
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
@@ -155,8 +182,6 @@ internal fun OledLyrics(
                         }
                     }
                 }
-                Spacer(Modifier.weight(1f))
-                Spacer(Modifier.height(24.dp))
             }
         }
     }

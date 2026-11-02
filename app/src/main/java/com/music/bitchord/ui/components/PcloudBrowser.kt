@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -104,6 +105,17 @@ fun PcloudBrowserDialog(request: PcloudBrowser.Request, controller: MediaControl
         )
     }
 
+    // BitChord Audio: search every file of yours — title, artist, album, folder,
+    // and the romaji of Japanese names — instead of walking the folders.
+    var query by remember { mutableStateOf(request.pickFor?.title.orEmpty()) }
+    var found by remember { mutableStateOf<List<Song>?>(null) }
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.isEmpty()) { found = null; return@LaunchedEffect }
+        kotlinx.coroutines.delay(250)
+        found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { searchLibrary(q) }
+    }
+
     fun songOf(entry: WebDavClient.Entry): Song {
         val id = WebDavConfig.idFor(entry.url)
         return WebDavRepository.library().firstOrNull { it.videoId == id }
@@ -138,6 +150,39 @@ fun PcloudBrowserDialog(request: PcloudBrowser.Request, controller: MediaControl
                         )
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.cancel)) }
+                }
+                androidx.compose.material3.OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.pcloud_search)) },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, contentDescription = null) }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                val results = found
+                if (results != null) {
+                    if (results.isEmpty()) {
+                        Text(stringResource(R.string.source_search_none), modifier = Modifier.padding(16.dp))
+                    }
+                    LazyColumn {
+                        items(results, key = { it.videoId }) { s ->
+                            BrowserRow(
+                                Icons.Rounded.MusicNote,
+                                "${s.title} · ${s.artist}",
+                                listOfNotNull(s.albumName, s.durationText, WebDavConfig.fileUrlOf(s.videoId)?.let { url ->
+                                    decodedName(url.substringBeforeLast('/'))
+                                }).joinToString(" · "),
+                            ) {
+                                if (request.pickFor != null) onPicked(s) else play(results, results.indexOf(s).coerceAtLeast(0))
+                            }
+                        }
+                    }
+                    return@Column
                 }
                 if (dir == null) {
                     LazyColumn {
@@ -187,6 +232,27 @@ fun PcloudBrowserDialog(request: PcloudBrowser.Request, controller: MediaControl
             }
         }
     }
+}
+
+/** Files of yours whose title, artist, album, folder or romaji contain every word of [query]. */
+private fun searchLibrary(query: String): List<Song> {
+    fun norm(x: String) = java.text.Normalizer.normalize(x, java.text.Normalizer.Form.NFKD)
+        .replace(Regex("\\p{M}+"), "").lowercase()
+    val words = norm(query).split(Regex("\\s+")).filter { it.isNotBlank() }
+    if (words.isEmpty()) return emptyList()
+    return WebDavRepository.library().asSequence().filter { s ->
+        val url = WebDavConfig.fileUrlOf(s.videoId)
+        val base = norm(listOfNotNull(s.title, s.artist, s.albumName, url?.let(::decodedName), url?.substringBeforeLast('/')?.let(::decodedName)).joinToString(" "))
+        if (words.all { it in base }) return@filter true
+        // "kimi no na wa" finds 君の名は: the romaji of Japanese names.
+        if (!com.music.bitchord.data.sources.JapaneseReading.isJapanese(s.title + s.artist)) return@filter false
+        val romaji = norm(listOfNotNull(
+            com.music.bitchord.data.sources.JapaneseReading.romaji(s.title),
+            com.music.bitchord.data.sources.JapaneseReading.romaji(s.artist),
+        ).joinToString(" "))
+        val joined = (base + " " + romaji).replace(" ", "")
+        words.all { it in base || it in romaji || it.replace(" ", "") in joined }
+    }.take(150).toList()
 }
 
 @Composable

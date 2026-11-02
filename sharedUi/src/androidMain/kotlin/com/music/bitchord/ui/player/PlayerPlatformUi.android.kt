@@ -32,6 +32,36 @@ internal actual fun KeepScreenOn(enabled: Boolean) {
 }
 
 @Composable
+internal actual fun ImmersiveScreen() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        // In a dialog, its own window; else the activity's.
+        val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            ?: (view.context as? android.app.Activity)?.window
+        if (window != null) {
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        onDispose {
+            if (window != null) {
+                androidx.core.view.WindowCompat.getInsetsController(window, view)
+                    .show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+}
+
+@Composable
 internal actual fun appLanguageTag(): String {
     val context = LocalContext.current
     return AppCompatDelegate.getApplicationLocales().get(0)?.toLanguageTag()
