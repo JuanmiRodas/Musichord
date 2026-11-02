@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -49,13 +52,17 @@ import coil3.compose.AsyncImage
 import com.music.bitchord.data.lyrics.LyricLine
 
 /**
- * BitChord Audio: lyrics for an OLED screen. Everything black but the cover,
- * the title and artist, the line being sung and — dimmed and blurred — the
- * one after it. The screen stays on; tap anywhere (or Back) to leave.
+ * BitChord Audio: lyrics for an OLED screen, made to sit on the desk like an
+ * always-on display. Everything black but the clock, the cover, the title and
+ * artist, the line being sung and — dimmed and blurred — the one after it.
+ * The screen stays on (its own window's flag, so nothing else in the player
+ * can turn that off); tap anywhere (or Back) to leave.
  *
- * No status or navigation bar. The cover, title and artist move to the next
- * corner every 30 seconds with a fade, and the lyrics drift a few pixels
- * every minute, so no pixel lights the same spot for long.
+ * The status bar stays — black, with the time and the notification icons —
+ * so a new message shows; the navigation bar is hidden. The clock, cover,
+ * title and artist move to the next corner every 30 seconds with a fade, and
+ * the lyrics drift a few pixels every minute, so no pixel lights the same
+ * spot for long.
  */
 @Composable
 internal fun OledLyrics(
@@ -68,6 +75,13 @@ internal fun OledLyrics(
     onDismiss: () -> Unit,
 ) {
     KeepScreenOn(enabled = true)
+    var clock by remember { mutableStateOf(clockNow()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            clock = clockNow()
+            kotlinx.coroutines.delay(1_000L * (60 - java.time.LocalTime.now().second).coerceAtLeast(1))
+        }
+    }
     val timed = remember(lines) { lines.any { it.timeMs > 0 } }
     var index by remember(lines) { mutableIntStateOf(-1) }
     var drift by remember { mutableStateOf(IntOffset.Zero) }
@@ -112,11 +126,12 @@ internal fun OledLyrics(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         // No status or navigation bar: nothing lit but what is drawn here.
-        ImmersiveScreen()
+        ImmersiveScreen(keepOn = true, showStatusBar = true)
         Box(
             Modifier
                 .fillMaxSize()
                 .background(Color.Black)
+                .windowInsetsPadding(WindowInsets.statusBars)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
         ) {
             androidx.compose.animation.Crossfade(
@@ -134,6 +149,19 @@ internal fun OledLyrics(
                         else -> Alignment.BottomStart
                     },
                 ) {
+                    Column(horizontalAlignment = if (c == 1 || c == 2) Alignment.End else Alignment.Start) {
+                    Text(
+                        clock.first,
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 44.sp,
+                        fontWeight = FontWeight.Light,
+                    )
+                    Text(
+                        clock.second,
+                        color = Color.White.copy(alpha = 0.45f),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AsyncImage(
                             model = artworkUrl,
@@ -149,10 +177,11 @@ internal fun OledLyrics(
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                    }
                 }
             }
             Box(
-                Modifier.fillMaxSize().offset { drift }.padding(horizontal = 28.dp, vertical = 110.dp),
+                Modifier.fillMaxSize().offset { drift }.padding(horizontal = 28.dp, vertical = 170.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 AnimatedContent(
@@ -185,4 +214,13 @@ internal fun OledLyrics(
             }
         }
     }
+}
+
+/** The time ("14:05", in the language's own style) and the date ("Mon 2 Nov"). */
+private fun clockNow(): Pair<String, String> {
+    val now = java.time.LocalDateTime.now()
+    val locale = java.util.Locale.getDefault()
+    val time = now.format(java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT).withLocale(locale))
+    val date = now.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", locale))
+    return time to date
 }

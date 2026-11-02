@@ -31,7 +31,7 @@ internal actual val renderEffectBlurSupported: Boolean = true
 internal actual fun KeepScreenOn(enabled: Boolean) = Unit
 
 @Composable
-internal actual fun ImmersiveScreen() = Unit
+internal actual fun ImmersiveScreen(keepOn: Boolean, showStatusBar: Boolean) = Unit
 
 @Composable
 internal actual fun appLanguageTag(): String = Locale.getDefault().toLanguageTag()

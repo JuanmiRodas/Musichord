@@ -13,9 +13,13 @@ internal expect val renderEffectBlurSupported: Boolean
 @Composable
 internal expect fun KeepScreenOn(enabled: Boolean)
 
-/** BitChord Audio: the status and navigation bars hidden while this is shown (swipe brings them back briefly). */
+/**
+ * BitChord Audio: the status and navigation bars hidden while this is shown
+ * (swipe brings them back briefly) — or only the navigation bar, with
+ * [showStatusBar]. [keepOn] keeps the screen on through this window's own flag.
+ */
 @Composable
-internal expect fun ImmersiveScreen()
+internal expect fun ImmersiveScreen(keepOn: Boolean = false, showStatusBar: Boolean = false)
 
 /** The app's language, as a BCP 47 tag. */
 @Composable

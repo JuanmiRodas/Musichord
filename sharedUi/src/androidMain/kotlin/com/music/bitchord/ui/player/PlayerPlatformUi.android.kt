@@ -32,9 +32,9 @@ internal actual fun KeepScreenOn(enabled: Boolean) {
 }
 
 @Composable
-internal actual fun ImmersiveScreen() {
+internal actual fun ImmersiveScreen(keepOn: Boolean, showStatusBar: Boolean) {
     val view = LocalView.current
-    DisposableEffect(view) {
+    DisposableEffect(view, keepOn, showStatusBar) {
         // In a dialog, its own window; else the activity's.
         val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
             ?: (view.context as? android.app.Activity)?.window
@@ -47,13 +47,27 @@ internal actual fun ImmersiveScreen() {
                     layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 }
             }
+            // BitChord Audio: kept on by this window's own flag. The activity
+            // view's keepScreenOn is shared with the player (which clears it
+            // when the lyrics close), so it can't be relied on here.
+            if (keepOn) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
                 systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                if (showStatusBar) {
+                    // The clock and the notification icons stay, white on black.
+                    hide(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+                    show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+                    isAppearanceLightStatusBars = false
+                    @Suppress("DEPRECATION")
+                    window.statusBarColor = android.graphics.Color.BLACK
+                } else {
+                    hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                }
             }
         }
         onDispose {
             if (window != null) {
+                if (keepOn) window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 androidx.core.view.WindowCompat.getInsetsController(window, view)
                     .show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             }
