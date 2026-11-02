@@ -12,9 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -49,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.lyrics.LyricLine
 
 /**
@@ -58,11 +56,12 @@ import com.music.bitchord.data.lyrics.LyricLine
  * The screen stays on (its own window's flag, so nothing else in the player
  * can turn that off); tap anywhere (or Back) to leave.
  *
- * The status bar stays — black, with the time and the notification icons —
- * so a new message shows; the navigation bar is hidden. The clock, cover,
- * title and artist move to the next corner every 30 seconds with a fade, and
- * the lyrics drift a few pixels every minute, so no pixel lights the same
- * spot for long.
+ * No status or navigation bar: the time, the date and the icons of your
+ * notifications (one per app, read with notification access, asked for the
+ * first time) are drawn here instead, in the corner opposite the cover and
+ * lined up with that side. Both move round the corners every 30 seconds with
+ * a fade, and the lyrics drift a few pixels every minute, so no pixel lights
+ * the same spot for long.
  */
 @Composable
 internal fun OledLyrics(
@@ -75,6 +74,8 @@ internal fun OledLyrics(
     onDismiss: () -> Unit,
 ) {
     KeepScreenOn(enabled = true)
+    val icons by PlayerPlatform.host.notificationIcons.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { PlayerPlatform.host.askNotificationAccess() }
     var clock by remember { mutableStateOf(clockNow()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -126,12 +127,11 @@ internal fun OledLyrics(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         // No status or navigation bar: nothing lit but what is drawn here.
-        ImmersiveScreen(keepOn = true, showStatusBar = true)
+        ImmersiveScreen(keepOn = true)
         Box(
             Modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                .windowInsetsPadding(WindowInsets.statusBars)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
         ) {
             androidx.compose.animation.Crossfade(
@@ -140,43 +140,73 @@ internal fun OledLyrics(
                 label = "oled-corner",
                 modifier = Modifier.fillMaxSize(),
             ) { c ->
-                Box(
-                    Modifier.fillMaxSize().offset { drift }.padding(horizontal = 24.dp, vertical = 28.dp),
-                    contentAlignment = when (c) {
-                        0 -> Alignment.TopStart
-                        1 -> Alignment.TopEnd
-                        2 -> Alignment.BottomEnd
-                        else -> Alignment.BottomStart
-                    },
-                ) {
-                    Column(horizontalAlignment = if (c == 1 || c == 2) Alignment.End else Alignment.Start) {
-                    Text(
-                        clock.first,
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Light,
-                    )
-                    Text(
-                        clock.second,
-                        color = Color.White.copy(alpha = 0.45f),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(bottom = 10.dp),
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        AsyncImage(
-                            model = artworkUrl,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).alpha(0.8f),
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.widthIn(max = 220.dp)) {
+                // The cover in corner c; the clock, date and notification icons
+                // in the opposite one. Each lines up with its own side.
+                fun alignment(k: Int) = when (k) {
+                    0 -> Alignment.TopStart
+                    1 -> Alignment.TopEnd
+                    2 -> Alignment.BottomEnd
+                    else -> Alignment.BottomStart
+                }
+                fun onRight(k: Int) = k == 1 || k == 2
+                val clockCorner = (c + 2) % 4
+                Box(Modifier.fillMaxSize().offset { drift }.padding(horizontal = 24.dp, vertical = 28.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.align(alignment(c)),
+                    ) {
+                        val cover = @Composable {
+                            AsyncImage(
+                                model = artworkUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).alpha(0.8f),
+                            )
+                        }
+                        val right = onRight(c)
+                        if (!right) { cover(); Spacer(Modifier.width(12.dp)) }
+                        Column(
+                            Modifier.widthIn(max = 220.dp),
+                            horizontalAlignment = if (right) Alignment.End else Alignment.Start,
+                        ) {
                             Text(title, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.titleSmall,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(artist, color = Color.White.copy(alpha = 0.45f), style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                        if (right) { Spacer(Modifier.width(12.dp)); cover() }
                     }
+                    val clockRight = onRight(clockCorner)
+                    Column(
+                        horizontalAlignment = if (clockRight) Alignment.End else Alignment.Start,
+                        modifier = Modifier.align(alignment(clockCorner)),
+                    ) {
+                        Text(
+                            clock.first,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 44.sp,
+                            fontWeight = FontWeight.Light,
+                        )
+                        Text(
+                            clock.second,
+                            color = Color.White.copy(alpha = 0.45f),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (icons.isNotEmpty()) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(top = 8.dp),
+                            ) {
+                                icons.forEach { icon ->
+                                    androidx.compose.foundation.Image(
+                                        bitmap = icon,
+                                        contentDescription = null,
+                                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White.copy(alpha = 0.6f)),
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

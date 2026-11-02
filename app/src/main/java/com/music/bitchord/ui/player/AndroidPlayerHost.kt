@@ -228,6 +228,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         com.music.bitchord.ui.components.NowPlayingSource.open(song)
     }
 
+    override val notificationIcons get() = com.music.bitchord.playback.NotificationIcons.icons
+
+    override fun askNotificationAccess() {
+        main.post { com.music.bitchord.playback.NotificationIcons.ask(app) }
+    }
+
     override fun chooseCover(song: com.music.bitchord.data.model.Song) {
         com.music.bitchord.ui.components.CoverPicker.open(song)
     }

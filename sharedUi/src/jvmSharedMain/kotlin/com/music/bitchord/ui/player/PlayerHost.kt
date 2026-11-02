@@ -122,6 +122,12 @@ interface PlayerHost {
     /** BitChord Audio: "where is this playing from" — the source picker for [song]. */
     fun chooseSource(song: Song) {}
 
+    /** BitChord Audio: the icons of the notifications present, for the OLED screen. */
+    val notificationIcons: StateFlow<List<androidx.compose.ui.graphics.ImageBitmap>> get() = MutableStateFlow(emptyList())
+
+    /** BitChord Audio: asks (once) for the access [notificationIcons] needs. */
+    fun askNotificationAccess() {}
+
     /** BitChord Audio: the cover picker for [song]. */
     fun chooseCover(song: Song) {}
 
