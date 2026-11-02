@@ -956,15 +956,23 @@ private fun BitChordApp(
     val offlineLiked by OfflinePlaylists.liked.collectAsStateWithLifecycle()
     val offlinePlaylists by OfflinePlaylists.playlists.collectAsStateWithLifecycle()
     val offlinePlaylistGroups = remember(offlinePlaylists) { offlinePlaylists.map { it.toGroup() } }
+    // BitChord Audio: a download of a YouTube (or pCloud, JioSaavn) song is
+    // still that song, with its heart; only a file that exists solely on the
+    // device uses the device's Liked playlist.
+    val deviceOnly: (Song) -> Boolean = { song ->
+        song.localUri != null && (song.videoId.startsWith("content://") || song.videoId.startsWith("file://") ||
+            song.videoId == song.localUri || song.videoId.startsWith("local:"))
+    }
     val likeStatusOf: (Song) -> LikeStatus = { song ->
         val uri = song.localUri
         when {
-            uri != null -> if (uri in offlineLiked) LikeStatus.LIKE else LikeStatus.INDIFFERENT
+            uri != null && deviceOnly(song) -> if (uri in offlineLiked) LikeStatus.LIKE else LikeStatus.INDIFFERENT
+            uri != null && uri in offlineLiked -> LikeStatus.LIKE
             else -> likeStatuses[song.videoId] ?: LikeStatus.INDIFFERENT
         }
     }
     val toggleLikeOf: (Song) -> Unit = { song ->
-        if (song.localUri != null) OfflinePlaylists.toggleLike(song) else viewModel.toggleLike(song.videoId)
+        if (deviceOnly(song)) OfflinePlaylists.toggleLike(song) else viewModel.toggleLike(song.videoId)
     }
     // Which tracks are being held on YouTube's own upload, so the player's menu
     // offers the way back out of a revert rather than the revert again.
@@ -1181,7 +1189,8 @@ private fun BitChordApp(
     // BitChord Audio: a file of yours shows (and sets) the heart of the liked song it is.
     LaunchedEffect(player.song?.videoId) {
         val song = player.song ?: return@LaunchedEffect
-        if (!com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(song.videoId)) return@LaunchedEffect
+        // Your files and other sources' copies (JioSaavn) alike.
+        if (com.music.bitchord.data.LocalLikes.isYouTubeId(song.videoId)) return@LaunchedEffect
         if (com.music.bitchord.data.LocalLikes.youTubeOf(song.videoId) != null) return@LaunchedEffect
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             runCatching { com.music.bitchord.data.sources.SourceMap.likedSongFor(song) }.getOrNull()

@@ -131,7 +131,7 @@ object SourceMap {
             val keys = OwnFileMatcher.titleKeys(file.title) + runCatching { OwnFileMatcher.soundKeys(file.title) }.getOrDefault(emptySet())
             val seconds = seconds(file.durationText)
             keys.flatMap { index[it].orEmpty() }.distinct()
-                .filter { OwnFileMatcher.sameArtist(file.artist, it.artist) }
+                .filter { OwnFileMatcher.sameArtist(file.artist, it.artist) || ArtistLinks.linked(it.artist, file.artist) }
                 .filter { !OwnFileMatcher.otherRecording(it.title, it.albumName, file) }
                 .filter { s ->
                     val a = seconds ?: return@filter false

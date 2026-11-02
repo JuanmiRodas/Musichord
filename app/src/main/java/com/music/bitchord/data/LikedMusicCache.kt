@@ -47,7 +47,11 @@ object LikedMusicCache {
         val f = file(profile) ?: return null
         val saved = SongListStore.load(f) ?: return null
         return Saved(saved.songs, saved.savedAt).takeIf { it.songs.isNotEmpty() }
-            ?.also { if (profile == lastProfile || _likedIds.value.isEmpty()) publish(it.songs) }
+            ?.also {
+                // The first list read this run is the account's, until one is saved.
+                if (lastProfile == null) lastProfile = profile
+                if (profile == lastProfile || _likedIds.value.isEmpty()) publish(it.songs)
+            }
     }
 
     private val _likedIds = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
