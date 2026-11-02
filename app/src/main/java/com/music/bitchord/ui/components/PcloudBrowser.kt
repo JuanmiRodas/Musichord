@@ -58,13 +58,20 @@ import java.net.URLDecoder
  */
 object PcloudBrowser {
     /** What the browser is open for: [pickFor] set means "choose a file for this song". */
-    data class Request(val pickFor: Song? = null)
+    data class Request(val pickFor: Song? = null, val startDir: String? = null)
 
     private val _request = MutableStateFlow<Request?>(null)
     val request: StateFlow<Request?> = _request.asStateFlow()
 
     fun browse() { _request.value = Request() }
     fun pickFor(song: Song) { _request.value = Request(pickFor = song) }
+
+    /** BitChord Audio: the folder a pCloud file is in — its album, as you filed it. */
+    fun openFolderOf(song: Song): Boolean {
+        val url = com.music.bitchord.data.webdav.WebDavConfig.fileUrlOf(song.videoId) ?: return false
+        _request.value = Request(startDir = url.substringBeforeLast('/') + "/")
+        return true
+    }
     fun close() { _request.value = null }
 
     const val LIBRARY_LINK = "app:pcloud-folders"
@@ -79,7 +86,7 @@ fun PcloudBrowserDialog(request: PcloudBrowser.Request, controller: MediaControl
             .map { WebDavConfig.normalizeUrl(it).trimEnd('/') + "/" }
     }
     // Several music folders start at a list of them; one starts inside it.
-    var path by remember { mutableStateOf(if (roots.size == 1) listOf(roots.first()) else emptyList()) }
+    var path by remember { mutableStateOf(request.startDir?.let { listOf(it) } ?: if (roots.size == 1) listOf(roots.first()) else emptyList()) }
     var listing by remember { mutableStateOf<Listing?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()

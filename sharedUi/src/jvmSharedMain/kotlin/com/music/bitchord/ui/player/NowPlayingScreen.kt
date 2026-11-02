@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -3418,7 +3419,14 @@ fun NowPlayingScreen(
                                             closeLyrics()
                                         }
                                     } else {
-                                        Modifier
+                                        // BitChord Audio: a tap on the cover opens its album.
+                                        Modifier.clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                        ) {
+                                            val album = song.albumId
+                                            if (album != null) onOpenAlbum(album) else PlayerPlatform.host.openAlbumOf(song)
+                                        }
                                     },
                                 ),
                             contentAlignment = Alignment.Center,
@@ -3426,17 +3434,8 @@ fun NowPlayingScreen(
                             // Measured stats stay on the sleeve's bottom centre. They
                             // fade away with Spotify's lower control deck rather than
                             // following the compact credits to the bottom edge.
-                            WhileShown({ !collapsePastHalf }) {
-                                SleeveNerdStats(
-                                    song = song,
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                                        .graphicsLayer {
-                                            alpha = (1f - p() * 2f) * spotifyChromeAlpha
-                                        },
-                                )
-                            }
+                            // BitChord Audio: the source line lives under the
+                            // play controls now (see below), not on the cover.
                         }
 
                         // The music video, across the player's whole width — the
@@ -4037,11 +4036,16 @@ fun NowPlayingScreen(
                         onNext = onNext,
                     )
 
+                    // BitChord Audio: where the song plays from (and the cover
+                    // button), under the controls rather than over the cover.
+                    Spacer(Modifier.height(4.dp))
+                    SleeveNerdStats(song = song, modifier = Modifier.fillMaxWidth())
+
                     // Keep the volume slot's full footprint when its contents are
                     // hidden. Removing the slot itself shortened the controls by 50dp
                     // and moved every control below it. A display preference should not
                     // change the half-player's geometry.
-                    Spacer(Modifier.height(12.dp + controlSpread / 2))
+                    Spacer(Modifier.height((controlSpread / 2 - 10.dp).coerceAtLeast(2.dp)))
 
                     if (!hideVolumeBar) {
                         VolumeRow(

@@ -128,6 +128,9 @@ interface PlayerHost {
     /** BitChord Audio: asks (once) for the access [notificationIcons] needs. */
     fun askNotificationAccess() {}
 
+    /** BitChord Audio: [song]'s album when it has no catalogue page (a file of yours: its folder). */
+    fun openAlbumOf(song: Song) {}
+
     /** BitChord Audio: the cover picker for [song]. */
     fun chooseCover(song: Song) {}
 

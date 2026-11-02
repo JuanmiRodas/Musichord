@@ -234,6 +234,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         main.post { com.music.bitchord.playback.NotificationIcons.ask(app) }
     }
 
+    override fun openAlbumOf(song: com.music.bitchord.data.model.Song) {
+        if (!com.music.bitchord.ui.components.PcloudBrowser.openFolderOf(song)) {
+            showMessage(app.getString(com.music.bitchord.R.string.no_album_metadata))
+        }
+    }
+
     override fun chooseCover(song: com.music.bitchord.data.model.Song) {
         com.music.bitchord.ui.components.CoverPicker.open(song)
     }

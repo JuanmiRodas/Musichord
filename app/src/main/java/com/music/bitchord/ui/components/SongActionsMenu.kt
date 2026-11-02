@@ -363,6 +363,14 @@ fun SongActionsMenu(
         when (val id = song.albumId) {
             null -> if (resolvingLinks) {
                 LoadingActionRow(SfIcons.Album, stringResource(R.string.open_album), palette)
+            } else if (com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(song.videoId)) {
+                // BitChord Audio: a file of yours opens its folder in pCloud.
+                ActionRow(
+                    SfIcons.Album,
+                    stringResource(R.string.open_album),
+                    accent = palette.accent,
+                    description = song.albumName,
+                ) { PcloudBrowser.openFolderOf(song) }
             }
             else -> ActionRow(
                 SfIcons.Album,

@@ -408,17 +408,9 @@ internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier,
     ) {
-        SourceLine(song)
-        nerdStats?.describe()?.let { stats ->
-            Text(
-                text = stats,
-                style = nerdStyle,
-                color = Color.White.copy(alpha = 0.65f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-        }
+        // BitChord Audio: one line — where it plays from and what it is,
+        // measured (codec, rate, bitrate, channels) — not the same facts twice.
+        SourceLine(song, detail = nerdStats?.describe())
         // Only when Automix is actually switched on: otherwise this would
         // report on analysis nothing is going to use, which is noise rather
         // than a stat.
@@ -1884,7 +1876,7 @@ private fun ShimmerText(
  * from and what it is. Tapping it opens the source picker.
  */
 @Composable
-internal fun SourceLine(song: Song, modifier: Modifier = Modifier) {
+internal fun SourceLine(song: Song, modifier: Modifier = Modifier, detail: String? = null) {
     val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
     val snapshot = nerdStats?.takeIf { it.mediaId == null || it.mediaId == song.videoId }
     // A file of yours is read by a source with no name of its own ("Unknown").
@@ -1896,12 +1888,20 @@ internal fun SourceLine(song: Song, modifier: Modifier = Modifier) {
             song.localUri != null -> "Phone"
             else -> "YouTube"
         }
-    val text = listOfNotNull(
-        place,
-        codecLabel(snapshot?.mimeType),
-        (snapshot?.claimed?.kbps ?: snapshot?.bitrateKbps)?.let { "$it kbps" },
-    ).joinToString(" · ")
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
+    val text = if (detail != null) {
+        "$place · $detail"
+    } else {
+        listOfNotNull(
+            place,
+            codecLabel(snapshot?.mimeType),
+            (snapshot?.claimed?.kbps ?: snapshot?.bitrateKbps)?.let { "$it kbps" },
+        ).joinToString(" · ")
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = modifier,
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
