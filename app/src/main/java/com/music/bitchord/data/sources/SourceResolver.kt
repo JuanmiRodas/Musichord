@@ -339,6 +339,20 @@ object SourceResolver {
      * A song the map hasn't looked up yet is looked up in the background, for
      * next time.
      */
+    /**
+     * BitChord Audio: the copy you picked by hand for this song (JioSaavn's, an
+     * addon's), when a YouTube row of it is what reached the player — so the
+     * pick holds wherever and however the song is played.
+     */
+    suspend fun chosenFor(target: TrackMatcher.Target): SourceStream? {
+        if (target.title.isBlank()) return null
+        val choice = PreferredSource.get(target.title, target.artist) as? PreferredSource.Chosen ?: return null
+        val (configId, trackId) = SourceRegistry.parseTrackKey(choice.song.videoId) ?: return null
+        val stream = runCatching { resolve(configId, trackId, target) }.getOrNull() ?: return null
+        TrackLog.d(TAG, "chosen: '${target.title}' plays the copy you picked at ${stream.format.summary}")
+        return stream
+    }
+
     suspend fun mappedSaavnFor(videoId: String, target: TrackMatcher.Target): SourceStream? {
         if (target.title.isBlank() || target.isVideo) return null
         if (PreferredSource.get(target.title, target.artist) != null) return null

@@ -5572,6 +5572,10 @@ class PlaybackService : MediaLibraryService() {
         }
         // BitChord Audio: JioSaavn's copy the source map already matched,
         // when it beats your file — the best copy plays from the start.
+        runCatching { SourceResolver.chosenFor(target) }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrNull()
+            ?.let { return Resolved.Module(it) }
         runCatching { SourceResolver.mappedSaavnFor(videoId, target) }
             .onFailure { if (it is CancellationException) throw it }
             .getOrNull()

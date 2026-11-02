@@ -53,6 +53,10 @@ internal class OwnFirst(
      * stand in for a YouTube song even while JioSaavn is off for live
      * substitution — on any connection, the way a download may use it.
      */
+    /** Anything at all to do: online and not in a party (each path checks its own rule). */
+    private val anyEnabled: Boolean
+        get() = AppSettings.meteredConnection.value != null && !ListenTogether.state.value.inParty
+
     private val saavnEnabled: Boolean
         get() = AppSettings.sourcePreference.value != AppSettings.SOURCE_YOUTUBE_FIRST &&
             !ListenTogether.state.value.inParty &&
@@ -61,10 +65,28 @@ internal class OwnFirst(
 
     /** The best copy for [song]: your file when it is the best, else JioSaavn's when better than YouTube's. */
     private suspend fun bestFor(song: Song): Song? {
+        // A copy you picked by hand comes first, on any connection: it is
+        // your choice, not the own-files rule (which waits for Wi-Fi).
+        when (val choice = com.music.bitchord.data.sources.PreferredSource.get(song)) {
+            is com.music.bitchord.data.sources.PreferredSource.Chosen ->
+                return if (AppSettings.meteredConnection.value != null && !ListenTogether.state.value.inParty) {
+                    asStandIn(choice.song, song)
+                } else {
+                    null
+                }
+            com.music.bitchord.data.sources.PreferredSource.YouTube -> return null
+            is com.music.bitchord.data.sources.PreferredSource.File -> return if (enabled) fileFor(song) else null
+            null -> Unit
+        }
         if (enabled) fileFor(song)?.let { return it }
         if (!saavnEnabled) return null
-        if (com.music.bitchord.data.sources.PreferredSource.get(song) != null) return null
         val copy = SourceMap.saavnSongFor(song) ?: return null
+        return asStandIn(copy, song)
+    }
+
+    /** [copy] in [song]'s place in the queue, sharing its heart. */
+    private fun asStandIn(copy: Song, song: Song): Song? {
+        if (copy.videoId == song.videoId) return null
         com.music.bitchord.data.LocalLikes.link(copy, song)
         return copy.copy(
             queueTier = song.queueTier,
@@ -116,7 +138,7 @@ internal class OwnFirst(
 
     /** The item a play request starts on, as your file. */
     suspend fun resolveStart(items: List<MediaItem>, startIndex: Int): List<MediaItem> {
-        if (!enabled && !saavnEnabled) return items
+        if (!anyEnabled) return items
         val item = items.getOrNull(startIndex) ?: return items
         val song = item.toSong()
         if (!wants(song)) return items
@@ -127,7 +149,7 @@ internal class OwnFirst(
 
     /** The next few items, replaced by your files while still upcoming. Main thread. */
     fun lookAhead(player: Player) {
-        if (!enabled && !saavnEnabled) return
+        if (!anyEnabled) return
         val count = player.mediaItemCount
         if (count == 0) return
         val current = player.currentMediaItemIndex.coerceAtLeast(0)
@@ -156,7 +178,7 @@ internal class OwnFirst(
 
     /** A song that became current from YouTube anyway: cross-faded to your file. Main thread. */
     fun onBecameCurrent(item: MediaItem?) {
-        if ((!enabled && !saavnEnabled) || item == null) return
+        if (!anyEnabled || item == null) return
         val song = item.toSong()
         if (!wants(song) || !inFlight.add(item.mediaId)) return
         scope.launch {
