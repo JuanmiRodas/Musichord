@@ -1183,6 +1183,11 @@ private fun BitChordApp(
     val lyricsSourceOrder by AppSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
     val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
     val lyricAliasesVersion by com.music.bitchord.data.lyrics.LyricAliases.version.collectAsStateWithLifecycle()
+    // BitChord Audio: Settings → Haptic feedback also silences the system's own
+    // feedback on this window (long presses, text handles).
+    val hapticsOn by AppSettings.hapticsEnabled.collectAsStateWithLifecycle()
+    val rootView = androidx.compose.ui.platform.LocalView.current
+    LaunchedEffect(hapticsOn) { rootView.rootView.isHapticFeedbackEnabled = hapticsOn }
     // BitChord Audio: playing Liked Music, a song un-liked (from YouTube or
     // pCloud) leaves the rest of the queue too; the one playing finishes.
     LaunchedEffect(controller) {

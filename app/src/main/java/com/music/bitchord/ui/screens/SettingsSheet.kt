@@ -242,6 +242,7 @@ fun SettingsScreen(
     val nerdStats by AppSettings.showNerdStats.collectAsStateWithLifecycle()
     val listenTogetherButton by AppSettings.showListenTogetherButton.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
+    val hapticsEnabled by AppSettings.hapticsEnabled.collectAsStateWithLifecycle()
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val liquidGlass by AppSettings.liquidGlass.collectAsStateWithLifecycle()
     val progressiveBlur by AppSettings.progressiveBlur.collectAsStateWithLifecycle()
@@ -989,6 +990,18 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setReduceAnimation(!reduceAnimation) },
+                )
+            }
+            val hapticsTitle = stringResource(R.string.haptic_feedback)
+            row(hapticsTitle, "haptic", "vibration", "vibración", "háptica") {
+                SettingsRow(
+                    icon = SfIcons.MotionPhotosOff,
+                    title = hapticsTitle,
+                    subtitle = stringResource(R.string.haptic_feedback_subtitle),
+                    trailing = {
+                        IosSwitch(checked = hapticsEnabled, onCheckedChange = AppSettings::setHapticsEnabled)
+                    },
+                    onClick = { AppSettings.setHapticsEnabled(!hapticsEnabled) },
                 )
             }
             val reduceDynamicBlurTitle = stringResource(R.string.reduce_dynamic_blur)
@@ -3128,7 +3141,7 @@ internal fun <T> ChoiceGroup(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(enabled = available) {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (com.music.bitchord.ui.haptics.HapticsSwitch.enabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onSelect(option)
                     }
                     .alpha(if (available) 1f else 0.45f)

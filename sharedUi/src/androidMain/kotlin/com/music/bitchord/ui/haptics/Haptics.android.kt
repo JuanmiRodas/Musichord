@@ -25,6 +25,7 @@ actual class Haptics internal constructor(context: Context) {
     private val app = context.applicationContext
 
     actual fun play(haptic: Haptic) {
+        if (!HapticsSwitch.enabled) return
         HapticDevice.of(app)?.play(haptic)
     }
 }

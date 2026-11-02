@@ -208,7 +208,7 @@ fun DacVolumeHud(hazeState: HazeState) {
     /** Pulled past an end: stretch away from the bound, then snap back with a little bounce. */
     fun rubberBand(direction: Int) {
         stretchFromTop = direction < 0
-        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        if (com.music.bitchord.ui.haptics.HapticsSwitch.enabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         scope.launch {
             stretch.animateTo(1.07f, tween(durationMillis = 90))
             stretch.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 380f))

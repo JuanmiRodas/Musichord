@@ -166,7 +166,7 @@ fun PillSegmentedControl(
                             .width(with(density) { widths[index].toDp() })
                             .clickable(enabled = enabled, interactionSource = null, indication = null) {
                                 if (index != selected) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    if (com.music.bitchord.ui.haptics.HapticsSwitch.enabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onSelect(index)
                                 }
                             }

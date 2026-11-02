@@ -481,6 +481,9 @@ object AppSettings {
     /** BitChord Audio: JioSaavn's 320 kbps copies for downloads, even while it's off for playback. */
     val jioSaavnForDownloads = MutableStateFlow(true)
 
+    /** BitChord Audio: the app's vibrations on taps, toggles and gestures. */
+    val hapticsEnabled = MutableStateFlow(true)
+
     /** JioSaavn takes part in downloads: switched on, or chosen as a source downloads may come from. */
     val jioSaavnDownloadsOn: Boolean
         get() = jioSaavnForDownloads.value || "JIOSAAVN" in downloadSources.value
@@ -1029,6 +1032,8 @@ object AppSettings {
         audioOnly.value = prefs.getBoolean(KEY_AUDIO_ONLY, true)
         ownFilesOnMobileData.value = prefs.getBoolean(KEY_OWN_FILES_MOBILE, false)
         jioSaavnForDownloads.value = prefs.getBoolean(KEY_SAAVN_DOWNLOADS, true)
+        hapticsEnabled.value = prefs.getBoolean(KEY_HAPTICS, true)
+        com.music.bitchord.ui.haptics.HapticsSwitch.enabled = hapticsEnabled.value
         downloadSources.value = prefs.getStringSet(KEY_DOWNLOAD_SOURCES, emptySet())?.toSet().orEmpty()
         ownFileMinKbps.value = prefs.getInt(KEY_OWN_MIN_KBPS, 256)
         upgradeDownloads.value = prefs.getBoolean(KEY_UPGRADE_DOWNLOADS, true)
@@ -1454,6 +1459,12 @@ object AppSettings {
     fun setDownloadSources(value: Set<String>) {
         downloadSources.value = value
         prefs.edit().putStringSet(KEY_DOWNLOAD_SOURCES, value).apply()
+    }
+
+    fun setHapticsEnabled(value: Boolean) {
+        hapticsEnabled.value = value
+        com.music.bitchord.ui.haptics.HapticsSwitch.enabled = value
+        prefs.edit().putBoolean(KEY_HAPTICS, value).apply()
     }
 
     fun setJioSaavnForDownloads(value: Boolean) {
@@ -2295,6 +2306,7 @@ object AppSettings {
     private const val KEY_OWN_FILES_MOBILE = "own_files_mobile_data"
     private const val KEY_SAAVN_DOWNLOADS = "saavn_for_downloads"
     private const val KEY_DOWNLOAD_SOURCES = "download_sources_only"
+    private const val KEY_HAPTICS = "haptics_enabled"
     private const val KEY_OWN_MIN_KBPS = "own_file_min_kbps"
     private const val KEY_UPGRADE_DOWNLOADS = "upgrade_downloads"
     private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"

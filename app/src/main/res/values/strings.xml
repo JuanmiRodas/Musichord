@@ -1394,4 +1394,6 @@
     <string name="source_album_too">Also match the other %1$d songs of this album (Liked Music and library) in the same source</string>
     <string name="source_album_done">Album: %1$d of %2$d songs matched in the same source</string>
     <string name="pcloud_search">Search your files (title, artist, album, folder)</string>
+    <string name="haptic_feedback">Haptic feedback</string>
+    <string name="haptic_feedback_subtitle">Vibrations on taps, toggles and gestures</string>
 </resources>

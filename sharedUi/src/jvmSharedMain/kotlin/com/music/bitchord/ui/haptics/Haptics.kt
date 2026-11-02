@@ -57,6 +57,12 @@ expect class Haptics {
     fun play(haptic: Haptic)
 }
 
+/** BitChord Audio: Settings → "Haptic feedback". Off, nothing in the app vibrates. */
+object HapticsSwitch {
+    @Volatile
+    var enabled: Boolean = true
+}
+
 /** `val haptics = rememberHaptics()`, then `haptics.play(Haptic.Select)`. */
 @Composable
 expect fun rememberHaptics(): Haptics
