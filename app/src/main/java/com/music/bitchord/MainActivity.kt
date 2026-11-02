@@ -5706,6 +5706,14 @@ private fun BitChordApp(
                 onDismiss = { com.music.bitchord.ui.components.NowPlayingSource.close() },
             )
         }
+        // BitChord Audio: the cover picker, raised from the player.
+        val coverSong by com.music.bitchord.ui.components.CoverPicker.song.collectAsStateWithLifecycle()
+        coverSong?.let { song ->
+            com.music.bitchord.ui.components.CoverPickerDialog(
+                song = song,
+                onDismiss = { com.music.bitchord.ui.components.CoverPicker.close() },
+            )
+        }
         // BitChord Audio: pCloud by folder — to play, or to pick a song's file.
         val browserRequest by com.music.bitchord.ui.components.PcloudBrowser.request.collectAsStateWithLifecycle()
         browserRequest?.let { req ->

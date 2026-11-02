@@ -244,6 +244,9 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                 TextButton(onClick = onBrowse, modifier = Modifier.padding(top = 4.dp)) {
                     Text(stringResource(R.string.source_browse_pcloud))
                 }
+                TextButton(onClick = { onDismiss(); CoverPicker.open(song) }) {
+                    Text(stringResource(R.string.cover_title) + "…")
+                }
                 // Every source, searched with the song's name — or your own words.
                 androidx.compose.material3.OutlinedTextField(
                     value = query,

@@ -83,6 +83,15 @@ object RemoteArtworkStore {
             Uri.fromFile(file).toString()
         }
 
+    /** BitChord Audio: [videoId]'s cached picture replaced (a new cover was written into the file). */
+    fun replace(context: Context, videoId: String, bytes: ByteArray, mime: String) {
+        val dir = File(context.applicationContext.cacheDir, "remote_art").apply { mkdirs() }
+        dir.listFiles { _, name -> name.startsWith("${cacheKey(videoId)}.") }?.forEach { it.delete() }
+        val file = File(dir, "${cacheKey(videoId)}.${extensionFor(mime)}")
+        runCatching { file.outputStream().use { it.write(bytes) } }
+        memory[videoId] = Uri.fromFile(file).toString()
+    }
+
     private fun diskHit(context: Context, key: String): String? {
         val dir = File(context.cacheDir, "remote_art")
         if (!dir.isDirectory) return null

@@ -207,7 +207,7 @@ object JioSaavnService {
     }
 
     /** BitChord Audio: an album found by name — its id, title and artists. */
-    data class AlbumHit(val id: String, val title: String, val artists: String)
+    data class AlbumHit(val id: String, val title: String, val artists: String, val image: String = "")
 
     /** BitChord Audio: albums matching [query] (album and artist). */
     suspend fun searchAlbums(query: String): List<AlbumHit> = runCatching {
@@ -232,7 +232,7 @@ object JioSaavnService {
             val artists = ((more?.get("artistMap") as? JsonObject)?.get("primary_artists") as? JsonArray).orEmpty()
                 .mapNotNull { str((it as? JsonObject)?.get("name")) }.joinToString(", ")
                 .ifBlank { str(more?.get("music")) ?: str(o["subtitle"]).orEmpty() }
-            AlbumHit(id, title, artists)
+            AlbumHit(id, title, artists, str(o["image"]).orEmpty())
         }
     }.getOrElse { emptyList() }
 

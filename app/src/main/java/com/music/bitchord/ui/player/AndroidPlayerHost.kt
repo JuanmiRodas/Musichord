@@ -228,6 +228,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         com.music.bitchord.ui.components.NowPlayingSource.open(song)
     }
 
+    override fun chooseCover(song: com.music.bitchord.data.model.Song) {
+        com.music.bitchord.ui.components.CoverPicker.open(song)
+    }
+
     override fun flagWrongLyrics(song: com.music.bitchord.data.model.Song, source: com.music.bitchord.data.lyrics.LyricsSource?) {
         val lyrics = com.music.bitchord.data.lyrics.EditedLyrics
         // Lyrics you picked or timed: back to the automatic ones.

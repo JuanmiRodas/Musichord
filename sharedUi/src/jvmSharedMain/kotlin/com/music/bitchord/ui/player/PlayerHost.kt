@@ -122,6 +122,9 @@ interface PlayerHost {
     /** BitChord Audio: "where is this playing from" — the source picker for [song]. */
     fun chooseSource(song: Song) {}
 
+    /** BitChord Audio: the cover picker for [song]. */
+    fun chooseCover(song: Song) {}
+
     /** BitChord Audio: how far [trackId]'s lyrics are moved (+ later, − earlier), in ms. */
     fun lyricsOffset(trackId: String): StateFlow<Long> = MutableStateFlow(0L)
 

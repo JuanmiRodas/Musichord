@@ -2,6 +2,7 @@ package com.music.bitchord.ui.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +24,12 @@ import com.music.bitchord.data.remote.RemoteArtworkStore
 @Composable
 fun rememberRemoteArtworkUrl(song: Song?): String? {
     val context = LocalContext.current
+    // BitChord Audio: the cover picked for this song, wherever it plays from.
+    val coversVersion by com.music.bitchord.data.covers.CoverOverrides.version.collectAsState()
+    val picked = remember(song?.title, song?.artist, coversVersion) {
+        song?.let { com.music.bitchord.data.covers.CoverOverrides.get(it) }
+    }
+    if (picked != null) return picked
     val key = song?.videoId
     var resolved by remember(key) { mutableStateOf(song?.thumbnailUrl) }
     LaunchedEffect(key) {

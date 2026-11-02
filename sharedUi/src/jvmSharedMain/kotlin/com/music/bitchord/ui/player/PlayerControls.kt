@@ -61,6 +61,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.Image as CoverIcon
 import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Headphones
@@ -1900,21 +1901,35 @@ internal fun SourceLine(song: Song, modifier: Modifier = Modifier) {
         codecLabel(snapshot?.mimeType),
         (snapshot?.claimed?.kbps ?: snapshot?.bitrateKbps)?.let { "$it kbps" },
     ).joinToString(" · ")
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .clickable { PlayerPlatform.host.chooseSource(song) }
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    ) {
-        Text(
-            text = "$text  ›",
-            style = MaterialTheme.typography.labelSmall.copy(
-                shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), offset = Offset(0f, 1f), blurRadius = 4f),
-            ),
-            color = Color.White.copy(alpha = 0.8f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .clip(RoundedCornerShape(50))
+                .clickable { PlayerPlatform.host.chooseSource(song) }
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        ) {
+            Text(
+                text = "$text  ›",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), offset = Offset(0f, 1f), blurRadius = 4f),
+                ),
+                color = Color.White.copy(alpha = 0.8f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // BitChord Audio: the cover picker.
+        Icon(
+            imageVector = Icons.Rounded.CoverIcon,
+            contentDescription = "Cover",
+            tint = Color.White.copy(alpha = 0.7f),
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .clickable { PlayerPlatform.host.chooseCover(song) }
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .size(16.dp),
         )
     }
 }

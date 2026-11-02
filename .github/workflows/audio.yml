@@ -67,9 +67,9 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          ./gradlew :app:testProdReleaseUnitTest --tests 'com.music.bitchord.AudioForkTest' 2>&1 | tee test.log || {
+          ./gradlew :app:testProdReleaseUnitTest --tests 'com.music.bitchord.AudioForkTest' --tests 'com.music.bitchord.CoverTagsTest' 2>&1 | tee test.log || {
             # Which tests failed, and why, as annotations on the run.
-            grep -hE 'AudioForkTest > .* FAILED|expected:|AssertionError|Exception' test.log app/build/test-results/testProdReleaseUnitTest/*.xml 2>/dev/null \
+            grep -hE '(AudioForkTest|CoverTagsTest) > .* FAILED|expected:|AssertionError|Exception' test.log app/build/test-results/testProdReleaseUnitTest/*.xml 2>/dev/null \
               | head -20 | while IFS= read -r line; do echo "::warning::${line:0:300}"; done
             exit 1
           }

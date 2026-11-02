@@ -293,6 +293,47 @@ object WebDavClient {
         }
     }
 
+    /** BitChord Audio: the whole of [fileUrl], streamed into [into]. Returns the byte count. */
+    suspend fun download(fileUrl: String, username: String, password: String, into: java.io.File): Result<Long> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val builder = Request.Builder().url(fileUrl)
+                WebDavConfig.basicAuthHeader(username, password)?.let { builder.header("Authorization", it) }
+                Http.client.newCall(builder.build()).execute().use { response ->
+                    if (response.code !in 200..299) throw WebDavException("Download failed with ${response.code}")
+                    val body = response.body ?: throw WebDavException("Empty response")
+                    into.outputStream().use { out -> body.byteStream().copyTo(out, 64 * 1024) }
+                }
+                into.length()
+            }
+        }
+
+    /** BitChord Audio: WebDAV MOVE of [fromUrl] onto [toUrl], replacing what is there. */
+    suspend fun move(fromUrl: String, toUrl: String, username: String, password: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val builder = Request.Builder().url(fromUrl).method("MOVE", null)
+                    .header("Destination", toUrl)
+                    .header("Overwrite", "T")
+                WebDavConfig.basicAuthHeader(username, password)?.let { builder.header("Authorization", it) }
+                Http.client.newCall(builder.build()).execute().use { response ->
+                    if (response.code !in 200..299) throw WebDavException("Move failed with ${response.code}")
+                }
+            }
+        }
+
+    /** BitChord Audio: deletes [fileUrl] (a leftover temporary file). */
+    suspend fun delete(fileUrl: String, username: String, password: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val builder = Request.Builder().url(fileUrl).delete()
+                WebDavConfig.basicAuthHeader(username, password)?.let { builder.header("Authorization", it) }
+                Http.client.newCall(builder.build()).execute().use { response ->
+                    if (response.code !in 200..299 && response.code != 404) throw WebDavException("Delete failed with ${response.code}")
+                }
+            }
+        }
+
     /**
      * Creates the collection at [dirUrl], if it isn't one already. 405 means
      * something is already there, which is the happy path wearing an error

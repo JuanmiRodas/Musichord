@@ -58,8 +58,7 @@ internal actual fun ImmersiveScreen(keepOn: Boolean, showStatusBar: Boolean) {
                     hide(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
                     show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
                     isAppearanceLightStatusBars = false
-                    @Suppress("DEPRECATION")
-                    window.statusBarColor = android.graphics.Color.BLACK
+                    setBlackStatusBar(window)
                 } else {
                     hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
                 }
@@ -161,4 +160,9 @@ internal actual fun DrawScope.clipShiftedDown(
     clipRect(left = left, top = top, right = right, bottom = bottom) {
         translate(top = dy) { block() }
     }
+}
+
+@Suppress("DEPRECATION")
+private fun setBlackStatusBar(window: android.view.Window) {
+    window.statusBarColor = android.graphics.Color.BLACK
 }
