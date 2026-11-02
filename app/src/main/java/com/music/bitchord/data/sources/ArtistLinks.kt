@@ -40,6 +40,16 @@ object ArtistLinks {
         if (set.add(b)) prefs?.edit()?.putStringSet(a, HashSet(set))?.apply()
     }
 
+    /** Every name [artist] is linked with, either way round (as keys: letters and digits). */
+    fun aliases(artist: String): Set<String> {
+        val k = key(artist)
+        if (k.isEmpty()) return emptySet()
+        val out = HashSet<String>()
+        links[k]?.let(out::addAll)
+        links.forEach { (a, set) -> if (k in set) out += a }
+        return out - k
+    }
+
     fun linked(youtubeArtist: String, fileArtist: String): Boolean =
         links[key(youtubeArtist)]?.contains(key(fileArtist)) == true
 }

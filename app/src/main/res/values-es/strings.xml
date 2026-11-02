@@ -602,6 +602,7 @@
     <string name="own_files_mobile_data">Usar mis archivos de pCloud con datos móviles</string>
     <string name="own_files_mobile_data_subtitle">Desactivado: con datos móviles suena YouTube (o tu descarga) en lugar de tus archivos, para ahorrar datos. En Wi-Fi siempre suenan tus archivos</string>
     <string name="source_search">Buscar en todas las fuentes</string>
+    <string name="source_search_also">También buscado como: %1$s</string>
     <string name="source_search_none">No se encontró nada — prueba con otras palabras</string>
     <string name="saavn_for_downloads">JioSaavn para las descargas</string>
     <string name="saavn_for_downloads_subtitle">Las descargas pueden usar las copias de 320 kbps de JioSaavn aunque esté desactivado para reproducir. Gana la mejor calidad: sin pérdida, luego tus archivos y JioSaavn por bitrate, luego YouTube</string>

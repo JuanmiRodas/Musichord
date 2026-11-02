@@ -819,6 +819,7 @@
     <string name="own_files_mobile_data">Play my pCloud files on mobile data</string>
     <string name="own_files_mobile_data_subtitle">Off: on mobile data, YouTube (or your download) plays instead of your files, to save data. Your files always play on Wi-Fi</string>
     <string name="source_search">Search all sources</string>
+    <string name="source_search_also">Also searched as: %1$s</string>
     <string name="source_search_none">Nothing found — try other words</string>
     <string name="saavn_for_downloads">JioSaavn for downloads</string>
     <string name="saavn_for_downloads_subtitle">Downloads may use JioSaavn\'s 320 kbps copies even while JioSaavn is off for playback. The best bitrate wins: lossless, then your files and JioSaavn by bitrate, then YouTube</string>

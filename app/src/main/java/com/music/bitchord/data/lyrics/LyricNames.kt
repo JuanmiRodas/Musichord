@@ -87,6 +87,9 @@ object LyricNames {
             return listOfNotNull(runCatching { JapaneseReading.romaji(name) }.getOrNull())
         }
         if (kana(name) == null) return emptyList()
+        // Spellings already confirmed (see JapaneseNames) before the keyboard's guess.
+        com.music.bitchord.data.sources.JapaneseNames.cachedArtist(name).firstOrNull()?.let { return listOf(it) }
+        com.music.bitchord.data.sources.JapaneseNames.cached(name, "")?.titles?.firstOrNull()?.let { return listOf(it) }
         return kotlinx.coroutines.withTimeoutOrNull(3_500) {
             runCatching { japanese(name) }.getOrNull()?.take(1)
         }.orEmpty()
@@ -104,7 +107,7 @@ object LyricNames {
     }
 
     /** Google's Japanese conversion of romaji [text]: the likeliest spellings, kanji and all. */
-    private fun japanese(text: String): List<String> {
+    fun japanese(text: String): List<String> {
         val q = URLEncoder.encode(text.lowercase(), "UTF-8")
         val url = URL("https://inputtools.google.com/request?text=$q&itc=ja-t-i0-und&num=3&cp=0&cs=1&ie=utf-8&oe=utf-8")
         val conn = (url.openConnection() as HttpURLConnection).apply {

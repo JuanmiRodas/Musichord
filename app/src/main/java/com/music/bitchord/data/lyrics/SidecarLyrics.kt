@@ -114,6 +114,14 @@ object SidecarLyrics {
         parse(raw)
     }
 
+    /** BitChord Audio: the Japanese names the lyrics folders' files carry (as keys). */
+    fun japaneseNames(): Set<String> =
+        byTitle.keys.filterTo(HashSet()) { com.music.bitchord.data.sources.JapaneseReading.isJapanese(it) }
+
+    /** BitChord Audio: the raw text of the `.lrc` beside a pCloud file, if any. */
+    suspend fun besideText(videoId: String): String? =
+        if (WebDavConfig.isWebDavId(videoId)) remoteBeside(videoId) else null
+
     private suspend fun fromFolders(titles: List<String>, artists: List<String>): String? {
         if (byTitle.isEmpty()) return null
         // Each title as written and without its version note — "(Live)",

@@ -126,6 +126,30 @@ object NetEase {
         "Accept" to "application/json",
     )
 
+    /** A song as NetEase lists it: its own name, its artists, its length in seconds (0 unknown). */
+    data class Row(val name: String, val artists: List<String>, val seconds: Long)
+
+    /**
+     * BitChord Audio: the songs NetEase lists for [query] — used to learn how a
+     * song is spelt in Japanese (NetEase files Japanese songs under their
+     * Japanese names, and its search also answers romaji and English names).
+     */
+    suspend fun songs(query: String, limit: Int = 20): List<Row> = withContext(Dispatchers.IO) {
+        val q = JapaneseMatch.enc(query.trim())
+        val body = lyricsGetWith("https://music.163.com/api/search/get?s=$q&type=1&limit=$limit&offset=0", headers)
+            ?: return@withContext emptyList()
+        val songs = runCatching {
+            JapaneseMatch.arr(JapaneseMatch.obj(JapaneseMatch.obj(lyricsJson.parseToJsonElement(body))?.get("result"))?.get("songs"))
+        }.getOrNull() ?: return@withContext emptyList()
+        songs.mapNotNull { JapaneseMatch.obj(it) }.mapNotNull { s ->
+            val name = JapaneseMatch.str(s["name"]) ?: return@mapNotNull null
+            val artists = JapaneseMatch.arr(s["artists"] ?: s["ar"]).orEmpty()
+                .mapNotNull { JapaneseMatch.str(JapaneseMatch.obj(it)?.get("name")) }
+            val dur = (s["duration"] ?: s["dt"])?.jsonPrimitive?.longOrNull?.div(1000) ?: 0
+            Row(name, artists, dur)
+        }
+    }
+
     suspend fun lyrics(title: String, artist: String, durationMs: Long): List<LyricLine>? = withContext(Dispatchers.IO) {
         val q = JapaneseMatch.enc("$title $artist".trim())
         val body = lyricsGetWith("https://music.163.com/api/search/get?s=$q&type=1&limit=15&offset=0", headers)

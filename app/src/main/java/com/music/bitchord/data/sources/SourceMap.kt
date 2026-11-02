@@ -52,7 +52,7 @@ object SourceMap {
     )
 
     /** Bumped when JioSaavn matching improves: songs it missed are looked up again. */
-    private const val SAAVN_VERSION = 2
+    private const val SAAVN_VERSION = 3
 
     /** JioSaavn's tier for every row it returns: 320 kbps AAC. */
     const val SAAVN_KBPS = 320
@@ -245,13 +245,33 @@ object SourceMap {
             val target = TrackMatcher.Target(title = s.title, artist = s.artist, album = s.albumName, durationSec = sec)
             val query = TrackMatcher.queries(target).firstOrNull() ?: "${s.title} ${s.artist}"
             val rows = runCatching { saavn.search(query, limit = 8) }.getOrNull() ?: return@forEachIndexed
-            val keys = OwnFileMatcher.titleKeys(s.title)
-            val hit = (TrackMatcher.ranked(rows, target) + rows).firstOrNull { row ->
+            val keys = OwnFileMatcher.titleKeys(s.title) + runCatching { OwnFileMatcher.soundKeys(s.title) }.getOrDefault(emptySet())
+            fun same(row: Song, japaneseArtists: List<String>): Boolean {
                 val rowSec = row.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
                     ?.fold(0) { acc, p -> acc * 60 + p }
-                sec != null && rowSec != null && kotlin.math.abs(sec - rowSec) <= 3 &&
-                    OwnFileMatcher.sameArtist(s.artist, row.artist) &&
-                    OwnFileMatcher.titleKeys(row.title).any { it in keys }
+                val rowKeys = OwnFileMatcher.titleKeys(row.title) + runCatching { OwnFileMatcher.soundKeys(row.title) }.getOrDefault(emptySet())
+                return sec != null && rowSec != null && kotlin.math.abs(sec - rowSec) <= 3 &&
+                    (OwnFileMatcher.sameArtist(s.artist, row.artist) || ArtistLinks.linked(s.artist, row.artist) ||
+                        japaneseArtists.any { OwnFileMatcher.sameArtist(it, row.artist) }) &&
+                    rowKeys.any { it in keys }
+            }
+            var hit = (TrackMatcher.ranked(rows, target) + rows).firstOrNull { same(it, emptyList()) }
+            // Not found by its romaji: asked again by its Japanese names (see JapaneseNames).
+            if (hit == null && (JapaneseNames.mayHaveJapanese(s.title) || !JapaneseReading.isJapanese(s.artist))) {
+                val names = runCatching { JapaneseNames.of(s) }.getOrDefault(JapaneseNames.Names.NONE)
+                if (!names.isEmpty) {
+                    for (q in names.queries(s.artist).take(4)) {
+                        val more = runCatching { saavn.search(q, limit = 12) }.getOrNull().orEmpty()
+                        hit = more.firstOrNull { same(it, names.artists) }
+                        if (hit != null) {
+                            JapaneseNames.learn(s.title, s.artist, hit.title.takeIf(JapaneseReading::isJapanese), hit.artist.takeIf(JapaneseReading::isJapanese))
+                            if (!OwnFileMatcher.sameArtist(s.artist, hit.artist)) ArtistLinks.learn(s.artist, hit.artist)
+                            TrackLog.d(TAG, "source map: JioSaavn has '${s.title}' as '${hit.title}' ('$q')")
+                            break
+                        }
+                        kotlinx.coroutines.delay(300)
+                    }
+                }
             }
             if (hit != null) found++
             val old = entries[s.videoId] ?: Entry(null, 0, false, gen())

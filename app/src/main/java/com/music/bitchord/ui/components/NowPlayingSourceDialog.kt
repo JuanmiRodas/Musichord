@@ -105,12 +105,27 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
     }
 
     // Search box: starts with the song's own name, and searches again as you type.
-    var query by remember(song.videoId) { mutableStateOf(searchName(song)) }
+    val defaultQuery = remember(song.videoId) { searchName(song) }
+    var query by remember(song.videoId) { mutableStateOf(defaultQuery) }
     var searched by remember(song.videoId) { mutableStateOf<List<Pair<String, Song>>?>(null) }
-    LaunchedEffect(query) {
+    // The song's Japanese title and artist, when it goes by romaji — searched too.
+    var japanese by remember(song.videoId) { mutableStateOf<com.music.bitchord.data.sources.JapaneseNames.Names?>(null) }
+    LaunchedEffect(song.videoId) {
+        japanese = withContext(Dispatchers.IO) {
+            runCatching { com.music.bitchord.data.sources.JapaneseNames.of(song) }
+                .getOrDefault(com.music.bitchord.data.sources.JapaneseNames.Names.NONE)
+        }
+    }
+    var alsoAsked by remember(song.videoId) { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(query, japanese) {
         searched = null
         kotlinx.coroutines.delay(500)
-        searched = withContext(Dispatchers.IO) { searchEverywhere(query, song) }
+        val extra = withContext(Dispatchers.IO) {
+            if (query.trim() == defaultQuery) japanese?.queries(song.artist).orEmpty()
+            else runCatching { com.music.bitchord.data.sources.JapaneseNames.forQuery(query) }.getOrDefault(emptyList())
+        }.filter { it.isNotBlank() && it != query.trim() }.take(4)
+        alsoAsked = extra
+        searched = withContext(Dispatchers.IO) { searchEverywhere(query, song, extra, japanese) }
     }
 
     fun pick(hit: Song) {
@@ -237,6 +252,14 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                     label = { Text(stringResource(R.string.source_search)) },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
+                if (alsoAsked.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.source_search_also, alsoAsked.joinToString(" · ")),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
                 when (val found = searched) {
                     null -> Text(
                         stringResource(R.string.browser_loading),
@@ -299,7 +322,12 @@ private fun searchName(song: Song): String {
  * on for playback, and YouTube Music. Best matches for [song] first within
  * each place.
  */
-private suspend fun searchEverywhere(query: String, song: Song): List<Pair<String, Song>> = kotlinx.coroutines.coroutineScope {
+private suspend fun searchEverywhere(
+    query: String,
+    song: Song,
+    extra: List<String> = emptyList(),
+    japanese: com.music.bitchord.data.sources.JapaneseNames.Names? = null,
+): List<Pair<String, Song>> = kotlinx.coroutines.coroutineScope {
     val q = query.trim()
     if (q.isEmpty()) return@coroutineScope emptyList()
     val target = TrackMatcher.Target(
@@ -308,17 +336,31 @@ private suspend fun searchEverywhere(query: String, song: Song): List<Pair<Strin
         album = song.albumName,
         durationSec = song.durationText?.let(::secondsIn),
     )
-    fun ranked(list: List<Song>): List<Song> {
-        val best = TrackMatcher.ranked(list, target)
-        return (best + list).distinctBy { it.videoId }
+    // The same song by its Japanese names, for rows a catalogue files that way.
+    val targets = listOf(target) + japanese?.titles.orEmpty().take(2).map { t ->
+        target.copy(title = t, artist = japanese?.artists?.firstOrNull() ?: song.artist)
     }
+    val sounds = (com.music.bitchord.data.sources.OwnFileMatcher.soundKeys(song.title) +
+        japanese?.titles.orEmpty().flatMap { com.music.bitchord.data.sources.OwnFileMatcher.soundKeys(it) }).toSet()
+    fun soundsRight(s: Song) = sounds.isNotEmpty() &&
+        runCatching { com.music.bitchord.data.sources.OwnFileMatcher.soundKeys(s.title) }.getOrDefault(emptySet()).any { it in sounds }
+    fun ranked(list: List<Song>): List<Song> {
+        val best = targets.flatMap { TrackMatcher.ranked(list, it) }
+        val sounding = list.filter(::soundsRight)
+        return (best + sounding + list).distinctBy { it.videoId }
+    }
+    /** Rows from the extra (Japanese) queries: only the ones that are this song by name or sound. */
+    fun relevant(list: List<Song>): List<Song> =
+        (targets.flatMap { TrackMatcher.ranked(list, it) } + list.filter(::soundsRight)).distinctBy { it.videoId }
     val pcloud = async {
         val words = norm(q).split(' ').filter { it.isNotBlank() }
         val sound = com.music.bitchord.data.sources.JapaneseReading.romaji(q)
             ?.let(com.music.bitchord.data.sources.JapaneseReading::soundKey)?.takeIf { it.length >= 4 }
+        val extraWords = extra.map { e -> norm(e).split(' ').filter { it.isNotBlank() } }.filter { it.isNotEmpty() }
         com.music.bitchord.data.webdav.WebDavRepository.library().filter { f ->
             val hay = norm("${f.title} ${f.artist} ${f.albumName.orEmpty()} ${fileLabel(f)}")
             words.all { it in hay } ||
+                extraWords.any { ew -> ew.all { it in hay } } ||
                 (sound != null && com.music.bitchord.data.sources.OwnFileMatcher.soundKeys(f.title).any { it == "~$sound" })
         }.take(40).let(::ranked).take(12).map { "pCloud" to it }
     }
@@ -327,21 +369,30 @@ private suspend fun searchEverywhere(query: String, song: Song): List<Pair<Strin
         .filter { it.kind != com.music.bitchord.data.sources.SourceKind.MY_LIBRARY && it.kind != com.music.bitchord.data.sources.SourceKind.YOUTUBE }
         .map { source ->
             async {
-                kotlinx.coroutines.withTimeoutOrNull(10_000) {
-                    runCatching { source.search(q, limit = 8, waitForAll = false, request = null) }.getOrNull()
-                }.orEmpty().let(::ranked).take(6).map { source.displayName to it }
+                val asked = (listOf(q) + extra).map { one ->
+                    async {
+                        kotlinx.coroutines.withTimeoutOrNull(10_000) {
+                            runCatching { source.search(one, limit = if (one == q) 8 else 15, waitForAll = false, request = null) }.getOrNull()
+                        }.orEmpty().let { if (one == q) it else relevant(it) }
+                    }
+                }.flatMap { it.await() }.distinctBy { it.videoId }
+                asked.let(::ranked).take(6).map { source.displayName to it }
             }
         }
     val youtube = async {
-        kotlinx.coroutines.withTimeoutOrNull(10_000) {
-            YtMusicRepository.search(q, SearchFilter.SONGS).getOrNull()
-        }.orEmpty().mapNotNull {
-            when (it) {
-                is SearchResult.Track -> it.song
-                is SearchResult.TopTrack -> it.song
-                else -> null
+        (listOf(q) + extra.take(2)).map { one ->
+            async {
+                kotlinx.coroutines.withTimeoutOrNull(10_000) {
+                    YtMusicRepository.search(one, SearchFilter.SONGS).getOrNull()
+                }.orEmpty().mapNotNull {
+                    when (it) {
+                        is SearchResult.Track -> it.song
+                        is SearchResult.TopTrack -> it.song
+                        else -> null
+                    }
+                }.let { if (one == q) it else relevant(it) }
             }
-        }.let(::ranked).take(6).map { "YouTube" to it }
+        }.flatMap { it.await() }.distinctBy { it.videoId }.let(::ranked).take(6).map { "YouTube" to it }
     }
     pcloud.await() + others.flatMap { it.await() } + youtube.await()
 }

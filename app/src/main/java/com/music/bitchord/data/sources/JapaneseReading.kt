@@ -79,6 +79,37 @@ object JapaneseReading {
         }
     }
 
+    /**
+     * The words of [text] that sound like [key] (a [soundKey]) — "僕が死のうと思ったのは"
+     * out of a lyric line "僕が死のうと思ったのは まだ僕が十三だった頃" for the
+     * key of "Boku ga Shinou to Omotta no Wa" — so a title can be read off the
+     * song's own words, in the characters they are written with. Null when no
+     * run of whole words sounds like it, or the dictionary isn't loaded.
+     */
+    fun spanSounding(text: String, key: String): String? {
+        if (key.length < 4 || !isJapanese(text)) return null
+        val t = tokenizer ?: run { warmUp(); return null }
+        val tokens = runCatching { t.tokenize(text) }.getOrNull() ?: return null
+        val readings = tokens.map { tok ->
+            TrackMatcher.romajiOf(tok.reading?.takeIf { it.isNotBlank() && it != "*" } ?: tok.surface)
+        }
+        for (i in tokens.indices) {
+            if (tokens[i].surface.isBlank()) continue
+            val sound = StringBuilder()
+            val surface = StringBuilder()
+            for (j in i until tokens.size) {
+                sound.append(readings[j])
+                surface.append(tokens[j].surface)
+                val k = soundKey(sound.toString())
+                if (k == key) {
+                    return surface.toString().trim().takeIf { it.length >= 2 && isJapanese(it) }
+                }
+                if (k.length > key.length + 2 || !key.startsWith(k.take(maxOf(0, k.length - 2)))) break
+            }
+        }
+        return null
+    }
+
     // Consonant spellings first (Hepburn → Kunrei), then vowels and particles:
     // folded the other way round, "sha" lost its h to the "ha" rule before it
     // could become "sya", and Jitensha no longer met Jitensya.

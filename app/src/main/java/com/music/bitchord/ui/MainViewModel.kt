@@ -1606,6 +1606,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // BitChord Audio: lyrics on screen for a song known by its romaji —
+        // its Japanese title is read off the words when it is sung in them.
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            _lyrics.collect { lines ->
+                val request = currentLyricsRequest ?: return@collect
+                if (lines.isNullOrEmpty()) return@collect
+                runCatching {
+                    com.music.bitchord.data.sources.JapaneseNames.lyricsSeen(request.title, request.artist, lines.map { it.text })
+                }
+            }
+        }
         // BitChord Audio: a search result that is a liked song — another
         // YouTube upload, your file, JioSaavn's copy, but the same recording
         // (not a live or other version) — shows liked too.

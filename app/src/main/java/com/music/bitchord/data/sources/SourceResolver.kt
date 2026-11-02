@@ -1194,7 +1194,18 @@ object SourceResolver {
         requireSharedArtist: Boolean = false,
         driftSec: Int = UPGRADE_DRIFT_SEC,
     ): SourceStream? {
-        for (query in TrackMatcher.queries(target)) {
+        // BitChord Audio: a song known by its romaji is also asked for by its
+        // Japanese names, when they have been learnt (see JapaneseNames) — a
+        // catalogue that files it only in Japanese is matched against those.
+        val japanese = runCatching { JapaneseNames.cached(target.title, target.artist) }.getOrNull()
+        val asked = TrackMatcher.queries(target).map { it to target } +
+            japanese?.let { names ->
+                names.titles.take(1).flatMap { t ->
+                    val jt = target.copy(title = t, artist = names.artists.firstOrNull() ?: target.artist)
+                    names.queries(target.artist).filter { it.startsWith(t) }.take(2).map { it to jt }
+                }
+            }.orEmpty()
+        for ((query, target) in asked) {
             val candidates = attempt(source) {
                 source.search(
                     query,
