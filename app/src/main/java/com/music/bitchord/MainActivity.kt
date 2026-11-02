@@ -968,11 +968,24 @@ private fun BitChordApp(
         when {
             uri != null && deviceOnly(song) -> if (uri in offlineLiked) LikeStatus.LIKE else LikeStatus.INDIFFERENT
             uri != null && uri in offlineLiked -> LikeStatus.LIKE
-            else -> likeStatuses[song.videoId] ?: LikeStatus.INDIFFERENT
+            else -> likeStatuses[song.videoId]
+                // BitChord Audio: anything playing from Liked Music is liked.
+                ?: if (song.playbackSourceId in com.music.bitchord.data.LikedMusicCache.IDS) LikeStatus.LIKE
+                else LikeStatus.INDIFFERENT
         }
     }
     val toggleLikeOf: (Song) -> Unit = { song ->
-        if (deviceOnly(song)) OfflinePlaylists.toggleLike(song) else viewModel.toggleLike(song.videoId)
+        if (deviceOnly(song)) {
+            OfflinePlaylists.toggleLike(song)
+        } else {
+            // As shown: a Liked Music song with no rating yet is un-liked by the tap.
+            val shown = likeStatusOf(song)
+            viewModel.setLike(
+                song.videoId,
+                if (shown == LikeStatus.LIKE) LikeStatus.INDIFFERENT else LikeStatus.LIKE,
+                shown,
+            )
+        }
     }
     // Which tracks are being held on YouTube's own upload, so the player's menu
     // offers the way back out of a revert rather than the revert again.
@@ -1191,9 +1204,16 @@ private fun BitChordApp(
         val song = player.song ?: return@LaunchedEffect
         // Your files and other sources' copies (JioSaavn) alike.
         if (com.music.bitchord.data.LocalLikes.isYouTubeId(song.videoId)) return@LaunchedEffect
+        com.music.bitchord.data.LocalLikes.saw(song)
         if (com.music.bitchord.data.LocalLikes.youTubeOf(song.videoId) != null) return@LaunchedEffect
+        // In a Liked Music queue the copy stands for a liked song by
+        // definition: found leniently. Anywhere else, only the same recording.
+        val inLiked = song.playbackSourceId in com.music.bitchord.data.LikedMusicCache.IDS
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            runCatching { com.music.bitchord.data.sources.SourceMap.likedSongFor(song) }.getOrNull()
+            runCatching {
+                if (inLiked) com.music.bitchord.data.sources.SourceMap.likedSongInQueue(song)
+                else com.music.bitchord.data.sources.SourceMap.likedSongFor(song)
+            }.getOrNull()
         }?.let { com.music.bitchord.data.LocalLikes.link(song, it) }
     }
     val editedLyricsVersion by com.music.bitchord.data.lyrics.EditedLyrics.version.collectAsStateWithLifecycle()

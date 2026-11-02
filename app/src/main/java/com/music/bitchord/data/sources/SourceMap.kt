@@ -120,6 +120,17 @@ object SourceMap {
      */
     fun likedSongFor(file: Song): Song? {
         if (file.videoId in noCounterpart) return null
+        return likedSongFor(file, strict = true).also { if (it == null) noCounterpart += file.videoId }
+    }
+
+    /**
+     * For a copy playing in a Liked Music queue: it is there because a liked
+     * song is — so the liked song with its title (any spelling) and artist,
+     * whatever its length or release.
+     */
+    fun likedSongInQueue(file: Song): Song? = likedSongFor(file, strict = true) ?: likedSongFor(file, strict = false)
+
+    private fun likedSongFor(file: Song, strict: Boolean): Song? {
         val liked = LikedMusicCache.load(LikedMusicCache.lastProfile)?.songs.orEmpty()
         if (liked.isEmpty()) return null
         counterparts[file.videoId]?.let { id -> liked.firstOrNull { it.videoId == id }?.let { return it } }
@@ -132,15 +143,16 @@ object SourceMap {
             val seconds = seconds(file.durationText)
             keys.flatMap { index[it].orEmpty() }.distinct()
                 .filter { OwnFileMatcher.sameArtist(file.artist, it.artist) || ArtistLinks.linked(it.artist, file.artist) }
-                .filter { !OwnFileMatcher.otherRecording(it.title, it.albumName, file) }
+                .filter { !strict || !OwnFileMatcher.otherRecording(it.title, it.albumName, file) }
                 .filter { s ->
+                    if (!strict) return@filter true
                     val a = seconds ?: return@filter false
                     val b = seconds(s.durationText) ?: return@filter false
                     kotlin.math.abs(a - b) <= 2
                 }
                 .minByOrNull { s -> kotlin.math.abs((seconds(s.durationText) ?: 0) - (seconds ?: 0)) }
         }
-        if (found == null) noCounterpart += file.videoId else counterparts[file.videoId] = found.videoId
+        if (found != null) counterparts[file.videoId] = found.videoId
         return found
     }
 

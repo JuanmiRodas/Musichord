@@ -801,16 +801,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * on a round trip before the heart fills reads as the tap not having
      * registered, and people tap again.
      */
-    fun setLike(videoId: String, status: LikeStatus) {
+    fun setLike(videoId: String, status: LikeStatus, shown: LikeStatus? = null) {
         // BitChord Audio: a song that isn't YouTube's (your pCloud file, a
         // JioSaavn copy) is liked on YouTube when it's there — so Liked Music
         // stays the one list — and here, on the device, when it isn't.
         if (!com.music.bitchord.data.LocalLikes.isYouTubeId(videoId)) {
-            setLikeOfOwn(videoId, status)
+            setLikeOfOwn(videoId, status, shown)
             return
         }
         if (!requireSignIn()) return
-        val previous = likeStatusOf(videoId)
+        // BitChord Audio: what the heart showed (a Liked Music song is liked).
+        val previous = shown ?: likeStatusOf(videoId)
         if (previous == status) return
         LikeState.set(videoId, status)
         viewModelScope.launch {
@@ -889,11 +890,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun setLikeOfOwn(id: String, status: LikeStatus) {
+    private fun setLikeOfOwn(id: String, status: LikeStatus, shown: LikeStatus? = null) {
         val local = com.music.bitchord.data.LocalLikes
         local.youTubeOf(id)?.let { yt ->
             LikeState.set(id, status)
-            setLike(yt, status)
+            setLike(yt, status, shown)
             return
         }
         // Liked here (YouTube hasn't it): un-liked here, and gone from Liked Music.
@@ -909,7 +910,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val yt = if (_signedIn.value) runCatching { local.findOnYouTube(song) }.getOrNull() else null
             if (yt != null) {
                 local.link(song, yt)
-                setLike(yt.videoId, status)
+                setLike(yt.videoId, status, shown)
             } else {
                 local.setLocal(song, status == LikeStatus.LIKE)
                 if (status != LikeStatus.LIKE) dropFromLikedLists(id)

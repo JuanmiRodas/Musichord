@@ -76,6 +76,11 @@ object LocalLikes {
 
     fun youTubeOf(id: String): String? = _links.value[id]
 
+    /** A song seen playing, so a heart tapped on it knows its name. */
+    fun saw(song: Song) {
+        seen[song.videoId] = song
+    }
+
     fun songFor(id: String): Song? =
         seen[id] ?: _liked.value[id] ?: WebDavRepository.library().firstOrNull { it.videoId == id }
 
