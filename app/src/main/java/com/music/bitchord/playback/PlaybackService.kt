@@ -81,6 +81,7 @@ import com.music.bitchord.playback.cast.CastSink
 import com.music.bitchord.playback.cast.RemoteSpeaker
 import com.music.bitchord.playback.cast.Speakers
 import com.music.bitchord.playback.cast.CastStream
+import com.music.bitchord.playback.cast.CastRouting
 import com.music.bitchord.playback.audio.PrecisionAudioSink
 import com.music.bitchord.playback.dsd.DsdExtractorsFactory
 import com.music.bitchord.playback.audio.DirectAudioProbe
@@ -1778,6 +1779,7 @@ class PlaybackService : MediaLibraryService() {
             DefaultDataSource.Factory(this, resolvingFactory),
         )
         AudioCache.setUpstream(defaultDataSourceFactory)
+        castDataSourceFactory = defaultDataSourceFactory
         // DsdExtractorsFactory: the stock extractors plus DSF/DFF, which Media3
         // cannot open at all. A DSD file leaves the extractor as float PCM.
         mediaSourceFactory = DefaultMediaSourceFactory(
@@ -1922,35 +1924,74 @@ class PlaybackService : MediaLibraryService() {
      * receiver cannot send. Runs the same resolver the player's own data source
      * does, so the receiver is handed the URL the phone would have played.
      */
+    /**
+     * BitChord Audio: what a Cast receiver plays [item] from.
+     *
+     * YouTube's own stream URLs go to the receiver as they are; a pCloud file
+     * goes as a direct pCloud link (no password needed). Everything else — a
+     * JioSaavn or addon stream that wants headers, a file on the phone, a
+     * pCloud file when no link can be had, or anything the receiver already
+     * failed to play directly ([CastRouting.proxyOnly]) — is served by the
+     * phone itself ([CastStreamServer]) through the same stream chain the
+     * phone's player reads, so whatever plays here can be cast.
+     */
     private suspend fun resolveForCast(item: MediaItem): CastStream? = withContext(Dispatchers.IO) {
         val uri = item.localConfiguration?.uri ?: return@withContext null
         val resolver = streamResolver ?: return@withContext null
-        // Ungated: the receiver plays items this player is not on.
-        val resolved = DirectSourceGate.ungated { resolver.resolveDataSpec(DataSpec(uri)) }.uri
-        if (resolved.scheme == "http" || resolved.scheme == "https") {
-            CastStream(resolved.toString(), CastPlayback.mimeTypeOf(resolved))
-        } else {
-            // The item's URI may be a local/offline path for a downloaded track.
-            // Fall back to resolving the remote stream URL using the same path
-            // non-downloaded tracks use, so the receiver gets an HTTP URL it can
-            // reach — see #1085. Only allow this when the videoId is a known
-            // downloaded YouTube id (key in Downloads.saved); reject external
-            // local files whose videoId is a content:// URI that cannot resolve.
-            val fallback = if (uri.scheme == "content" || uri.scheme == "file") {
-                item.mediaId.takeIf { it.isNotBlank() }?.let { vid ->
-                    if (Downloads.saved.value.containsKey(vid)) "bitchord://watch?v=$vid" else null
+        val proxyOnly = item.mediaId in CastRouting.proxyOnly
+        val spec = if (uri.scheme == "content" || uri.scheme == "file") null else runCatching {
+            // Ungated: the receiver plays items this player is not on.
+            DirectSourceGate.ungated { resolver.resolveDataSpec(DataSpec(uri)) }
+        }.getOrNull()
+        val resolved = spec?.uri
+        val isHttp = resolved != null && (resolved.scheme == "http" || resolved.scheme == "https")
+        if (isHttp && !proxyOnly && spec!!.httpRequestHeaders.isEmpty()) {
+            val host = resolved!!.host.orEmpty()
+            if (host.endsWith("googlevideo.com")) {
+                return@withContext CastStream(resolved.toString(), CastPlayback.mimeTypeOf(resolved), castArtwork(item))
+            }
+            if (com.music.bitchord.data.webdav.PcloudLinks.isPcloud(resolved.toString())) {
+                com.music.bitchord.data.webdav.PcloudLinks.directUrl(resolved.toString())?.let {
+                    return@withContext CastStream(it, CastPlayback.mimeTypeOf(resolved), castArtwork(item))
                 }
-            } else null
-            if (fallback != null) {
-                runCatching {
-                    DirectSourceGate.ungated { resolver.resolveDataSpec(DataSpec(fallback.toUri())) }.uri
-                        .takeIf { it.scheme == "http" || it.scheme == "https" }
-                }.getOrNull()?.let { url ->
-                    CastStream(url.toString(), CastPlayback.mimeTypeOf(url))
-                }
-            } else null
+            }
         }
+        // Served by the phone.
+        val artwork = castArtwork(item)
+        val named = resolved?.takeIf { isHttp } ?: uri
+        val mime = CastPlayback.mimeTypeOf(named)
+        val ext = when (mime) {
+            "audio/flac" -> "flac"
+            "audio/mpeg" -> "mp3"
+            "audio/ogg" -> "ogg"
+            "audio/wav" -> "wav"
+            else -> "m4a"
+        }
+        val name = "${item.mediaMetadata.title ?: "track"}.$ext"
+        castStreamServer.urlFor(uri, mime, name)?.let { CastStream(it, mime, artwork) }
+            ?: resolved?.takeIf { isHttp }?.let { CastStream(it.toString(), mime, artwork) }
     }
+
+    /**
+     * The cover for a receiver: one it can fetch as it is, else served by the
+     * phone (a cover inside a pCloud file, a password-protected folder image).
+     */
+    private fun castArtwork(item: MediaItem): String? {
+        val art = item.mediaMetadata.artworkUri ?: return null
+        val open = (art.scheme == "http" || art.scheme == "https") &&
+            !com.music.bitchord.data.webdav.WebDavAuth.shouldAuthorize(art.host.orEmpty())
+        if (open) return art.toString()
+        return castStreamServer.urlFor(art, "image/jpeg", "cover.jpg")
+    }
+
+    /** BitChord Audio: the phone serving tracks to a Cast receiver; see [resolveForCast]. */
+    private val castStreamServer by lazy {
+        com.music.bitchord.playback.cast.CastStreamServer(applicationContext) { castDataSourceFactory }
+    }
+
+    /** The phone player's stream chain (without the cache), for [castStreamServer]. */
+    @Volatile
+    private var castDataSourceFactory: androidx.media3.datasource.DataSource.Factory? = null
 
     private fun createCrossfadeController() = CrossfadeController(
             scope,

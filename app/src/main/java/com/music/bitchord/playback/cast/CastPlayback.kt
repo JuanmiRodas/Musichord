@@ -30,7 +30,15 @@ import org.json.JSONObject
 import kotlin.coroutines.resume
 
 /** A stream the receiver can open by itself: a URL and what it holds. */
-class CastStream(val url: String, val mimeType: String)
+class CastStream(val url: String, val mimeType: String, val artworkUrl: String? = null)
+
+/**
+ * BitChord Audio: tracks a receiver failed to play from their direct address;
+ * from then on the phone serves them itself (see `CastStreamServer`).
+ */
+object CastRouting {
+    val proxyOnly: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+}
 
 /** Told when the receiver changes something the session player reports as its own. */
 interface CastSink {
@@ -358,6 +366,18 @@ class CastPlayback(
                     wantsPlay = false
                     onReceiverFinished()
                 } else if (status.idleReason == MediaStatus.IDLE_REASON_ERROR) {
+                    // BitChord Audio: a track the receiver couldn't fetch by
+                    // itself is tried once more, served by the phone.
+                    val failedId = status.getQueueItemById(status.currentItemId)?.mediaId()
+                        ?: localPlayer()?.currentMediaItem?.mediaId
+                    val player = localPlayer()
+                    val index = failedId?.let { id -> player?.let { indexOfMediaId(it, id) } }
+                    if (failedId != null && player != null && index != null && CastRouting.proxyOnly.add(failedId)) {
+                        Log.w(TAG, "receiver couldn't play $failedId directly; serving it from the phone")
+                        if (player.currentMediaItemIndex != index) player.seekTo(index, 0L)
+                        load(player.getMediaItemAt(index), status.streamPosition.coerceAtLeast(0L), play = true)
+                        return
+                    }
                     wantsPlay = false
                     loading = false
                     say(R.string.cast_track_unsupported)
@@ -541,7 +561,7 @@ class CastPlayback(
             metadata.title?.let { putString(MediaMetadata.KEY_TITLE, it.toString()) }
             metadata.artist?.let { putString(MediaMetadata.KEY_ARTIST, it.toString()) }
             metadata.albumTitle?.let { putString(MediaMetadata.KEY_ALBUM_TITLE, it.toString()) }
-            metadata.artworkUri?.takeIf { it.scheme == "http" || it.scheme == "https" }
+            (stream.artworkUrl?.let(Uri::parse) ?: metadata.artworkUri?.takeIf { it.scheme == "http" || it.scheme == "https" })
                 ?.let { addImage(WebImage(it)) }
         }
         val info = MediaInfo.Builder(stream.url)
