@@ -3941,6 +3941,9 @@ fun NowPlayingScreen(
                             // the queue behind it the same way the "Up next" glyph
                             // closes lyrics behind the queue.
                             onClick = openLyrics,
+                            // Nothing found (or still looking): straight to the
+                            // lyrics sources and the search, to find them by hand.
+                            onNoLyricsClick = { showLyricsProviders = true },
                         )
                     }
                     if (!lyricsOpen && !syncedLyricsEnabled) {

@@ -584,6 +584,8 @@ internal fun CurrentLyricStrip(
     lyricsUnavailable: Boolean,
     loadingText: String,
     onClick: () -> Unit,
+    /** BitChord Audio: with no lyrics found, where a tap goes (the lyrics search). */
+    onNoLyricsClick: () -> Unit = onClick,
 ) {
     // Compute the active lyric text so we can determine RTL direction at the
     // strip level.  This lets us override the parent Column's forced
@@ -638,6 +640,7 @@ internal fun CurrentLyricStrip(
                     trackKey = trackKey,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickable(onClick = onNoLyricsClick)
                         .align(align),
                 )
             } else {
@@ -645,6 +648,7 @@ internal fun CurrentLyricStrip(
                     text = loadingText,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickable(onClick = onNoLyricsClick)
                         .align(align),
                 )
             }
