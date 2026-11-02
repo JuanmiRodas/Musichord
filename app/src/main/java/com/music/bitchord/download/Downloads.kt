@@ -160,6 +160,12 @@ object Downloads {
         }.getOrDefault(emptyMap())
         // BitChord Audio: better copies for what's downloaded, on Wi-Fi.
         DownloadUpgrader.start(context)
+        // BitChord Audio: Artist/Album folders and tidy names, existing downloads too.
+        DownloadLayout.init(context)
+        DownloadSkips.init(context)
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            runCatching { DownloadLayout.reorganise(context.applicationContext) }
+        }
     }
 
     // ---- Asking -------------------------------------------------------------
@@ -749,6 +755,17 @@ object Downloads {
 
     private val recordLock = Any()
 
+    /** BitChord Audio: the saved downloads' details, for [DownloadLayout]. */
+    internal fun savedMetadataSnapshot(): Map<String, SavedSongMetadata> = _savedMetadata.value
+
+    /** BitChord Audio: a saved file moved to [to] (see [DownloadLayout.reorganise]). */
+    fun relocate(from: String, to: String) {
+        record(
+            saved = { m -> m.mapValues { (_, v) -> if (v == from) to else v } },
+            meta = { m -> m.mapValues { (_, v) -> if (v.uri == from) v.copy(uri = to) else v } },
+        )
+    }
+
     /** Returns all downloaded songs whose files still exist on disk. */
     suspend fun getDownloadedSongs(context: Context): List<Song> = withContext(Dispatchers.IO) {
         val metaMap = _savedMetadata.value
@@ -967,6 +984,11 @@ object Downloads {
         } catch (e: CancellationException) {
             clear(id)
             throw e
+        } catch (e: DownloadSkips.Skipped) {
+            // BitChord Audio: none of the allowed sources has it — skipped, and in the report.
+            Log.d(TAG, "download skipped for $id: ${e.message}")
+            DownloadSkips.record(song, e.message.orEmpty())
+            fail(id, e.message.orEmpty())
         } catch (e: Exception) {
             Log.w(TAG, "download failed for $id: ${e.message}", e)
             fail(id, e.friendly())
@@ -1027,7 +1049,7 @@ object Downloads {
 
         // Asked for from the Cached songs folder: the copy already on disk is
         // the answer, if it is whole. See [fromCache].
-        if (fromCache.remove(song.videoId)) {
+        if (fromCache.remove(song.videoId) && !DownloadSkips.restricted) {
             AudioCache.completeCopyOf(song.videoId)?.let(::cachedRoute)?.let { route ->
                 Log.d(TAG, "downloading ${song.videoId} from the song cache as .${route.extension}")
                 return@withContext Prepared(song.videoId, track, route = route, alreadyAt = null)
@@ -1040,6 +1062,7 @@ object Downloads {
         } catch (e: Exception) {
             // No connection, or nothing would resolve. A complete copy in the
             // song cache is still the song, and better saved than refused.
+            if (e is DownloadSkips.Skipped) throw e
             AudioCache.completeCopyOf(song.videoId)?.let(::cachedRoute)
                 ?.also { Log.w(TAG, "${song.videoId} could not be fetched (${e.message}); saving the cached copy") }
                 ?: throw e
@@ -1112,8 +1135,12 @@ object Downloads {
                     artwork = async { MediaTagger.artworkFor(context, track) }
                 }
 
-                val name = DownloadStore.fileNameFor(track, route.extension)
-                val alreadyThere = DownloadStore.existing(context, name)
+                // BitChord Audio: Artist[/Album]/N. Title - Artist - Album.ext
+                DownloadLayout.lookUpTrackNumber(track)
+                val place = DownloadLayout.place(track, route.extension)
+                val name = place.name
+                val alreadyThere = DownloadStore.existing(context, name, place.folder)
+                    ?: DownloadStore.existing(context, DownloadStore.fileNameFor(track, route.extension))
                 if (alreadyThere != null) {
                     Log.d(TAG, "$name is already in Music; adopting it")
                     remember(song, track, alreadyThere)
@@ -1157,7 +1184,7 @@ object Downloads {
                     return@coroutineScope
                 }
 
-                val destination = DownloadStore.begin(context, name, route.mimeType)
+                val destination = DownloadStore.begin(context, name, route.mimeType, place.folder)
                 pending = destination
                 destination.openStream().use { sink ->
                     route.write(sink) { written, total ->
@@ -1177,7 +1204,11 @@ object Downloads {
                 remember(song, track, savedUri, route.downloadFormat, artworkUri)
                 DownloadSession.done(id)
                 clear(id)
-                Log.d(TAG, "saved $name")
+                Log.d(TAG, "saved ${place.folder}/$name")
+                // The album just passed its folder threshold: its other songs join it.
+                if (DownloadLayout.albumFolderFor(track.artist, track.albumName)) {
+                    runCatching { DownloadLayout.reorganise(context, track.artist to track.albumName) }
+                }
             }
         } catch (e: Throwable) {
             pending?.abort()
@@ -1247,7 +1278,9 @@ object Downloads {
      */
     private suspend fun routeFor(context: Context, track: Song, quality: DownloadQuality): Route {
         val row = SourceRegistry.parseTrackKey(track.videoId)
-        row?.let { (configId, trackId) ->
+        // BitChord Audio: a row of a source not allowed for downloads is matched elsewhere.
+        val rowAllowed = row?.let { DownloadSkips.allowed(DownloadSkips.choiceOf(SourceRegistry.config(it.first)?.kind)) } ?: false
+        row?.takeIf { rowAllowed }?.let { (configId, trackId) ->
             fromRow(track, configId, trackId, quality)?.let { kept ->
                 sourceRoute(context, track, kept)?.let { return it }
             }
@@ -1255,7 +1288,10 @@ object Downloads {
         fromSources(track, quality)?.let { kept ->
             sourceRoute(context, track, kept)?.let { return it }
         }
-        if (row != null) {
+        if (!DownloadSkips.allowed(DownloadSkips.Choice.YOUTUBE)) {
+            throw DownloadSkips.Skipped("Not on ${DownloadSkips.allowedLabels()}")
+        }
+        if (row != null && rowAllowed) {
             val name = SourceRegistry.config(row.first)?.displayName ?: "its source"
             error("Couldn't download this song from $name — check that it's still connected")
         }
@@ -1402,7 +1438,8 @@ object Downloads {
                     target,
                     SourceResolver.requestForDownload(quality),
                     keep = { candidate ->
-                        keepable(candidate, target.durationSec)
+                        candidate.takeIf { DownloadSkips.allowed(DownloadSkips.choiceOf(it)) }
+                            ?.let { keepable(it, target.durationSec) }
                             ?.also { probes[it.stream.url] = it.probe }
                             ?.stream
                     },

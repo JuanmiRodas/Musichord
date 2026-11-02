@@ -417,15 +417,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         localUri: String? = null,
         localPath: String? = null,
     ) {
+        // BitChord Audio: a source whose lyrics were flagged wrong for this song isn't asked.
+        val flaggedLyrics = com.music.bitchord.data.lyrics.BadLyrics.flagged(videoId)
         val sources = if (AppSettings.syncedLyrics.value) {
-            AppSettings.lyricsSources.value
+            AppSettings.lyricsSources.value.filterTo(LinkedHashSet()) { it.name !in flaggedLyrics }
         } else {
             emptySet()
         }
         val key = lyricsLookupKey(
             videoId, sources, AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
         ) + com.music.bitchord.data.lyrics.LyricAliases.version.value +
-            "/" + com.music.bitchord.data.lyrics.EditedLyrics.version.value
+            "/" + com.music.bitchord.data.lyrics.EditedLyrics.version.value +
+            "/" + com.music.bitchord.data.lyrics.BadLyrics.version.value
         if (lyricsFor == key) return
         // The duration lands a beat after the track, and a database match needs
         // it. Turned away here rather than inside the job below: claiming the
@@ -474,7 +477,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.music.bitchord.data.lyrics.LyricNames.variants(title, artist)
             }.getOrDefault(emptyList())
             val nameQueries = com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, artist, spellings)
-            suspend fun ownLyrics() = com.music.bitchord.data.lyrics.SidecarLyrics.forSong(
+            suspend fun ownLyrics() = if (com.music.bitchord.data.lyrics.BadLyrics.OWN in flaggedLyrics) null else com.music.bitchord.data.lyrics.SidecarLyrics.forSong(
                 getApplication(), videoId, localUri, localPath,
                 titles = nameQueries.map { it.title }.distinct(),
                 artists = nameQueries.map { it.artist }.distinct(),
@@ -492,7 +495,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // only needed to *match* a track against a stranger's database, and
             // nothing is being matched here — these lyrics were written into
             // this exact file, for this exact recording.
-            if (localUri != null) {
+            if (localUri != null && com.music.bitchord.data.lyrics.BadLyrics.OWN !in flaggedLyrics) {
                 EmbeddedLyrics.forUri(getApplication(), localUri)?.let { embedded ->
                     _lyrics.value = embedded
                     // No source to name: what the file records is the lyrics,

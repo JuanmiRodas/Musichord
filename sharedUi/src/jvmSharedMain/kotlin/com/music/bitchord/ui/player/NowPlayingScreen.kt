@@ -1631,6 +1631,10 @@ fun NowPlayingScreen(
                     showLyricsProviders = false
                     showLyricsTiming = true
                 }),
+                onFlagWrong = if (lyrics.isNullOrEmpty()) null else ({
+                    showLyricsProviders = false
+                    PlayerPlatform.host.flagWrongLyrics(song, lyricsSource)
+                }),
             )
         }
         if (showLyricsTiming) {

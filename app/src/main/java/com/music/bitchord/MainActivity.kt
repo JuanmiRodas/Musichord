@@ -554,7 +554,9 @@ private fun BitChordApp(
      * stays full-screen behind a mini player rather than losing a lane to a
      * permanent pane.
      */
-    var showNowPlaying by remember { mutableStateOf(false) }
+    // BitChord Audio: saveable, so coming back to the app (after Android dropped the
+    // screen in the background) reopens the player rather than Home.
+    var showNowPlaying by rememberSaveable { mutableStateOf(false) }
     // The DAC's own volume while direct USB output owns it; the full player
     // has its own bar for that, so the HUD stays out of its way.
     androidx.compose.runtime.SideEffect { VolumeHud.suppressed = showNowPlaying }
@@ -1222,9 +1224,10 @@ private fun BitChordApp(
         }
     }
     val editedLyricsVersion by com.music.bitchord.data.lyrics.EditedLyrics.version.collectAsStateWithLifecycle()
+    val badLyricsVersion by com.music.bitchord.data.lyrics.BadLyrics.version.collectAsStateWithLifecycle()
     LaunchedEffect(
         player.song?.videoId, player.durationMs, syncedLyricsEnabled, lyricsSources,
-        lyricsSourceOrder, prioritizeSyllableSync, lyricAliasesVersion, editedLyricsVersion,
+        lyricsSourceOrder, prioritizeSyllableSync, lyricAliasesVersion, editedLyricsVersion, badLyricsVersion,
     ) {
         player.song?.let {
             viewModel.loadLyrics(

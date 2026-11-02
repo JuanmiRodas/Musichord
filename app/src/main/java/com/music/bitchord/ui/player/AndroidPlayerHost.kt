@@ -228,6 +228,16 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         com.music.bitchord.ui.components.NowPlayingSource.open(song)
     }
 
+    override fun flagWrongLyrics(song: com.music.bitchord.data.model.Song, source: com.music.bitchord.data.lyrics.LyricsSource?) {
+        val lyrics = com.music.bitchord.data.lyrics.EditedLyrics
+        // Lyrics you picked or timed: back to the automatic ones.
+        if (source == null && lyrics.has(song.videoId)) {
+            lyrics.clear(song.videoId)
+        } else {
+            com.music.bitchord.data.lyrics.BadLyrics.flag(app, song.videoId, source?.name ?: com.music.bitchord.data.lyrics.BadLyrics.OWN)
+        }
+    }
+
     override fun saveTimedLyrics(song: com.music.bitchord.data.model.Song, lines: List<com.music.bitchord.data.lyrics.LyricLine>) {
         com.music.bitchord.data.lyrics.EditedLyrics.save(song, lines)
     }

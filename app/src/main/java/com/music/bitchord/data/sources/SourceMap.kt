@@ -221,7 +221,7 @@ object SourceMap {
      * 3 seconds.
      */
     private suspend fun fillSaavn(songs: List<Song>) {
-        if (!AppSettings.jioSaavnForDownloads.value) return
+        if (!AppSettings.jioSaavnDownloadsOn) return
         val saavn = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.JIOSAAVN }
             ?.let { SourceRegistry.instance(it.id) } ?: return
         val todo = songs.filter { entries[it.videoId]?.saavnChecked != true }

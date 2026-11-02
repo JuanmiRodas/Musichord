@@ -214,4 +214,6 @@
     <string name="lyrics_time_break">Pausa …</string>
     <string name="lyrics_time_break_end">Fin pausa</string>
     <string name="lyrics_time_up_next">SIGUIENTE</string>
+    <string name="lyrics_flag_title">Esta letra está mal</string>
+    <string name="lyrics_flag_hint">No volver a usar esta fuente para esta canción y buscar otra letra</string>
 </resources>

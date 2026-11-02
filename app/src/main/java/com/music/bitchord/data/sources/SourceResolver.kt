@@ -715,7 +715,7 @@ object SourceResolver {
         if (e.file == null && !e.saavnChecked) return null
         val own = e.file?.takeIf { SourceMap.lookup(videoId)?.file == it }
         val ownKbps = if (own != null && e.lossless) Int.MAX_VALUE else if (own != null) e.kbps else 0
-        val saavnKbps = if (e.saavn != null && AppSettings.jioSaavnForDownloads.value) SourceMap.SAAVN_KBPS else 0
+        val saavnKbps = if (e.saavn != null && AppSettings.jioSaavnDownloadsOn) SourceMap.SAAVN_KBPS else 0
         if (ownKbps == 0 && saavnKbps == 0) return null
         return if (ownKbps >= saavnKbps) {
             val source = SourceRegistry.configs.value.firstOrNull { it.kind == SourceKind.MY_LIBRARY }

@@ -1383,4 +1383,12 @@
     <string name="lyric_search_timed">timed</string>
     <string name="lyric_search_untimed">untimed</string>
     <string name="lyric_search_automatic">Use automatic</string>
+    <string name="download_only_from">Download only from</string>
+    <string name="download_only_from_any">Any source</string>
+    <string name="download_only_from_message">Downloads come only from the ticked sources — the best quality among them. A song none of them has is skipped and listed under Skipped downloads. Nothing ticked: any source.</string>
+    <string name="download_skips_title">Skipped downloads</string>
+    <string name="download_skips_subtitle">%1$d songs not on the sources downloads may come from</string>
+    <string name="download_skips_none">No songs skipped.</string>
+    <string name="download_skips_share">Share CSV</string>
+    <string name="download_skips_clear">Clear</string>
 </resources>

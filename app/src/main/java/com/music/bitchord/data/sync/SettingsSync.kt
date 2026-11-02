@@ -61,6 +61,7 @@ object SettingsSync {
         "bitchord_artist_links",
         "bitchord_local_likes",
         "bitchord_lyric_offsets",
+        "bitchord_bad_lyrics",
     )
 
     /** Files in the app's own storage that follow you. */

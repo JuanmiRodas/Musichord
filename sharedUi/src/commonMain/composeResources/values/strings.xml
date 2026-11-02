@@ -293,4 +293,6 @@
     <string name="lyrics_time_break">Break …</string>
     <string name="lyrics_time_break_end">End break</string>
     <string name="lyrics_time_up_next">UP NEXT</string>
+    <string name="lyrics_flag_title">These lyrics are wrong</string>
+    <string name="lyrics_flag_hint">Never use this source for this song again, and look for other lyrics</string>
 </resources>

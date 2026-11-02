@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +65,8 @@ internal fun LyricsProviderSheet(
     onEditAliases: (() -> Unit)? = null,
     /** BitChord Audio: opens the tap-to-time editor on the lyrics shown. */
     onTimeLyrics: (() -> Unit)? = null,
+    /** BitChord Audio: flags the lyrics shown as wrong. */
+    onFlagWrong: (() -> Unit)? = null,
 ) {
     val savedOrder by PlayerSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
     val sources = remember(savedOrder) { LyricsSource.ordered(savedOrder) }
@@ -93,6 +96,14 @@ internal fun LyricsProviderSheet(
                         onSelect(source)
                         if (wasFound) onDismiss()
                     },
+                )
+            }
+            onFlagWrong?.let { flag ->
+                LyricAliasRow(
+                    onClick = flag,
+                    icon = Icons.Rounded.Flag,
+                    title = stringResource(Res.string.lyrics_flag_title),
+                    hint = stringResource(Res.string.lyrics_flag_hint),
                 )
             }
             onTimeLyrics?.let { time ->

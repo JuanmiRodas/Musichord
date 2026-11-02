@@ -201,7 +201,7 @@ object SourceRegistry {
         // BitChord Audio: JioSaavn's 320 kbps for downloads even while it is
         // off for playback (where it can pick the wrong cut mid-song). A
         // download is matched strictly on length, so the risk is far lower.
-        if (!com.music.bitchord.data.settings.AppSettings.jioSaavnForDownloads.value) return base
+        if (!com.music.bitchord.data.settings.AppSettings.jioSaavnDownloadsOn) return base
         val saavn = configs.value.filter { it.kind == SourceKind.JIOSAAVN }
             .mapNotNull { instances[it.id] }
             .filter { s -> base.none { it.configId == s.configId } }

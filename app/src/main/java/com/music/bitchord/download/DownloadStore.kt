@@ -153,13 +153,15 @@ object DownloadStore {
      * taps download twice gets two copies rather than being told they already
      * have one.
      */
-    fun existing(context: Context, name: String): Uri? =
+    fun existing(context: Context, name: String, folder: String = ""): Uri? =
         if (!AppSettings.exportDownloads.value) {
-            privateFile(context, name).takeIf { it.exists() }?.let(Uri::fromFile)
+            (privateFile(context, name, folder).takeIf { it.exists() } ?: privateFile(context, name).takeIf { it.exists() })
+                ?.let(Uri::fromFile)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             mediaStoreEntry(context, name)
         } else {
-            legacyFile(name).takeIf { it.exists() }?.let(Uri::fromFile)
+            (legacyFile(name, folder).takeIf { it.exists() } ?: legacyFile(name).takeIf { it.exists() })
+                ?.let(Uri::fromFile)
         }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -268,9 +270,9 @@ object DownloadStore {
      *   made — a failure worth surfacing, since every one of them means the
      *   download cannot start rather than that it might not finish.
      */
-    fun begin(context: Context, name: String, mimeType: String): Pending {
+    fun begin(context: Context, name: String, mimeType: String, folder: String = ""): Pending {
         if (!AppSettings.exportDownloads.value) {
-            val target = privateFile(context, name)
+            val target = privateFile(context, name, folder)
             val folder = target.parentFile ?: error("No download folder")
             if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
             val part = File(folder, ".$name.part")
@@ -281,7 +283,7 @@ object DownloadStore {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, pathFor(folder))
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             // A MIME type the audio collection doesn't recognise is not a null
@@ -300,20 +302,80 @@ object DownloadStore {
             return Pending(context, uri, name, part = null, target = null)
         }
 
-        val target = legacyFile(name)
-        val folder = target.parentFile ?: error("No Music folder on this device")
-        if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
-        val part = File(folder, "$name.part")
+        val target = legacyFile(name, folder)
+        val dir = target.parentFile ?: error("No Music folder on this device")
+        if (!dir.exists() && !dir.mkdirs()) error("Could not create ${dir.path}")
+        val part = File(dir, "$name.part")
         part.delete()
         return Pending(context, Uri.fromFile(target), name, part = part, target = target)
     }
 
     @Suppress("DEPRECATION")
-    private fun legacyFile(name: String) = File(
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER),
+    private fun legacyFile(name: String, folder: String = "") = File(
+        File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER), folder),
         name,
     )
 
-    private fun privateFile(context: Context, name: String) =
-        File(File(context.filesDir, "downloads"), name)
+    private fun privateFile(context: Context, name: String, folder: String = "") =
+        File(File(File(context.filesDir, "downloads"), folder), name)
+
+    /** BitChord Audio: `Music/BitChord/<folder>/` — the artist, and the album under it. */
+    private fun pathFor(folder: String): String =
+        if (folder.isBlank()) "$relativePath/" else "$relativePath/${folder.trim('/')}/"
+
+    /**
+     * BitChord Audio: moves a saved download to [folder] as [name]. The same
+     * uri for a media-store row (renamed in place), a new one for a file.
+     * Null when it can't be moved — a row another install of the app made,
+     * say — and the file is left where it was.
+     */
+    fun move(context: Context, uri: Uri, folder: String, name: String): Uri? = runCatching {
+        if (uri.scheme == "file") {
+            val from = File(uri.path ?: return null)
+            if (from.name == "playlist.m3u8") return null
+            val base = if (from.absolutePath.startsWith(File(context.filesDir, "downloads").absolutePath)) {
+                File(File(context.filesDir, "downloads"), folder)
+            } else {
+                @Suppress("DEPRECATION")
+                File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER), folder)
+            }
+            val to = File(base, name)
+            if (to.absolutePath == from.absolutePath) return uri
+            base.mkdirs()
+            if (to.exists() || !from.renameTo(to)) return null
+            if (!to.absolutePath.startsWith(context.filesDir.absolutePath)) {
+                MediaScannerConnection.scanFile(context, arrayOf(to.absolutePath, from.absolutePath), null, null)
+            }
+            // Tidy: an emptied artist or album folder goes.
+            from.parentFile?.takeIf { it.listFiles()?.isEmpty() == true }?.delete()
+            return Uri.fromFile(to)
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.RELATIVE_PATH, pathFor(folder))
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+        }
+        if (context.contentResolver.update(uri, values, null, null) > 0) uri else null
+    }.onFailure { Log.w(TAG, "could not move $uri: ${it.message}") }.getOrNull()
+
+    /** BitChord Audio: where a saved download is now — folder under BitChord and name. */
+    fun placeOf(context: Context, uri: Uri): Pair<String, String>? = runCatching {
+        if (uri.scheme == "file") {
+            val f = File(uri.path ?: return null)
+            val root = listOf(File(context.filesDir, "downloads"),
+                @Suppress("DEPRECATION") File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER))
+                .firstOrNull { f.absolutePath.startsWith(it.absolutePath) } ?: return null
+            return (f.parentFile?.absolutePath?.removePrefix(root.absolutePath)?.trim('/') ?: "") to f.name
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        context.contentResolver.query(
+            uri,
+            arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME),
+            null, null, null,
+        )?.use { c ->
+            if (!c.moveToFirst()) return null
+            val rel = c.getString(0).orEmpty().trim('/')
+            rel.removePrefix(relativePath.trim('/')).trim('/') to c.getString(1).orEmpty()
+        }
+    }.getOrNull()
 }

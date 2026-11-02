@@ -1491,4 +1491,12 @@
     <string name="lyric_search_timed">sincronizada</string>
     <string name="lyric_search_untimed">sin tiempos</string>
     <string name="lyric_search_automatic">Usar automática</string>
+    <string name="download_only_from">Descargar solo de</string>
+    <string name="download_only_from_any">Cualquier fuente</string>
+    <string name="download_only_from_message">Las descargas vienen solo de las fuentes marcadas, con la mejor calidad entre ellas. Una canción que no tenga ninguna se omite y aparece en Descargas omitidas. Sin marcar: cualquier fuente.</string>
+    <string name="download_skips_title">Descargas omitidas</string>
+    <string name="download_skips_subtitle">%1$d canciones que no están en las fuentes elegidas</string>
+    <string name="download_skips_none">No se ha omitido ninguna canción.</string>
+    <string name="download_skips_share">Compartir CSV</string>
+    <string name="download_skips_clear">Borrar</string>
 </resources>

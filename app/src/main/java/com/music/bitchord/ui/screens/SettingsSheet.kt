@@ -291,6 +291,16 @@ fun SettingsScreen(
     val audioOnly by AppSettings.audioOnly.collectAsStateWithLifecycle()
     val ownFilesOnMobileData by AppSettings.ownFilesOnMobileData.collectAsStateWithLifecycle()
     val saavnForDownloads by AppSettings.jioSaavnForDownloads.collectAsStateWithLifecycle()
+    val downloadSources by AppSettings.downloadSources.collectAsStateWithLifecycle()
+    val downloadSkips by com.music.bitchord.download.DownloadSkips.entries.collectAsStateWithLifecycle()
+    var showDownloadSources by remember { mutableStateOf(false) }
+    var showDownloadSkips by remember { mutableStateOf(false) }
+    if (showDownloadSources) {
+        com.music.bitchord.ui.components.DownloadSourcesDialog(onDismiss = { showDownloadSources = false })
+    }
+    if (showDownloadSkips) {
+        com.music.bitchord.ui.components.DownloadSkipsDialog(onDismiss = { showDownloadSkips = false })
+    }
     val upgradeDownloads by AppSettings.upgradeDownloads.collectAsStateWithLifecycle()
     val ownMinKbps by AppSettings.ownFileMinKbps.collectAsStateWithLifecycle()
     val ownLyricsFirst by AppSettings.ownLyricsFirst.collectAsStateWithLifecycle()
@@ -1740,6 +1750,28 @@ fun SettingsScreen(
                         IosSwitch(checked = saavnForDownloads, onCheckedChange = AppSettings::setJioSaavnForDownloads)
                     },
                     onClick = { AppSettings.setJioSaavnForDownloads(!saavnForDownloads) },
+                )
+            }
+            val onlyFromTitle = stringResource(R.string.download_only_from)
+            row(onlyFromTitle, "download", "descargas", "source", "fuente", "jiosaavn", "pcloud") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = onlyFromTitle,
+                    subtitle = if (downloadSources.isEmpty()) {
+                        stringResource(R.string.download_only_from_any)
+                    } else {
+                        com.music.bitchord.download.DownloadSkips.allowedLabels()
+                    },
+                    onClick = { showDownloadSources = true },
+                )
+            }
+            val skipsTitle = stringResource(R.string.download_skips_title)
+            row(skipsTitle, "download", "descargas", "skipped", "omitidas", "report", "informe") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = skipsTitle,
+                    subtitle = stringResource(R.string.download_skips_subtitle, downloadSkips.size),
+                    onClick = { showDownloadSkips = true },
                 )
             }
             val upgradeDlTitle = stringResource(R.string.upgrade_downloads)
