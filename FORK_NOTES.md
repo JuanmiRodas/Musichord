@@ -106,3 +106,11 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 ## Cast rejoin after update/crash (v1.9.84)
 - CastController.rejoinIfLost() on every app foreground (+5 s after start); matches last speaker by id, route id or name; skips a speaker now on another app (route description not "Default Media Receiver"); scans 3 min; logs to TrackLog.
 - CastPlayback: resumed sessions wait for the receiver's status (ADOPT_WAIT_MS) before deciding; receiver track read from queue or mediaInfo; phone follows by id, then title+artist (alias), else inserts the track next to the current one (playlist kept); queued-ahead items rebuilt once (old proxy links die with the process); a rejoined speaker holding nothing of ours is left (forgetAndLeave).
+
+## One-tap cast + notification star (v1.9.85)
+- CastController.castToRecent(): recent speaker (KEY_RECENT_ID/NAME, kept after disconnect); State.recentName → CastUi.recentName; RecentCastGlyph (SpeakerGroup) right of the output glyph; notification button ACTION_CAST_RECENT (ic_notification_cast_recent) after the star, before shuffle.
+- LikeLookup: notification/widget star reads overrides + LikedMusicCache + LocalLikes (links/liked) like the player; toggle goes through MainViewModel.toggleLike when the app is alive.
+
+## Cast double-play fix (v1.9.86)
+- reconcileOnce resolves streams first, then edits only if nothing moved (generation, receiver item, phone item); load() cancels a reconcile in flight. Was: a slow resolve inserted the just-loaded track again (played twice) or the skipped one after the new one (skip came back).
+- rejoinIfLost/tryJoin bail on any session (also suspended/connecting).
