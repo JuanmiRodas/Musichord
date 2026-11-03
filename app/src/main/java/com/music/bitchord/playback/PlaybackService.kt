@@ -7819,11 +7819,14 @@ class PlaybackService : MediaLibraryService() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
+        // BitChord Audio: casting carries on when the app is closed, as on
+        // Spotify — the speaker is playing, not the phone, and this service is
+        // what keeps feeding it. Reopening the app finds it still going.
+        if (castPlayback.active || CastController.state.value.casting) {
+            TrackLog.d("BitChordCast", "cast: app closed while casting; the cast carries on")
+            return
+        }
         if (AppSettings.stopOnTaskRemoved.value) {
-            // A receiver left playing with nothing on the phone to drive it
-            // would run out its few queued tracks and stop on its own anyway;
-            // better to say so now than leave the TV on a casting screen.
-            if (castPlayback.active) CastController.disconnect(resumeHere = false)
             // Both, or a swipe-away mid-crossfade leaves the outgoing track
             // playing on its own out of a service that is on its way out.
             eachPlayer { it.stop() }

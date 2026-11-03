@@ -361,6 +361,9 @@ class CastPlayback(
     /** Set after taking up a speaker's queue: everything queued after its track is replaced once. */
     private var refreshAhead = false
 
+    /** Plans in a row given up because the queue moved; see [reconcileOnce]. */
+    private var replans = 0
+
     /**
      * BitChord Audio: puts the phone's player on the receiver's track — found
      * in the phone's queue, or the phone's queue replaced by the receiver's —
@@ -577,6 +580,7 @@ class CastPlayback(
                 loading = false
             }
             MediaStatus.PLAYER_STATE_IDLE -> {
+                Log.d(TAG, "cast: speaker idle (reason ${status.idleReason}) on ${status.getQueueItemById(status.currentItemId)?.media?.metadata?.getString(MediaMetadata.KEY_TITLE)}")
                 if (!loading && status.idleReason == MediaStatus.IDLE_REASON_FINISHED) {
                     wantsPlay = false
                     // BitChord Audio: only a track the phone is still on can
@@ -630,6 +634,32 @@ class CastPlayback(
 
         val itemId = status.currentItemId
         if (itemId != MediaQueueItem.INVALID_ITEM_ID && itemId != lastItemId) {
+            // BitChord Audio: the speaker left the last track by itself after
+            // a few seconds of a whole song — it couldn't play its stream and
+            // went on to the next (a Cast queue does that). Not a skip anyone
+            // asked for: that track is played again, served by the phone.
+            val left = lastItemId
+            val leftItem = status.getQueueItemById(left)
+            val leftPlayed = playStartedAt[left]?.let { SystemClock.elapsedRealtime() - it }
+            val leftLength = leftItem?.media?.streamDuration ?: 0L
+            val askedToMove = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
+            val leftId = leftItem?.mediaId()
+            val player = localPlayer()
+            if (!askedToMove && !loading && leftId != null && player != null && leftLength > 30_000 &&
+                leftPlayed != null && leftPlayed < 5_000
+            ) {
+                val index = indexOfMediaId(player, leftId)
+                Log.w(TAG, "cast: speaker skipped ${leftItem.media?.metadata?.getString(MediaMetadata.KEY_TITLE) ?: leftId} after ${leftPlayed ?: 0}ms (its stream failed)")
+                if (index != null && CastRouting.proxyOnly.add(leftId)) {
+                    lastItemId = itemId
+                    if (player.currentMediaItemIndex != index) {
+                        lastLocalMoveAt = SystemClock.elapsedRealtime()
+                        player.seekTo(index, 0L)
+                    }
+                    load(player.getMediaItemAt(index), 0L, play = true)
+                    return
+                }
+            }
             lastItemId = itemId
             val mediaId = status.getQueueItemById(itemId)?.mediaId()
             val player = localPlayer()
@@ -817,7 +847,8 @@ class CastPlayback(
         fun replan() {
             Log.d(TAG, "cast: queue changed while finding the next streams; planning again")
             if (refreshing) refreshAhead = true
-            reconcileAgain = true
+            // At most a few times in a row; the next change plans again anyway.
+            if (++replans <= 3) reconcileAgain = true
         }
         // What doesn't match goes first (quick), then the missing ones.
         val drop = remoteAhead.drop(kept)
@@ -829,16 +860,10 @@ class CastPlayback(
         for (next in wanted.drop(kept)) {
             val queueItem = buildQueueItem(next, autoplay = true) ?: break
             if (stale()) return replan()
-            // The speaker's queue after its track must still be exactly what
-            // was kept plus what this run added, or the insert is misplaced.
-            val nowQueue = remote.mediaStatus?.queueItems.orEmpty()
-            val nowHere = nowQueue.indexOfFirst { it.itemId == startItemId }
-            val tail = if (nowHere < 0) null else nowQueue.drop(nowHere + 1).map { it.mediaId() }
-            val expected = wanted.take(kept).map { it.mediaId } + queued
-            if (tail == null || tail != expected) return replan()
             remote.queueInsertItems(arrayOf(queueItem), MediaQueueItem.INVALID_ITEM_ID, null).awaitResult()
             queued += next.mediaId
         }
+        replans = 0
         if (queued.isNotEmpty()) {
             Log.d(TAG, "cast: speaker has the next ${kept + queued.size} queued (${queued.size} added)")
         }
