@@ -3083,6 +3083,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val group = LocalGroups.groupOf(browseId, local.data)
                 if (thumbnailUrl == null) artwork = record?.thumbnailUrl ?: group?.thumbnailUrl
                 if (subtitle.isBlank()) credit = (record?.subtitle ?: group?.subtitle)?.ifBlank { null }
+                // BitChord Audio: an album of your pCloud files: the cover you
+                // picked, else the one inside its first file.
+                if (thumbnailUrl == null && artwork == null) {
+                    val first = (group?.songs ?: local.data).firstOrNull()
+                    if (first != null) {
+                        artwork = com.music.bitchord.data.covers.CoverOverrides.get(first)
+                            ?: runCatching {
+                                com.music.bitchord.data.remote.RemoteArtworkStore.resolveArt(getApplication(), first)
+                            }.getOrNull()
+                    }
+                }
             }
             val state = when {
                 local != null -> local

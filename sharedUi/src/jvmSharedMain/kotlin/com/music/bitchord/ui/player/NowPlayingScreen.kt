@@ -3424,7 +3424,7 @@ fun NowPlayingScreen(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null,
                                         ) {
-                                            val album = song.albumId
+                                            val album = song.albumId ?: PlayerPlatform.host.albumPageIdOf(song)
                                             if (album != null) onOpenAlbum(album) else PlayerPlatform.host.openAlbumOf(song)
                                         }
                                     },

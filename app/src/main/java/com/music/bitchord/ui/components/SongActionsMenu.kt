@@ -370,7 +370,12 @@ fun SongActionsMenu(
                     stringResource(R.string.open_album),
                     accent = palette.accent,
                     description = song.albumName,
-                ) { PcloudBrowser.openFolderOf(song) }
+                ) {
+                    // Its album page (the same page a YouTube Music album has),
+                    // else its folder.
+                    com.music.bitchord.data.webdav.PcloudAlbums.pageIdOf(song)?.let(onOpenAlbum)
+                        ?: PcloudBrowser.openFolderOf(song)
+                }
             }
             else -> ActionRow(
                 SfIcons.Album,

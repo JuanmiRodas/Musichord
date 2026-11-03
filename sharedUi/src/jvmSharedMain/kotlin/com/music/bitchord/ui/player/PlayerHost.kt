@@ -131,6 +131,9 @@ interface PlayerHost {
     /** BitChord Audio: [song]'s album when it has no catalogue page (a file of yours: its folder). */
     fun openAlbumOf(song: Song) {}
 
+    /** BitChord Audio: the album page of a file of yours (its album in your pCloud library), or null. */
+    fun albumPageIdOf(song: Song): String? = null
+
     /** BitChord Audio: the cover picker for [song]. */
     fun chooseCover(song: Song) {}
 

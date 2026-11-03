@@ -234,6 +234,9 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         main.post { com.music.bitchord.playback.NotificationIcons.ask(app) }
     }
 
+    override fun albumPageIdOf(song: com.music.bitchord.data.model.Song): String? =
+        com.music.bitchord.data.webdav.PcloudAlbums.pageIdOf(song)
+
     override fun openAlbumOf(song: com.music.bitchord.data.model.Song) {
         if (!com.music.bitchord.ui.components.PcloudBrowser.openFolderOf(song)) {
             showMessage(app.getString(com.music.bitchord.R.string.no_album_metadata))
