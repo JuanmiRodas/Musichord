@@ -135,14 +135,50 @@ class CastPlayback(
     private var endWasPlaying = false
 
     override val isPlaying: Boolean
-        get() = active && !loading && client?.mediaStatus?.playerState == MediaStatus.PLAYER_STATE_PLAYING
+        get() = active && !loading && target == null && client?.mediaStatus?.playerState == MediaStatus.PLAYER_STATE_PLAYING
+
+    /**
+     * BitChord Audio: the track the speaker was just sent to (a skip, a
+     * load), until it says it is playing it. Meanwhile the phone shows that
+     * track at its start, waiting — not the old one's clock running on (the
+     * app "playing" while the speaker was stuck, then starting from 0).
+     */
+    @Volatile private var target: String? = null
+    private var targetWatch: Job? = null
+    private val retriedFromPhone = HashSet<String>()
+
+    private fun expect(mediaId: String?) {
+        target = mediaId
+        targetWatch?.cancel()
+        if (mediaId == null) return
+        targetWatch = scope.launch {
+            delay(TARGET_STUCK_MS)
+            if (target != mediaId || !active) return@launch
+            val player = localPlayer() ?: return@launch
+            val index = indexOfMediaId(player, mediaId) ?: return@launch
+            if (retriedFromPhone.add(mediaId)) {
+                // Stuck: the speaker couldn't get the stream it was given (a
+                // slow or refused link). Once more, served by the phone.
+                Log.w(TAG, "cast: speaker still not playing ${player.getMediaItemAt(index).mediaMetadata.title} after ${TARGET_STUCK_MS}ms; sending it again from the phone")
+                CastRouting.proxyOnly.add(mediaId)
+                streams.remove(mediaId)
+                load(player.getMediaItemAt(index), requestedPositionMs, play = true)
+            } else {
+                Log.w(TAG, "cast: speaker still not playing $mediaId after a second try; giving up on it")
+                target = null
+                loading = false
+                say(R.string.cast_track_unsupported)
+                sink?.onRemotePlaybackChanged()
+            }
+        }
+    }
 
     override val playWhenReady: Boolean get() = wantsPlay
 
     /** In [Player]'s own terms, so the session player can answer with it directly. */
     override val playbackState: Int
         get() = when {
-            loading -> Player.STATE_BUFFERING
+            loading || target != null -> Player.STATE_BUFFERING
             finished -> Player.STATE_ENDED
             else -> when (client?.mediaStatus?.playerState) {
                 MediaStatus.PLAYER_STATE_BUFFERING, MediaStatus.PLAYER_STATE_LOADING -> Player.STATE_BUFFERING
@@ -152,7 +188,7 @@ class CastPlayback(
 
     override val positionMs: Long
         get() {
-            val live = client?.takeIf { !loading }?.approximateStreamPosition
+            val live = client?.takeIf { !loading && target == null }?.approximateStreamPosition
             val asked = requestedPositionMs
             // A seek is asked of the receiver and answered a moment later; in
             // between, its own clock still reads the old place and the bar would
@@ -486,6 +522,8 @@ class CastPlayback(
         alias = null
         heartbeat?.cancel()
         heartbeat = null
+        target = null
+        targetWatch?.cancel()
     }
 
     /**
@@ -520,6 +558,7 @@ class CastPlayback(
             requestedPositionMs = 0L
             requestedAt = SystemClock.elapsedRealtime()
             Log.d(TAG, "cast: phone moved to ${item.mediaMetadata.title}; speaker jumps to its queued copy")
+            expect(item.mediaId)
             remote.queueJumpToItem(queued.itemId, null)
             sink?.onRemotePlaybackChanged()
         } else {
@@ -563,6 +602,15 @@ class CastPlayback(
             return
         }
         val state = status.playerState
+        target?.let { t ->
+            if (sameTrack(receiverMediaId(status), t) &&
+                (state == MediaStatus.PLAYER_STATE_PLAYING || state == MediaStatus.PLAYER_STATE_PAUSED)
+            ) {
+                target = null
+                targetWatch?.cancel()
+                requestedAt = SystemClock.elapsedRealtime()
+            }
+        }
         // Whatever the phone last asked for has been answered by now.
         requestedAt = 0L
 
@@ -705,6 +753,7 @@ class CastPlayback(
         reconcileAgain = false
         val generation = ++loadGeneration
         Log.d(TAG, "cast: loading ${item?.mediaMetadata?.title ?: item?.mediaId} on the speaker (whole queue replaced)")
+        expect(item?.mediaId)
         wantsPlay = play
         loading = true
         finished = false
@@ -756,10 +805,11 @@ class CastPlayback(
                 .setAutoplay(play)
                 .setCurrentTime(positionMs)
                 .build()
-            val result = remote.load(request).awaitResult()
+            // A speaker that never answers would leave this "loading" for good.
+            val result = kotlinx.coroutines.withTimeoutOrNull(LOAD_TIMEOUT_MS) { remote.load(request).awaitResult() }
             if (generation != loadGeneration || !active) return@run
-            if (!result.status.isSuccess) {
-                Log.w(TAG, "load failed: ${result.status.statusCode}")
+            if (result == null || !result.status.isSuccess) {
+                Log.w(TAG, "cast: speaker load failed: ${result?.status?.statusCode ?: "no answer in ${LOAD_TIMEOUT_MS}ms"}")
                 loading = false
                 wantsPlay = false
                 say(R.string.cast_track_unsupported)
@@ -869,9 +919,20 @@ class CastPlayback(
         }
     }
 
+    /**
+     * BitChord Audio: streams already found, by track, for a while — a skip
+     * onto a track that was queued on the speaker and then taken off again
+     * (the queue re-planned) doesn't search for it all over again.
+     */
+    private val streams = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, CastStream>>()
+
     private suspend fun buildQueueItem(item: MediaItem, autoplay: Boolean): MediaQueueItem? {
-        val stream = try {
-            resolve(item)
+        val now = SystemClock.elapsedRealtime()
+        // Once a track must be served by the phone, a direct link found before doesn't count.
+        val key = item.mediaId + if (item.mediaId in CastRouting.proxyOnly) "#phone" else ""
+        val cached = streams[key]?.takeIf { now - it.first < STREAM_TTL_MS }?.second
+        val stream = cached ?: try {
+            resolve(item)?.also { streams[key] = now to it }
         } catch (e: Exception) {
             Log.w(TAG, "could not resolve ${item.mediaId} for casting", e)
             null
@@ -953,6 +1014,13 @@ class CastPlayback(
 
         /** A skip waits this long for the next one before its track is fetched. */
         private const val SKIP_SETTLE_MS = 450L
+
+        /** A speaker not playing what it was sent after this long is stuck. */
+        private const val TARGET_STUCK_MS = 15_000L
+        private const val LOAD_TIMEOUT_MS = 20_000L
+
+        /** How long a found stream is reused (links last hours; kept well short of that). */
+        private const val STREAM_TTL_MS = 20 * 60_000L
 
         /** How often the phone checks it agrees with the speaker. */
         private const val HEARTBEAT_MS = 20_000L

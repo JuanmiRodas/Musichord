@@ -89,7 +89,10 @@ object CastController {
         }
 
         override fun onSessionEnded(session: CastSession, error: Int) {
-            rememberSession(null)
+            // Let go of only to be joined afresh (see [helpResume]): the
+            // speaker is still the one to come back to.
+            if (!endingToRejoin) rememberSession(null)
+            endingToRejoin = false
             stopWatching()
             update { it.copy(connecting = false, connectedName = null) }
             playback?.onSessionEnded(error)
@@ -196,12 +199,51 @@ object CastController {
      * updated, crashed or was closed by the system), is looked for and joined.
      */
     fun rejoinIfLost() {
-        // Any session at all — connecting, or briefly suspended (the Wi-Fi
-        // dozing) — is the framework's to bring back; choosing the speaker
-        // again on top of it restarted the cast.
-        if (castContext?.sessionManager?.currentCastSession != null) return
-        if (_state.value.connecting) return
+        val session = castContext?.sessionManager?.currentCastSession
+        if (session?.isConnected == true) return
+        if (session != null) {
+            // Being brought back by the framework (after the app was closed,
+            // or the Wi-Fi dozed). It can only finish once the speaker is
+            // seen on the network — and nothing looks unless the cast list is
+            // open, so it waited for ever ("connecting", the speaker idle).
+            // Looked for here; if it still hasn't come back, it is let go of
+            // (the speaker keeps playing) and the speaker is joined afresh.
+            helpResume()
+            return
+        }
+        if (_state.value.connecting && !rejoining) update { it.copy(connecting = false) }
         rejoinLostSession()
+    }
+
+    private var helping = false
+    @Volatile private var endingToRejoin = false
+
+    private fun helpResume() {
+        if (helping) return
+        val router = router ?: return
+        val selector = selector ?: return
+        helping = true
+        val main = Handler(Looper.getMainLooper())
+        main.post {
+            val callback = object : MediaRouter.Callback() {}
+            router.addCallback(selector, callback, MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN or MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY)
+            com.music.bitchord.data.TrackLog.d(TAG, "cast: session coming back; looking for the speaker so it can")
+            main.postDelayed({
+                router.removeCallback(callback)
+                helping = false
+                val s = castContext?.sessionManager?.currentCastSession
+                if (s != null && !s.isConnected) {
+                    com.music.bitchord.data.TrackLog.d(TAG, "cast: session didn't come back in 20 s; joining the speaker afresh")
+                    // false: the speaker is not told to stop.
+                    endingToRejoin = true
+                    runCatching { castContext?.sessionManager?.endCurrentSession(false) }
+                    main.postDelayed({ rejoinLostSession() }, 1_000)
+                } else if (s == null) {
+                    update { it.copy(connecting = false) }
+                    rejoinLostSession()
+                }
+            }, 20_000)
+        }
     }
 
     /**
@@ -228,7 +270,9 @@ object CastController {
                 return deviceName != null && r.name.toString() == deviceName
             }
             fun tryJoin(): Boolean {
-                if (castContext?.sessionManager?.currentCastSession != null) return true
+                val existing = castContext?.sessionManager?.currentCastSession
+                if (existing?.isConnected == true) return true
+                if (existing != null) return false
                 val route = router.routes.firstOrNull(::matches) ?: return false
                 // Something else playing there now (another app took the
                 // speaker): left alone — joining would cut it off.

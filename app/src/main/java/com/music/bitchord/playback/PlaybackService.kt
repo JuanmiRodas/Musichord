@@ -1980,7 +1980,10 @@ class PlaybackService : MediaLibraryService() {
         val isHttp = resolved != null && (resolved.scheme == "http" || resolved.scheme == "https")
         if (isHttp && !proxyOnly && spec!!.httpRequestHeaders.isEmpty()) {
             val host = resolved!!.host.orEmpty()
-            if (host.endsWith("googlevideo.com")) {
+            // BitChord Audio: JioSaavn's CDN too — the speaker fetches it
+            // itself, so it keeps playing (and starts sooner) without the
+            // phone in between. A link it can't open is retried via the phone.
+            if (host.endsWith("googlevideo.com") || host.endsWith("saavncdn.com")) {
                 return@withContext CastStream(resolved.toString(), CastPlayback.mimeTypeOf(resolved), castArtwork(item))
             }
             if (com.music.bitchord.data.webdav.PcloudLinks.isPcloud(resolved.toString())) {
