@@ -132,3 +132,10 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - reconcile: dropped the exact-tail check (status queueItems can be partial → endless re-plans and re-resolves); replans capped at 3 in a row.
 - Log: every speaker idle with its reason.
 - Logs repo not reachable yet: user must create it and give the Claude GitHub app access, then add_repo.
+
+## Cast skip robustness (v1.9.91)
+- CastPlayback.expect(target): after a jump/load the phone shows the new track at its start (BUFFERING, no running clock) until the speaker reports it PLAYING/PAUSED; 15 s stuck → resent via the phone proxy once, then given up (toast). remote.load has a 20 s timeout.
+- Resolved streams cached per track (20 min; separate key once proxyOnly).
+- resolveForCast: saavncdn.com direct to the speaker (like googlevideo/pCloud).
+- CastController.helpResume(): a session resuming after reopen gets an active scan (resume needs discovery); not back in 20 s → endCurrentSession(false) (endingToRejoin keeps the device) + rejoin. Was stuck "connecting" with the speaker idle.
+- Upstream kushagrasinghx/BitChord (v1.8.2) cast = same design, older (AHEAD 3, no proxy); forks can't be listed from here (GitHub API scoped, forks page blocked).
