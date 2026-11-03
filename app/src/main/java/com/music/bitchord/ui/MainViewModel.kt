@@ -1659,6 +1659,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             _lyrics.collect { lines ->
                 val request = currentLyricsRequest ?: return@collect
+                // The always-on music screen shows the same words.
+                com.music.bitchord.data.lyrics.CurrentLyrics.set(request.videoId, lines)
                 if (lines.isNullOrEmpty()) return@collect
                 runCatching {
                     com.music.bitchord.data.sources.JapaneseNames.lyricsSeen(request.title, request.artist, lines.map { it.text })

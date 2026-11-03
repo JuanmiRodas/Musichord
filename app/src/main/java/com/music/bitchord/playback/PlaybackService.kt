@@ -1322,6 +1322,12 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        // BitChord Audio: screen off while playing → the always-on music screen.
+        runCatching {
+            com.music.bitchord.aod.AodTrigger.attach(this) {
+                mediaSession?.player?.isPlaying == true || player?.isPlaying == true
+            }
+        }
 
         if (com.music.bitchord.data.innertube.Innertube.cookie == null) {
             com.music.bitchord.data.innertube.Innertube.cookie = com.music.bitchord.auth.AuthStore(this).cookie

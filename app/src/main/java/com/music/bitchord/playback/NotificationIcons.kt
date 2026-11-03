@@ -43,10 +43,56 @@ class NotificationIconsService : NotificationListenerService() {
         val icons = list.mapNotNull { sbn ->
             runCatching {
                 val context = runCatching { createPackageContext(sbn.packageName, 0) }.getOrDefault(this)
-                sbn.notification.smallIcon.loadDrawable(context)?.toBitmap(48, 48, Bitmap.Config.ARGB_8888)?.asImageBitmap()
+                iconFor(sbn.packageName, sbn.notification.smallIcon.loadDrawable(context))?.asImageBitmap()
             }.getOrNull()
         }
         NotificationIcons.set(icons.take(8))
+    }
+
+    /**
+     * What to draw for one notification, ready to show as it is (no tint).
+     *
+     * A proper small icon is a silhouette — only its alpha means anything — so
+     * it is painted white. Some apps (and the system, for some of them) hand
+     * over a full-colour or fully opaque one instead: painted white that is just
+     * a grey square, so for those the app's own icon is shown, in colour and
+     * rounded, which is what the system does in its status bar too.
+     */
+    private fun iconFor(pkg: String, small: android.graphics.drawable.Drawable?): Bitmap? {
+        val size = 48
+        val raw = small?.toBitmap(size, size, Bitmap.Config.ARGB_8888)
+        if (raw != null && isSilhouette(raw)) {
+            val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(out)
+            val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                colorFilter = android.graphics.PorterDuffColorFilter(android.graphics.Color.WHITE, android.graphics.PorterDuff.Mode.SRC_IN)
+            }
+            canvas.drawBitmap(raw, 0f, 0f, paint)
+            return out
+        }
+        val app = runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull() ?: return null
+        val colour = app.toBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(out)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        paint.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN)
+        canvas.drawBitmap(colour, 0f, 0f, paint)
+        return out
+    }
+
+    /**
+     * True for a real silhouette: a fair part of it transparent. An icon opaque
+     * almost edge to edge is a picture, not a shape (a tinted square otherwise).
+     */
+    private fun isSilhouette(bitmap: Bitmap): Boolean {
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        val opaque = pixels.count { (it ushr 24) > 0x40 }
+        if (opaque == 0) return false
+        return opaque < pixels.size * 0.8
     }
 }
 

@@ -11,6 +11,8 @@
     <!-- Saving a track to Music outlives the screen it was asked from. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- BitChord Audio: the always-on music screen comes up over the lock screen. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- Touch feedback. The system's own haptics switch is honoured on top of
          this, so granting it doesn't override a user who turned buzzing off. -->
@@ -645,6 +647,24 @@
           Downloads. Not exported: it is started by the app and by its own
           cancel action, and nothing outside has any business queueing work.
         -->
+        <!-- BitChord Audio: the always-on music screen, in place of the phone's AOD while music plays. -->
+        <activity
+            android:name=".aod.AodActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.music.bitchord.aod"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:noHistory="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/Theme.BitChord" />
+        <activity
+            android:name=".aod.AodWidgetPickerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- BitChord Audio: notification icons for the OLED lyrics screen. -->
         <service
             android:name=".playback.NotificationIconsService"

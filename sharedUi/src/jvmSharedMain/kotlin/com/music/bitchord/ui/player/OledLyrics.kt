@@ -201,7 +201,7 @@ internal fun OledLyrics(
                                     androidx.compose.foundation.Image(
                                         bitmap = icon,
                                         contentDescription = null,
-                                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White.copy(alpha = 0.6f)),
+                                        alpha = 0.7f,
                                         modifier = Modifier.size(18.dp),
                                     )
                                 }

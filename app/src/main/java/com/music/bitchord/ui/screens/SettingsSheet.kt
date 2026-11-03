@@ -302,6 +302,15 @@ fun SettingsScreen(
     if (showDownloadSkips) {
         com.music.bitchord.ui.components.DownloadSkipsDialog(onDismiss = { showDownloadSkips = false })
     }
+    var showAodWidgets by remember { mutableStateOf(false) }
+    if (showAodWidgets) {
+        com.music.bitchord.aod.AodWidgetsDialog(onDismiss = { showAodWidgets = false })
+    }
+    val aodContext = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.music.bitchord.aod.AodSettings.init(aodContext) }
+    val aodEnabled by com.music.bitchord.aod.AodSettings.enabled.collectAsStateWithLifecycle()
+    val aodBrightness by com.music.bitchord.aod.AodSettings.brightness.collectAsStateWithLifecycle()
+    val aodWidgets by com.music.bitchord.aod.AodSettings.widgets.collectAsStateWithLifecycle()
     val upgradeDownloads by AppSettings.upgradeDownloads.collectAsStateWithLifecycle()
     val ownMinKbps by AppSettings.ownFileMinKbps.collectAsStateWithLifecycle()
     val ownLyricsFirst by AppSettings.ownLyricsFirst.collectAsStateWithLifecycle()
@@ -1777,6 +1786,49 @@ fun SettingsScreen(
                     },
                     onClick = { showDownloadSources = true },
                 )
+            }
+            val aodTitle = stringResource(R.string.aod_title)
+            row(aodTitle, "aod", "always on", "siempre activa", "lock", "bloqueo", "oled", "pantalla") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = aodTitle,
+                    subtitle = stringResource(R.string.aod_subtitle),
+                    trailing = {
+                        IosSwitch(checked = aodEnabled, onCheckedChange = { on ->
+                            com.music.bitchord.aod.AodSettings.setEnabled(on)
+                            if (on) com.music.bitchord.aod.AodTrigger.askIfNeeded(aodContext)
+                        })
+                    },
+                    onClick = {
+                        val on = !aodEnabled
+                        com.music.bitchord.aod.AodSettings.setEnabled(on)
+                        if (on) com.music.bitchord.aod.AodTrigger.askIfNeeded(aodContext)
+                    },
+                )
+            }
+            if (aodEnabled) {
+                val aodBrightTitle = stringResource(R.string.aod_brightness)
+                row(aodBrightTitle, "aod", "brightness", "brillo", divided = false) {
+                    val steps = listOf(0.05f, 0.1f, 0.15f, 0.25f, 0.4f)
+                    SettingsRow(
+                        icon = SfIcons.GraphicEq,
+                        title = aodBrightTitle,
+                        subtitle = stringResource(R.string.aod_brightness_subtitle, (aodBrightness * 100).toInt()),
+                        onClick = {
+                            val next = steps.firstOrNull { it > aodBrightness + 0.001f } ?: steps.first()
+                            com.music.bitchord.aod.AodSettings.setBrightness(next)
+                        },
+                    )
+                }
+                val aodWidgetsTitle = stringResource(R.string.aod_widgets)
+                row(aodWidgetsTitle, "aod", "widget", "widgets", divided = false) {
+                    SettingsRow(
+                        icon = SfIcons.GraphicEq,
+                        title = aodWidgetsTitle,
+                        subtitle = stringResource(R.string.aod_widgets_subtitle, aodWidgets.size),
+                        onClick = { showAodWidgets = true },
+                    )
+                }
             }
             val logsTitle = stringResource(R.string.crash_logs_title)
             val crashReports by com.music.bitchord.data.CrashLog.reports.collectAsStateWithLifecycle()

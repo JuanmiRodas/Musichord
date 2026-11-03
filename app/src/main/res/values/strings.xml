@@ -1450,4 +1450,14 @@
     <string name="pcloud_search">Search your files (title, artist, album, folder)</string>
     <string name="haptic_feedback">Haptic feedback</string>
     <string name="haptic_feedback_subtitle">Vibrations on taps, toggles and gestures</string>
+    <string name="aod_title">Music on the always-on screen</string>
+    <string name="aod_subtitle">When the screen turns off while music plays, BitChord shows its own always-on screen over the lock screen: song, lyrics, clock, notifications, widgets and controls</string>
+    <string name="aod_brightness">Always-on screen brightness</string>
+    <string name="aod_brightness_subtitle">%1$d%% · tap to change</string>
+    <string name="aod_widgets">Always-on screen widgets</string>
+    <string name="aod_widgets_subtitle">%1$d added · from any app</string>
+    <string name="aod_widgets_added">On the screen</string>
+    <string name="aod_widgets_available">Add a widget</string>
+    <string name="aod_done">Done</string>
+    <string name="aod_permission">Allow full-screen notifications so BitChord can show its screen over the lock screen</string>
 </resources>

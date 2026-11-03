@@ -1558,4 +1558,14 @@
     <string name="pcloud_search">Buscar en tus archivos (título, artista, álbum, carpeta)</string>
     <string name="haptic_feedback">Respuesta háptica</string>
     <string name="haptic_feedback_subtitle">Vibraciones al tocar, activar y deslizar</string>
+    <string name="aod_title">Música en la pantalla siempre activa</string>
+    <string name="aod_subtitle">Al apagar la pantalla mientras suena música, BitChord muestra su propia pantalla siempre activa sobre la de bloqueo: canción, letra, hora, notificaciones, widgets y controles</string>
+    <string name="aod_brightness">Brillo de la pantalla siempre activa</string>
+    <string name="aod_brightness_subtitle">%1$d%% · toca para cambiar</string>
+    <string name="aod_widgets">Widgets de la pantalla siempre activa</string>
+    <string name="aod_widgets_subtitle">%1$d añadidos · de cualquier app</string>
+    <string name="aod_widgets_added">En la pantalla</string>
+    <string name="aod_widgets_available">Añadir un widget</string>
+    <string name="aod_done">Listo</string>
+    <string name="aod_permission">Permite las notificaciones a pantalla completa para que BitChord muestre su pantalla sobre la de bloqueo</string>
 </resources>
