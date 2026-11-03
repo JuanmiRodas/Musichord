@@ -3352,6 +3352,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Read off a fresh listing of the folder it came from: a grouping
             // has nothing of its own to read, and whatever the folder says
             // when it can't be listed is what this page says too.
+            // BitChord Audio: an album of your pCloud files is read off the
+            // library already listed, not a fresh listing of the whole server
+            // (which takes minutes on a big one).
+            if (folderId == com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID) {
+                val library = com.music.bitchord.data.webdav.WebDavRepository.library()
+                    .ifEmpty { com.music.bitchord.data.webdav.WebDavRepository.saved().orEmpty() }
+                if (library.isNotEmpty()) {
+                    return nonEmpty(LocalGroups.songsOf(browseId, library)) { text(R.string.no_tracks_here) }
+                }
+            }
             return when (val folder = localPageState(folderId)) {
                 is UiState.Success -> nonEmpty(LocalGroups.songsOf(browseId, folder.data)) { text(R.string.no_tracks_here) }
                 null -> UiState.Error(text(R.string.no_tracks_here))
