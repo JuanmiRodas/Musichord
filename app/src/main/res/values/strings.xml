@@ -1460,4 +1460,7 @@
     <string name="aod_widgets_available">Add a widget</string>
     <string name="aod_done">Done</string>
     <string name="aod_permission">Allow full-screen notifications so BitChord can show its screen over the lock screen</string>
+    <string name="cast_recent_to">Cast to %1$s</string>
+    <string name="cast_recent_stop">Back to this phone</string>
+    <string name="cast_recent_not_found">%1$s isn\'t reachable right now</string>
 </resources>

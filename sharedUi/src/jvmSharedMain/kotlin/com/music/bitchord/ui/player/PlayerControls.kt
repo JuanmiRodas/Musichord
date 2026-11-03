@@ -68,6 +68,7 @@ import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Watch
+import androidx.compose.material.icons.rounded.SpeakerGroup
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -693,11 +694,14 @@ internal fun PlayerActionRow(
                         )
                     }
                 } else {
-                    OutputPartyPill(
-                        onOutput = onOpenOutput,
-                        onParty = onListenTogether,
-                        onOpenMembers = onOpenListenTogetherMembers,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutputPartyPill(
+                            onOutput = onOpenOutput,
+                            onParty = onListenTogether,
+                            onOpenMembers = onOpenListenTogetherMembers,
+                        )
+                        RecentCastGlyph()
+                    }
                 }
             }
             Box(
@@ -976,6 +980,24 @@ private fun OutputPartyPill(
             trailingLabel = badge.members.takeIf { badge.inParty }?.toString(),
         )
     }
+}
+
+/**
+ * BitChord Audio: one tap to cast to the speaker last cast to (a speaker
+ * group, say) without opening the output list — drawn like the glyphs beside
+ * it. Lit while casting; a tap then brings the music back to the phone.
+ */
+@Composable
+private fun RecentCastGlyph() {
+    val cast by PlayerPlatform.host.castState.collectAsStateWithLifecycle()
+    val recent = cast.recentName
+    if (!cast.supported || recent == null) return
+    BottomGlyph(
+        icon = Icons.Rounded.SpeakerGroup,
+        contentDescription = recent,
+        onClick = { PlayerPlatform.host.castToRecent() },
+        highlighted = cast.connectedName != null || cast.connecting,
+    )
 }
 
 /**

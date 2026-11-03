@@ -1568,4 +1568,7 @@
     <string name="aod_widgets_available">Añadir un widget</string>
     <string name="aod_done">Listo</string>
     <string name="aod_permission">Permite las notificaciones a pantalla completa para que BitChord muestre su pantalla sobre la de bloqueo</string>
+    <string name="cast_recent_to">Enviar a %1$s</string>
+    <string name="cast_recent_stop">Volver a este teléfono</string>
+    <string name="cast_recent_not_found">%1$s no está disponible ahora</string>
 </resources>

@@ -150,6 +150,9 @@ interface PlayerHost {
     /** Casting to a network receiver. Absent, and so never drawn, where the platform has none. */
     val castState: StateFlow<CastUi> get() = NoCast
 
+    /** BitChord Audio: one tap — cast to the speaker last cast to, or back to the phone while casting. */
+    fun castToRecent() = Unit
+
     /**
      * The BitChord watch app as an output: the watch plays the queue the way a
      * Cast receiver does. Absent, and so never drawn, where there is no watch.
@@ -246,6 +249,8 @@ data class CastUi(
     /** The receiver the music is on now, or null when it is on this device. */
     val connectedName: String? = null,
     val connecting: Boolean = false,
+    /** BitChord Audio: the speaker last cast to, for the one-tap button; null hides it. */
+    val recentName: String? = null,
 )
 
 /** Where the installed [PlayerHost] lives. */

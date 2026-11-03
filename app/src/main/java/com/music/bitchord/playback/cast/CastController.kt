@@ -44,6 +44,8 @@ object CastController {
         val devices: List<Device> = emptyList(),
         val connectedName: String? = null,
         val connecting: Boolean = false,
+        /** BitChord Audio: the speaker last cast to (kept after disconnecting). */
+        val recentName: String? = null,
     ) {
         val casting: Boolean get() = connectedName != null
     }
@@ -145,7 +147,7 @@ object CastController {
         router = MediaRouter.getInstance(app)
         selector = ctx.mergedSelector
         ctx.sessionManager.addSessionManagerListener(sessionListener, CastSession::class.java)
-        update { it.copy(supported = true) }
+        update { it.copy(supported = true, recentName = prefs?.getString(KEY_RECENT_NAME, null)) }
         // A session that outlived the process: the framework restores it on its
         // own and reports it through the listener, but one already live by the
         // time this runs would be reported to nobody.
@@ -167,6 +169,8 @@ object CastController {
 
     private const val KEY_DEVICE = "lastDevice"
     private const val KEY_DEVICE_NAME = "lastDeviceName"
+    private const val KEY_RECENT_ID = "recentDevice"
+    private const val KEY_RECENT_NAME = "recentDeviceName"
     private const val REJOIN_SCAN_MS = 180_000L
 
     /** The speaker a session is on, kept until the session ends — a crash or an update leaves it. */
@@ -179,8 +183,11 @@ object CastController {
             } else {
                 putString(KEY_DEVICE, device.deviceId)
                 putString(KEY_DEVICE_NAME, device.friendlyName)
+                putString(KEY_RECENT_ID, device.deviceId)
+                putString(KEY_RECENT_NAME, device.friendlyName)
             }
         }?.apply()
+        device?.friendlyName?.let { name -> update { it.copy(recentName = name) } }
     }
 
     /**
@@ -313,6 +320,58 @@ object CastController {
      * back to this phone, rather than the receiver having gone away — see
      * [CastPlayback.onSessionEnded].
      */
+    /**
+     * BitChord Audio: the one-tap cast button. Casting already: brings the
+     * music back to the phone. Otherwise looks for the speaker last cast to
+     * (by id, or by name) and casts to it — no list to open.
+     */
+    fun castToRecent() {
+        if (_state.value.casting) {
+            disconnect(resumeHere = true)
+            return
+        }
+        val id = prefs?.getString(KEY_RECENT_ID, null) ?: return
+        val name = prefs?.getString(KEY_RECENT_NAME, null)
+        val router = router ?: return
+        val selector = selector ?: return
+        val main = Handler(Looper.getMainLooper())
+        main.post {
+            fun matches(r: MediaRouter.RouteInfo): Boolean {
+                if (!r.matchesSelector(selector) || r.isDefault || r.isBluetooth) return false
+                val deviceId = runCatching { com.google.android.gms.cast.CastDevice.getFromBundle(r.extras)?.deviceId }.getOrNull()
+                return deviceId == id || r.id.contains(id) || (name != null && r.name.toString() == name)
+            }
+            fun tryCast(): Boolean {
+                val route = router.routes.firstOrNull(::matches) ?: return false
+                com.music.bitchord.data.TrackLog.d(TAG, "cast: one tap to ${route.name}")
+                update { it.copy(connecting = true) }
+                router.selectRoute(route)
+                return true
+            }
+            if (tryCast()) return@post
+            update { it.copy(connecting = true) }
+            var done = false
+            val callback = object : MediaRouter.Callback() {
+                override fun onRouteAdded(r: MediaRouter, route: MediaRouter.RouteInfo) {
+                    if (!done && tryCast()) { done = true; r.removeCallback(this) }
+                }
+                override fun onRouteChanged(r: MediaRouter, route: MediaRouter.RouteInfo) {
+                    if (!done && tryCast()) { done = true; r.removeCallback(this) }
+                }
+            }
+            router.addCallback(selector, callback, MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN or MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY)
+            main.postDelayed({
+                router.removeCallback(callback)
+                if (!done) {
+                    update { it.copy(connecting = false) }
+                    appContext?.let { c ->
+                        android.widget.Toast.makeText(c, c.getString(com.music.bitchord.R.string.cast_recent_not_found, name ?: ""), android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }, 20_000)
+        }
+    }
+
     /** A rejoined speaker turned out to hold nothing of ours: let go of it, quietly. */
     fun forgetAndLeave() {
         rememberSession(null)

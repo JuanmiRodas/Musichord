@@ -265,10 +265,15 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         com.music.bitchord.ui.components.LyricAliasEditor.open(song)
     }
 
+    override fun castToRecent() {
+        CastController.ensureStarted(app)
+        CastController.castToRecent()
+    }
+
     override val castState: StateFlow<CastUi> by lazy {
         CastController.ensureStarted(app)
         CastController.state
-            .map { CastUi(supported = it.supported, connectedName = it.connectedName, connecting = it.connecting) }
+            .map { CastUi(supported = it.supported, connectedName = it.connectedName, connecting = it.connecting, recentName = it.recentName) }
             .stateIn(scope, SharingStarted.Eagerly, CastUi())
     }
 

@@ -1653,7 +1653,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_library.value is UiState.Success) refresh(Feed.LIBRARY)
     }
 
+    override fun onCleared() {
+        com.music.bitchord.data.LikeLookup.toggle = null
+        super.onCleared()
+    }
+
     init {
+        // BitChord Audio: the notification's star uses the screen's heart.
+        com.music.bitchord.data.LikeLookup.toggle = { id ->
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) { toggleLike(id) }
+        }
         // BitChord Audio: lyrics on screen for a song known by its romaji —
         // its Japanese title is read off the words when it is sung in them.
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {

@@ -216,6 +216,7 @@ const val EXTRA_SWAP_MEDIA_ITEM = "bitchord.swap.media_item"
 private const val WATCH_SESSION_FOREGROUND_MS = 6 * 60 * 60 * 1000L
 
 const val ACTION_TOGGLE_FAVORITE = "com.music.bitchord.action.TOGGLE_FAVORITE"
+const val ACTION_CAST_RECENT = "com.music.bitchord.action.CAST_RECENT"
 
 /** Session command used by the media notification's and the 4×1 widget's Shuffle button. */
 const val ACTION_TOGGLE_SHUFFLE = "com.music.bitchord.action.TOGGLE_SHUFFLE"
@@ -810,6 +811,7 @@ class PlaybackService : MediaLibraryService() {
     private val boundedContextCommand = SessionCommand(ACTION_START_BOUNDED_CONTEXT, Bundle.EMPTY)
     private val clearBoundedContextCommand = SessionCommand(ACTION_CLEAR_BOUNDED_CONTEXT, Bundle.EMPTY)
     private val favoriteCommand = SessionCommand(ACTION_TOGGLE_FAVORITE, Bundle.EMPTY)
+    private val castRecentCommand = SessionCommand(ACTION_CAST_RECENT, Bundle.EMPTY)
     private val autoplayCommand = SessionCommand(ACTION_TOGGLE_AUTOPLAY, Bundle.EMPTY)
     private val shuffleCommand = SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY)
     private val startStationCommand = SessionCommand(ACTION_START_STATION, Bundle.EMPTY)
@@ -1390,8 +1392,14 @@ class PlaybackService : MediaLibraryService() {
                 }
         }
         scope.launch {
-            LikeState.overrides
-                .map { it[player?.currentMediaItem?.mediaId] }
+            CastController.state
+                .map { Triple(it.supported, it.recentName, it.casting) }
+                .distinctUntilChanged()
+                .collectLatest { refreshCustomLayouts() }
+        }
+        scope.launch {
+            com.music.bitchord.data.LikeLookup.changes
+                .map { player?.currentMediaItem?.mediaId?.let(com.music.bitchord.data.LikeLookup::status) }
                 .distinctUntilChanged()
                 .collectLatest {
                     refreshCustomLayouts()
@@ -2127,10 +2135,13 @@ class PlaybackService : MediaLibraryService() {
     /** Whether [item] is liked, by whichever of the two records owns it. */
     private fun isLiked(item: MediaItem?): Boolean {
         val song = item?.toSong() ?: return false
-        return if (song.localUri != null) {
-            OfflinePlaylists.isLiked(song)
+        return if (song.localUri != null && OfflinePlaylists.isLiked(song)) {
+            true
         } else {
-            LikeState.overrides.value[song.videoId] == LikeStatus.LIKE
+            // BitChord Audio: as the player screen says it (the whole Liked
+            // Music, your files through their YouTube song), not only this
+            // session's taps — a liked song showed an empty star here.
+            com.music.bitchord.data.LikeLookup.isLiked(song.videoId)
         }
     }
 
@@ -2158,7 +2169,18 @@ class PlaybackService : MediaLibraryService() {
             .setSessionCommand(shuffleCommand)
             .setDisplayName(if (shuffleEnabled) "Shuffle off" else "Shuffle on")
             .build()
-        return listOfNotNull(favorite, shuffle)
+        // BitChord Audio: one tap to the speaker last cast to (or back here),
+        // from the lock screen — after the star, before shuffle, so the two
+        // slots the system shows there are the star and this.
+        val castState = CastController.state.value
+        val castRecent = castState.recentName?.takeIf { castState.supported }?.let { name ->
+            CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                .setCustomIconResId(R.drawable.ic_notification_cast_recent)
+                .setSessionCommand(castRecentCommand)
+                .setDisplayName(if (castState.casting) getString(R.string.cast_recent_stop) else getString(R.string.cast_recent_to, name))
+                .build()
+        }
+        return listOfNotNull(favorite, castRecent, shuffle)
     }
 
     /** Adds Radio/Revert for controllers with room for them, e.g. Android Auto. */
@@ -3505,7 +3527,7 @@ class PlaybackService : MediaLibraryService() {
 
     private fun toggleFavoriteFromNotification(videoId: String) {
         favoriteActionJob?.cancel()
-        val previous = LikeState.overrides.value[videoId] ?: LikeStatus.INDIFFERENT
+        val previous = com.music.bitchord.data.LikeLookup.status(videoId) ?: LikeStatus.INDIFFERENT
         val target = if (previous == LikeStatus.LIKE) {
             LikeStatus.INDIFFERENT
         } else {
@@ -6426,7 +6448,7 @@ class PlaybackService : MediaLibraryService() {
         // it. Unknown is not "not liked", so keep what was last published for
         // this same track rather than emptying a heart that was right.
         val liked = (if (song.localUri != null) OfflinePlaylists.isLiked(song) else null)
-            ?: LikeState.overrides.value[song.videoId]?.let { it == LikeStatus.LIKE }
+            ?: com.music.bitchord.data.LikeLookup.status(song.videoId)?.let { it == LikeStatus.LIKE }
             ?: MediaWidgetSnapshot.load(this).takeIf { it.mediaId == song.videoId }?.isLiked
             ?: false
         val reported: Player = mediaSession?.player ?: exoPlayer
@@ -8594,6 +8616,7 @@ class PlaybackService : MediaLibraryService() {
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                 .buildUpon()
                 .add(favoriteCommand)
+                .add(castRecentCommand)
                 .add(boundedContextCommand)
                 .add(clearBoundedContextCommand)
                 .add(autoplayCommand)
@@ -8635,6 +8658,7 @@ class PlaybackService : MediaLibraryService() {
                 ACTION_CLEAR_BOUNDED_CONTEXT -> clearBoundedContext()
                 ACTION_TOGGLE_AUTOPLAY -> toggleAutoplayFromNotification()
                 ACTION_TOGGLE_SHUFFLE -> toggleShuffleFromSession()
+                ACTION_CAST_RECENT -> CastController.castToRecent()
                 ACTION_START_STATION -> startStationFromSession()
                 ACTION_REVERT_TO_ORIGINAL -> revertCurrentToOriginal()
                 ACTION_SWAP_TO_VERSION -> swapCurrentToVersion(args)
@@ -8666,7 +8690,18 @@ class PlaybackService : MediaLibraryService() {
                             // reconcile, and the button follows [OfflinePlaylists.liked].
                             OfflinePlaylists.toggleLike(song)
                         } else {
-                            toggleFavoriteFromNotification(item.mediaId)
+                            // BitChord Audio: the player screen's own heart when the
+                            // app is open (other uploads of a liked song, your files).
+                            val viaApp = com.music.bitchord.data.LikeLookup.toggle
+                            if (viaApp != null) {
+                                runCatching { viaApp(item.mediaId) }
+                                refreshCustomLayouts()
+                            } else {
+                                val id = item.mediaId
+                                val yt = if (com.music.bitchord.data.LocalLikes.isYouTubeId(id)) id
+                                else com.music.bitchord.data.LocalLikes.links.value[id]
+                                yt?.let(::toggleFavoriteFromNotification)
+                            }
                         }
                     }
                 else -> return Futures.immediateFuture(
