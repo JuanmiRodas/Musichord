@@ -125,3 +125,10 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - LogUpload: Settings → "Send the log to GitHub" (repo owner/name + fine-grained token, Contents RW, that repo only). Every 2 min when new: logs/<maker-model>/<day>/<start time>.log (same file updated); crash/exit reports once to logs/<device>/reports/. CrashLog also uploads the session log to pCloud .bitchord-audio/logs/ every 5 min.
 - Cast: AHEAD 8, inserted one at a time with staleness + exact-tail checks; customData carries the whole song (LastPlayed.songToJson) so an empty/new phone takes up the speaker's whole queue; 20 s heartbeat (requestStatus, phone follows the speaker's track, top-up reconcile).
 - Model: speaker = truth for track/position/play state; phone = truth for what comes next.
+
+## Cast survives closing the app (v1.9.90)
+- onTaskRemoved: while casting, never stops/disconnects (stopOnTaskRemoved ignored); reopening rejoins (framework resume or rejoinIfLost).
+- Speaker leaving a track by itself < 5 s into a > 30 s song (stream failed; Cast queues auto-advance on error) → that track replayed via phone proxy once.
+- reconcile: dropped the exact-tail check (status queueItems can be partial → endless re-plans and re-resolves); replans capped at 3 in a row.
+- Log: every speaker idle with its reason.
+- Logs repo not reachable yet: user must create it and give the Claude GitHub app access, then add_repo.
