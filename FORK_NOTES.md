@@ -102,3 +102,7 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - `aod/`: AodTrigger (screen off while playing → AodActivity via full-screen-intent notification), AodActivity (over lock screen: song, lyric line, clock/date/notification icons, widgets, prev/play/next/stop, corner rotation + drift, closes on unlock/tap/1 min paused), AodSettings, AodWidgets (+picker), AodWidgetsDialog. Settings → "Music on the always-on screen".
 - CurrentLyrics: MainViewModel publishes loaded lyrics for it.
 - NotificationIcons: silhouettes painted white; opaque/full-colour small icons fall back to the app icon in colour (was a grey square).
+
+## Cast rejoin after update/crash (v1.9.84)
+- CastController.rejoinIfLost() on every app foreground (+5 s after start); matches last speaker by id, route id or name; skips a speaker now on another app (route description not "Default Media Receiver"); scans 3 min; logs to TrackLog.
+- CastPlayback: resumed sessions wait for the receiver's status (ADOPT_WAIT_MS) before deciding; receiver track read from queue or mediaInfo; phone follows by id, then title+artist (alias), else inserts the track next to the current one (playlist kept); queued-ahead items rebuilt once (old proxy links die with the process); a rejoined speaker holding nothing of ours is left (forgetAndLeave).
