@@ -114,3 +114,9 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 ## Cast double-play fix (v1.9.86)
 - reconcileOnce resolves streams first, then edits only if nothing moved (generation, receiver item, phone item); load() cancels a reconcile in flight. Was: a slow resolve inserted the just-loaded track again (played twice) or the skipped one after the new one (skip came back).
 - rejoinIfLost/tryJoin bail on any session (also suspended/connecting).
+
+## Cast slow/skipped after several skips (v1.9.87)
+- recoverFrom: no retry/skip while casting (phone-side load failure skipped the song on the speaker).
+- onLocalTransition load waits SKIP_SETTLE_MS (450 ms) so rapid skips fetch only the final track.
+- IDLE FINISHED < 5 s into a > 30 s track → stream broke: retried once via the phone proxy (CastRouting.proxyOnly) instead of moving on.
+- Log: per-track stream resolve time (direct / served by the phone), speaker load time, every speaker move.
