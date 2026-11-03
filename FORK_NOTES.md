@@ -139,3 +139,11 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - resolveForCast: saavncdn.com direct to the speaker (like googlevideo/pCloud).
 - CastController.helpResume(): a session resuming after reopen gets an active scan (resume needs discovery); not back in 20 s → endCurrentSession(false) (endingToRejoin keeps the device) + rejoin. Was stuck "connecting" with the speaker idle.
 - Upstream kushagrasinghx/BitChord (v1.8.2) cast = same design, older (AHEAD 3, no proxy); forks can't be listed from here (GitHub API scoped, forks page blocked).
+
+## Details editor, album cover, song selection (v1.9.93)
+- MetadataEdits (data/edits): title/artist/album/albumArtist/year/track/genre by "id:<videoId>" and exact original title|artist key (versions stay separate); local + pCloud .bitchord-audio/metadata.json. ArtworkOverrides.edited + Song.shown(); ShownSongs.version bumps redraws.
+- Shown in rows (Common.kt SongRow), NowPlaying title/artist + OLED, MiniPlayer, glass bar; toMediaItem puts edited title/artist/album in MediaMetadata (lock screen, notification, cast) with originals in extras (bitchord.origTitle/Artist/Album) that toSong reads back — Song identity/matching stays original.
+- TagWriter: text tags into pCloud files and downloads (MP3 ID3 v2.3 UTF-16 / v2.4 UTF-8; FLAC Vorbis comments) via CoverTags.mp3Text/flacText; m4a/opus not written.
+- MetadataEditorDialog (MetadataEditor.open): song menu "Edit details"; album ⋯ "Edit album details" (shared fields only); selection.
+- CoverPicker.open(list): album ⋯ "Change cover of all songs", selection.
+- ReleaseSelection: album/playlist ⋯ "Select songs" → tap ticks; bar: select all, cover, details, play next, add to queue, cancel.
