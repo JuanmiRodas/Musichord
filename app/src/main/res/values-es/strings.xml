@@ -1578,4 +1578,25 @@
     <string name="log_upload_token">Token (vacío mantiene el guardado)</string>
     <string name="log_upload_send_now">Enviar ahora</string>
     <string name="log_upload_stop">Dejar de enviar</string>
+    <string name="edit_info">Editar datos</string>
+    <string name="edit_info_many">Editar datos de %1$d canciones</string>
+    <string name="edit_info_help">Se muestran en lugar de los de la fuente en todas partes: listas, reproductor, pantalla de bloqueo, altavoces. La canción sigue sonando desde donde sonaba.</string>
+    <string name="edit_info_help_many">Solo cambian los campos que rellenes; cada canción mantiene su título y número de pista.</string>
+    <string name="edit_info_title">Título</string>
+    <string name="edit_info_artist">Artista</string>
+    <string name="edit_info_album">Álbum</string>
+    <string name="edit_info_album_artist">Artista del álbum</string>
+    <string name="edit_info_year">Año</string>
+    <string name="edit_info_track">Número de pista</string>
+    <string name="edit_info_genre">Género</string>
+    <string name="edit_info_into_pcloud">Escribirlos también en mis archivos de pCloud (MP3 y FLAC)</string>
+    <string name="edit_info_into_downloads">Escribirlos también en mis descargas (MP3 y FLAC)</string>
+    <string name="edit_info_restore">Volver a los datos originales</string>
+    <string name="edit_info_no_files">Guardado. No hay archivos de pCloud ni descargas de estas canciones donde escribirlos.</string>
+    <string name="edit_info_saved_files">Guardado, y escrito en %1$d de %2$d archivos</string>
+    <string name="album_change_cover">Cambiar la portada de todas las canciones</string>
+    <string name="album_edit_info">Editar datos del álbum</string>
+    <string name="select_songs">Seleccionar canciones</string>
+    <string name="selection_cover">Portada</string>
+    <string name="selection_edit">Datos</string>
 </resources>

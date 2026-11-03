@@ -351,6 +351,9 @@ fun DetailScreen(
      * [ArtworkPalette] so it reads as this page rather than a sheet over it.
      */
     reorder: (@Composable (ArtworkPalette) -> Unit)? = null,
+    /** BitChord Audio: for a selection of the page's songs (see [ReleaseSelection]). */
+    onPlayNextSongs: ((List<Song>) -> Unit)? = null,
+    onAddToQueueSongs: ((List<Song>) -> Unit)? = null,
 ) {
     val rawSongs = (page.songs as? UiState.Success)?.data.orEmpty()
     // A folder keeps its own sort — the one its top bar menu sets — rather
@@ -461,6 +464,9 @@ fun DetailScreen(
         emptyList()
     }
     BackHandler(enabled = folderState?.selecting == true) { folderState?.clear() }
+    // BitChord Audio: songs being picked on this page.
+    val picking = folder == null && ReleaseSelection.active(page.browseId)
+    BackHandler(enabled = picking) { ReleaseSelection.end() }
 
     // What marks a row as already downloaded, tinted from the sleeve like the
     // rest of the page. Null on any page that is itself a reading of this
@@ -763,10 +769,11 @@ fun DetailScreen(
                             } else {
                                 song.copy(thumbnailUrl = song.thumbnailUrl ?: page.thumbnailUrl)
                             },
+                            selected = picking && song.videoId in ReleaseSelection.selected,
                             onClick = {
-                                onSongClick(queue, position)
+                                if (picking) ReleaseSelection.toggle(song) else onSongClick(queue, position)
                             },
-                            onLongPress = { onSongLongPress(song) },
+                            onLongPress = { if (picking) ReleaseSelection.toggle(song) else onSongLongPress(song) },
                             onSwipeToQueue = { onSongSwipe(song) },
                             rowBackground = Color.Transparent,
                             // The track's place on the release, not its place in
@@ -858,6 +865,16 @@ fun DetailScreen(
             if (isArtist) aboutItem()
         }
 
+                if (picking) {
+                    ReleaseSelectionBar(
+                        songs = songs,
+                        onPlayNext = onPlayNextSongs,
+                        onAddToQueue = onAddToQueueSongs,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = topBarContentPadding(), start = PAGE_GUTTER, end = PAGE_GUTTER),
+                    )
+                }
                 if (folder != null && folderState != null && folderState.selecting) {
                     LocalFolderSelectionBar(
                         folder = folder,

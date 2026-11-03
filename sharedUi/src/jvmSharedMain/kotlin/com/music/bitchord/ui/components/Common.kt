@@ -519,8 +519,13 @@ private fun SongRowContent(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     // BitChord Audio: the copy picked for the song, as it is shown.
-    val shown = remember(song.videoId, song.title, com.music.bitchord.data.model.ArtworkOverrides.display) {
-        com.music.bitchord.data.model.ArtworkOverrides.display?.invoke(song) ?: song
+    // …and with the details you corrected by hand.
+    val editsVersion = ShownSongs.version.intValue
+    val shown = remember(song.videoId, song.title, com.music.bitchord.data.model.ArtworkOverrides.display, editsVersion) {
+        val picked = com.music.bitchord.data.model.ArtworkOverrides.display?.invoke(song) ?: song
+        com.music.bitchord.data.model.ArtworkOverrides.edited?.invoke(song)?.let { e ->
+            picked.copy(title = e.title, artist = e.artist, albumName = e.albumName, trackNumber = e.trackNumber)
+        } ?: picked
     }
     val titleColor by animateColorAsState(
         targetValue = if (isCurrent && !searchPlayingStyle) activeTint else MaterialTheme.colorScheme.onBackground,

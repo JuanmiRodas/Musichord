@@ -229,7 +229,16 @@ object ArtworkOverrides {
      * artist and cover in place of a "MUSIC VIDEO" upload), or null for itself.
      */
     var display: ((Song) -> Song?)? = null
+
+    /**
+     * BitChord Audio: the song with the details you corrected by hand (title,
+     * artist, album), or null when there are none — for what is shown only.
+     */
+    var edited: ((Song) -> Song?)? = null
 }
+
+/** BitChord Audio: [this] as it is shown — your corrected details, if any. */
+fun Song.shown(): Song = ArtworkOverrides.edited?.invoke(this) ?: this
 
 /**
  * Whether a row is the track the player is on, for the now-playing highlight.

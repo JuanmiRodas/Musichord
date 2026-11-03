@@ -57,8 +57,22 @@ import kotlinx.coroutines.withContext
 object CoverPicker {
     private val _song = MutableStateFlow<Song?>(null)
     val song: StateFlow<Song?> = _song.asStateFlow()
-    fun open(song: Song) { _song.value = song }
-    fun close() { _song.value = null }
+
+    /** Set when opened for a chosen set of songs (an album page, a selection): those, all ticked. */
+    @Volatile
+    var songs: List<Song>? = null
+        private set
+
+    fun open(song: Song) { songs = null; _song.value = song }
+
+    /** For several songs at once — the first one's covers are offered, all of them get the pick. */
+    fun open(many: List<Song>) {
+        val first = many.firstOrNull() ?: return
+        songs = many
+        _song.value = first
+    }
+
+    fun close() { songs = null; _song.value = null }
 }
 
 /**
@@ -79,7 +93,8 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
     var saveToFiles by remember(song.videoId) { mutableStateOf(true) }
 
     LaunchedEffect(song.videoId) {
-        albumSongs = withContext(Dispatchers.Default) { albumOf(song) }
+        albumSongs = CoverPicker.songs?.filter { it.videoId != song.videoId }
+            ?: withContext(Dispatchers.Default) { albumOf(song) }
         chosen.clear()
         albumSongs.forEach { chosen += it.videoId }
     }

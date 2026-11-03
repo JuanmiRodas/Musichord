@@ -398,6 +398,10 @@ fun SongActionsMenu(
         ActionRow(SfIcons.Info, stringResource(R.string.song_info), accent = palette.accent) {
             showingSongInfo = true
         }
+        // BitChord Audio: correct the song's details (and its cover).
+        ActionRow(SfIcons.Pencil, stringResource(R.string.edit_info), accent = palette.accent) {
+            MetadataEditor.open(listOf(song))
+        }
 
         // The player's own: about the track playing right now rather than
         // about the song as a thing in a library.

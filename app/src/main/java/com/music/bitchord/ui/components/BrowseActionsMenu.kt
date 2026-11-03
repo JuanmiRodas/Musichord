@@ -150,6 +150,12 @@ fun BrowseActionsMenu(
      */
     onRenameInSheet: (() -> Unit)? = null,
     startRenaming: Boolean = false,
+    /** BitChord Audio: one cover for every song of the release. */
+    onChangeCover: (() -> Unit)? = null,
+    /** BitChord Audio: the details every song of the release shares. */
+    onEditInfo: (() -> Unit)? = null,
+    /** BitChord Audio: pick some (or all) of the page's songs to act on. */
+    onSelectSongs: (() -> Unit)? = null,
 ) {
     var renaming by remember { mutableStateOf(startRenaming) }
     var confirmingDelete by remember { mutableStateOf(false) }
@@ -225,6 +231,9 @@ fun BrowseActionsMenu(
                     onClick = download,
                 )
             }
+            onSelectSongs?.let { ActionRow(SfIcons.Check, stringResource(R.string.select_songs), onClick = it) }
+            onChangeCover?.let { ActionRow(SfIcons.Album, stringResource(R.string.album_change_cover), onClick = it) }
+            onEditInfo?.let { ActionRow(SfIcons.Pencil, stringResource(R.string.album_edit_info), onClick = it) }
             onOpen?.let {
                 ActionRow(
                     SfIcons.Open,

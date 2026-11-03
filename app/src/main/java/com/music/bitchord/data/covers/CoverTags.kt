@@ -178,4 +178,146 @@ object CoverTags {
         }
         return Rewrite(out.toByteArray(), at.toLong())
     }
+
+    // ---- BitChord Audio: text tags (the metadata editor) --------------------
+
+    /**
+     * The words written into a file: null leaves that tag as it is, empty
+     * removes it.
+     */
+    data class Text(
+        val title: String? = null,
+        val artist: String? = null,
+        val album: String? = null,
+        val albumArtist: String? = null,
+        val year: String? = null,
+        val track: String? = null,
+        val genre: String? = null,
+    ) {
+        val isEmpty: Boolean get() = listOf(title, artist, album, albumArtist, year, track, genre).all { it == null }
+    }
+
+    private fun id3Frames(t: Text, version: Int): Map<String, String?> = buildMap {
+        t.title?.let { put("TIT2", it) }
+        t.artist?.let { put("TPE1", it) }
+        t.album?.let { put("TALB", it) }
+        t.albumArtist?.let { put("TPE2", it) }
+        t.year?.let { put(if (version == 4) "TDRC" else "TYER", it) }
+        t.track?.let { put("TRCK", it) }
+        t.genre?.let { put("TCON", it) }
+    }
+
+    private fun textFrame(version: Int, id: String, value: String): ByteArray {
+        // UTF-16 with BOM (v2.3) / UTF-8 (v2.4): any script, Japanese included.
+        val body = if (version == 4) {
+            byteArrayOf(3) + value.toByteArray(Charsets.UTF_8)
+        } else {
+            byteArrayOf(1) + byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + value.toByteArray(Charsets.UTF_16LE)
+        }
+        val size = if (version == 4) syncsafeBytes(body.size) else u32Bytes(body.size)
+        return id.toByteArray(Charsets.ISO_8859_1) + size + byteArrayOf(0, 0) + body
+    }
+
+    /**
+     * An MP3's tag with the given text frames replaced (year: TYER and TDRC
+     * both dropped and the version's own written); everything else, the cover
+     * included, kept. No tag: a new ID3v2.3 one with just these.
+     */
+    fun mp3Text(head: ByteArray, text: Text): Rewrite? {
+        if (!isId3(head)) {
+            val frames = id3Frames(text, 3).mapNotNull { (id, v) -> v?.takeIf { it.isNotEmpty() }?.let { textFrame(3, id, it) } }
+            return Rewrite(id3Tag(3, frames, ByteArray(0)), 0)
+        }
+        val version = head[3].toInt()
+        val flags = head[5].toInt()
+        if (version !in 3..4 || (flags and 0x80) != 0) return null
+        val total = id3TotalSize(head)
+        if (head.size < total) return null
+        val end = (10 + syncsafe(head, 6)).coerceAtMost(head.size)
+        var at = 10
+        if ((flags and 0x40) != 0) {
+            at += if (version == 3) 4 + u32(head, 10) else syncsafe(head, 10)
+        }
+        val replacing = id3Frames(text, version)
+        val dropping = replacing.keys + if (text.year != null) setOf("TYER", "TDRC", "TDAT") else emptySet()
+        val frames = ArrayList<ByteArray>()
+        while (at + 10 <= end) {
+            if (head[at].toInt() == 0) break
+            val id = String(head, at, 4, Charsets.ISO_8859_1)
+            if (!id.all { it in 'A'..'Z' || it in '0'..'9' }) break
+            val size = if (version == 4) syncsafe(head, at + 4) else u32(head, at + 4)
+            if (size < 0 || at + 10 + size > end) return null
+            if (id !in dropping) frames += head.copyOfRange(at, at + 10 + size)
+            at += 10 + size
+        }
+        replacing.forEach { (id, v) -> if (!v.isNullOrEmpty()) frames += textFrame(version, id, v) }
+        return Rewrite(id3Tag(version, frames, ByteArray(0)), total)
+    }
+
+    /**
+     * A FLAC's metadata with its Vorbis comments changed: the named fields
+     * replaced, every other comment (and block) kept. No comment block: one is
+     * added after STREAMINFO.
+     */
+    fun flacText(metadata: ByteArray, text: Text): Rewrite? {
+        if (metadata.size < 8 || String(metadata, 0, 4, Charsets.ISO_8859_1) != "fLaC") return null
+        val blocks = ArrayList<Pair<Int, ByteArray>>()
+        var at = 4
+        while (at + 4 <= metadata.size) {
+            val type = metadata[at].toInt() and 0x7f
+            val last = (metadata[at].toInt() and 0x80) != 0
+            val len = ((metadata[at + 1].toInt() and 0xff) shl 16) or ((metadata[at + 2].toInt() and 0xff) shl 8) or (metadata[at + 3].toInt() and 0xff)
+            if (at + 4 + len > metadata.size) return null
+            blocks += type to metadata.copyOfRange(at + 4, at + 4 + len)
+            at += 4 + len
+            if (last) break
+        }
+        if (blocks.firstOrNull()?.first != 0) return null
+        fun le32(b: ByteArray, o: Int) = (b[o].toInt() and 0xff) or ((b[o + 1].toInt() and 0xff) shl 8) or
+            ((b[o + 2].toInt() and 0xff) shl 16) or ((b[o + 3].toInt() and 0xff) shl 24)
+        fun le32Bytes(n: Int) = byteArrayOf(n.toByte(), (n ushr 8).toByte(), (n ushr 16).toByte(), (n ushr 24).toByte())
+        val index = blocks.indexOfFirst { it.first == 4 }
+        var vendor = "BitChord Audio".toByteArray()
+        val comments = ArrayList<String>()
+        if (index >= 0) {
+            val b = blocks[index].second
+            var o = 0
+            val vlen = le32(b, o); o += 4
+            if (vlen < 0 || o + vlen > b.size) return null
+            vendor = b.copyOfRange(o, o + vlen); o += vlen
+            val n = le32(b, o); o += 4
+            repeat(n) {
+                if (o + 4 > b.size) return null
+                val l = le32(b, o); o += 4
+                if (l < 0 || o + l > b.size) return null
+                comments += String(b, o, l, Charsets.UTF_8); o += l
+            }
+        }
+        val fields = buildMap {
+            text.title?.let { put("TITLE", it) }
+            text.artist?.let { put("ARTIST", it) }
+            text.album?.let { put("ALBUM", it) }
+            text.albumArtist?.let { put("ALBUMARTIST", it) }
+            text.year?.let { put("DATE", it) }
+            text.track?.let { put("TRACKNUMBER", it) }
+            text.genre?.let { put("GENRE", it) }
+        }
+        val kept = comments.filter { c -> c.substringBefore('=').uppercase() !in fields.keys }
+        val all = kept + fields.filterValues { it.isNotEmpty() }.map { (k, v) -> "$k=$v" }
+        val body = ByteArrayOutputStream().apply {
+            write(le32Bytes(vendor.size)); write(vendor)
+            write(le32Bytes(all.size))
+            all.forEach { c -> val bytes = c.toByteArray(Charsets.UTF_8); write(le32Bytes(bytes.size)); write(bytes) }
+        }.toByteArray()
+        if (body.size >= 1 shl 24) return null
+        if (index >= 0) blocks[index] = 4 to body else blocks.add(1, 4 to body)
+        val out = ByteArrayOutputStream()
+        out.write("fLaC".toByteArray(Charsets.ISO_8859_1))
+        blocks.forEachIndexed { i, (type, b) ->
+            out.write((if (i == blocks.lastIndex) 0x80 else 0) or type)
+            out.write((b.size shr 16) and 0xff); out.write((b.size shr 8) and 0xff); out.write(b.size and 0xff)
+            out.write(b)
+        }
+        return Rewrite(out.toByteArray(), at.toLong())
+    }
 }

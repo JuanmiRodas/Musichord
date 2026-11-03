@@ -421,15 +421,16 @@ private fun GlassNowPlaying(
             // a long line fades out at its end, as Apple's does.
             Column(Modifier.weight(1f)) {
                 val secondary = contentColor.copy(alpha = 0.7f)
+                val shownSong = rememberShown(song)
                 ExplicitSongTitle(
-                    song = song,
+                    song = shownSong,
                     style = titleStyle,
                     color = contentColor,
                     badgeColor = secondary,
                     fadeOverflow = true,
                 )
                 FadingLine(
-                    text = song.artist,
+                    text = shownSong.artist,
                     style = artistStyle,
                     color = secondary,
                 )

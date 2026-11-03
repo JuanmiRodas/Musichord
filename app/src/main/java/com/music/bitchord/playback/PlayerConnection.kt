@@ -441,14 +441,16 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
  */
 fun MediaItem.toSong() = Song(
     videoId = mediaId,
-    title = mediaMetadata.title?.toString().orEmpty(),
-    artist = mediaMetadata.artist?.toString().orEmpty(),
+    // BitChord Audio: the song's own details, under any you corrected (those
+    // are only what the item shows — see [toMediaItem]).
+    title = mediaMetadata.extras?.getString(EXTRA_ORIG_TITLE) ?: mediaMetadata.title?.toString().orEmpty(),
+    artist = mediaMetadata.extras?.getString(EXTRA_ORIG_ARTIST) ?: mediaMetadata.artist?.toString().orEmpty(),
     thumbnailUrl = mediaMetadata.artworkUri?.toString(),
     durationText = mediaMetadata.extras?.getString(EXTRA_DURATION),
     artistId = mediaMetadata.extras?.getString(EXTRA_ARTIST_ID),
     artists = mediaMetadata.extras?.artistsFromBundle() ?: emptyList(),
     albumId = mediaMetadata.extras?.getString(EXTRA_ALBUM_ID),
-    albumName = mediaMetadata.albumTitle?.toString(),
+    albumName = mediaMetadata.extras?.getString(EXTRA_ORIG_ALBUM) ?: mediaMetadata.albumTitle?.toString(),
     isExplicit = mediaMetadata.extras?.takeIf { it.containsKey(EXTRA_EXPLICIT) }
         ?.getBoolean(EXTRA_EXPLICIT),
     isVideo = mediaMetadata.extras?.getBoolean(EXTRA_IS_VIDEO) == true,
@@ -561,6 +563,9 @@ internal const val EXTRA_LOCAL_PATH = "bitchord.localPath"
  * to the live queue and matching code.
  */
 private const val EXTRA_DURATION = "bitchord.durationText"
+private const val EXTRA_ORIG_TITLE = "bitchord.origTitle"
+private const val EXTRA_ORIG_ARTIST = "bitchord.origArtist"
+private const val EXTRA_ORIG_ALBUM = "bitchord.origAlbum"
 private const val EXTRA_EXPLICIT = "bitchord.explicit"
 
 /**
@@ -716,13 +721,16 @@ fun Song.toMediaItem(): MediaItem {
         // reach.
         else -> "bitchord://watch?v=$videoId${matchQuery()}"
     }
+    // BitChord Audio: details you corrected are what the player, the lock
+    // screen and the speaker show; the song's own ride along in the extras.
+    val shown = com.music.bitchord.data.model.ArtworkOverrides.edited?.invoke(this)
     return MediaItem.Builder()
         .setMediaId(videoId)
         .setUri(resolvePlaybackUri(uriString, localPath))
     .setMediaMetadata(
         MediaMetadata.Builder()
-            .setTitle(title)
-            .setArtist(artist)
+            .setTitle(shown?.title ?: title)
+            .setArtist(shown?.artist ?: artist)
             // The release this track came off, when whoever queued it knew.
             //
             // A native field rather than an extra because Media3 bundles this
@@ -732,7 +740,7 @@ fun Song.toMediaItem(): MediaItem {
             // without it. It is also what the Replay's album chart is counted
             // on: read back off the player, a track with no album here is a
             // track that cannot be filed under one.
-            .setAlbumTitle(albumName)
+            .setAlbumTitle(shown?.albumName ?: albumName)
             // Sized here rather than left as stored: this is what the lock
             // screen, the notification and Android Auto draw, all of them
             // large, and none of them go back for a better copy later.
@@ -764,7 +772,8 @@ fun Song.toMediaItem(): MediaItem {
                     artistId != null || albumId != null || setVideoId != null ||
                     isExplicit != null || isVideo || isVideoOrigin || radioName != null ||
                     sourceQuality != null || videoId.startsWith("webdav:") || videoId.startsWith("smb:") ||
-                    playbackSource != null || playbackSourceType != null || playbackSourceId != null
+                    playbackSource != null || playbackSourceType != null || playbackSourceId != null ||
+                    shown != null
                 ) {
                     setExtras(
                         bundleOf(
@@ -787,6 +796,9 @@ fun Song.toMediaItem(): MediaItem {
                             EXTRA_SOURCE_QUALITY to sourceQuality,
                             EXTRA_SOURCE_HI_RES to sourceHiRes,
                             EXTRA_MEDIA_ID to videoId,
+                            EXTRA_ORIG_TITLE to title.takeIf { shown != null },
+                            EXTRA_ORIG_ARTIST to artist.takeIf { shown != null },
+                            EXTRA_ORIG_ALBUM to albumName.takeIf { shown != null },
                         ),
                     )
                 }

@@ -1470,4 +1470,25 @@
     <string name="log_upload_token">Token (empty keeps the saved one)</string>
     <string name="log_upload_send_now">Send now</string>
     <string name="log_upload_stop">Stop sending</string>
+    <string name="edit_info">Edit details</string>
+    <string name="edit_info_many">Edit details of %1$d songs</string>
+    <string name="edit_info_help">Shown instead of the source\'s everywhere — lists, player, lock screen, speakers. The song still plays from where it did.</string>
+    <string name="edit_info_help_many">Only the fields you fill in are changed; each song keeps its own title and track number.</string>
+    <string name="edit_info_title">Title</string>
+    <string name="edit_info_artist">Artist</string>
+    <string name="edit_info_album">Album</string>
+    <string name="edit_info_album_artist">Album artist</string>
+    <string name="edit_info_year">Year</string>
+    <string name="edit_info_track">Track number</string>
+    <string name="edit_info_genre">Genre</string>
+    <string name="edit_info_into_pcloud">Also write into my pCloud files (MP3 and FLAC)</string>
+    <string name="edit_info_into_downloads">Also write into my downloads (MP3 and FLAC)</string>
+    <string name="edit_info_restore">Back to the original details</string>
+    <string name="edit_info_no_files">Saved. No pCloud file or download of these songs to write into.</string>
+    <string name="edit_info_saved_files">Saved, and written into %1$d of %2$d files</string>
+    <string name="album_change_cover">Change cover of all songs</string>
+    <string name="album_edit_info">Edit album details</string>
+    <string name="select_songs">Select songs</string>
+    <string name="selection_cover">Cover</string>
+    <string name="selection_edit">Details</string>
 </resources>

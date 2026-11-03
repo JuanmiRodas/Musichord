@@ -452,15 +452,16 @@ fun MiniPlayer(
             Column(Modifier.weight(1f)) {
                 // The badge in the artist line's colour and a long line faded
                 // out at its end, as on the glass bar's mini player.
+                val shownSong = rememberShown(song)
                 ExplicitSongTitle(
-                    song = song,
+                    song = shownSong,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                     badgeColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     fadeOverflow = true,
                 )
                 FadingLine(
-                    text = song.artist,
+                    text = shownSong.artist,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

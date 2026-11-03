@@ -3374,6 +3374,8 @@ private fun BitChordApp(
                                 },
                                 songSort = songSort,
                                 folder = folder,
+                                onPlayNextSongs = playSongsNext,
+                                onAddToQueueSongs = addSongsToQueue,
                                 contentPadding = listPadding,
                                 reorder = if (reordering != null) {
                                     { palette ->
@@ -5279,6 +5281,17 @@ private fun BitChordApp(
                         scope.launch { Downloads.deleteCollection(context, id) }
                     }
                 },
+                // BitChord Audio: the whole release at once.
+                onChangeCover = act { songs -> com.music.bitchord.ui.components.CoverPicker.open(songs) }
+                    .takeIf { target.type == BrowseType.ALBUM || target.type == BrowseType.PLAYLIST || target.type == BrowseType.OTHER },
+                onEditInfo = act { songs -> com.music.bitchord.ui.components.MetadataEditor.open(songs) }
+                    .takeIf { target.type == BrowseType.ALBUM || target.type == BrowseType.OTHER },
+                onSelectSongs = target.browseId?.takeIf { !target.fromCard }?.let { id ->
+                    {
+                        browseActions = null
+                        com.music.bitchord.ui.components.ReleaseSelection.start(id)
+                    }
+                },
             )
         }
         // In a recompose scope of its own, as the track menu's is.
@@ -5743,6 +5756,14 @@ private fun BitChordApp(
             com.music.bitchord.ui.components.LikedCleanerDialog(
                 unlike = { ids, onProgress -> viewModel.unlikeExactly(ids, onProgress) },
                 onDismiss = { com.music.bitchord.ui.components.LikedCleanerUi.close() },
+            )
+        }
+        // BitChord Audio: the details editor.
+        val editSongs by com.music.bitchord.ui.components.MetadataEditor.songs.collectAsStateWithLifecycle()
+        if (editSongs.isNotEmpty()) {
+            com.music.bitchord.ui.components.MetadataEditorDialog(
+                songs = editSongs,
+                onDismiss = { com.music.bitchord.ui.components.MetadataEditor.close() },
             )
         }
         // BitChord Audio: the cover picker, raised from the player.

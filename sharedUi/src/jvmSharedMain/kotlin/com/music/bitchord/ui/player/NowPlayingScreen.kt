@@ -1646,8 +1646,8 @@ fun NowPlayingScreen(
                 lines = lyricsTranslation.displayedLyrics,
                 playhead = lyricsPlayhead,
                 isPlaying = isPlaying,
-                title = song.title,
-                artist = song.artist,
+                title = com.music.bitchord.ui.components.rememberShown(song).title,
+                artist = com.music.bitchord.ui.components.rememberShown(song).artist,
                 artworkUrl = remoteArt ?: song.thumbnailUrl,
                 onDismiss = { oledLyrics = false },
             )
@@ -3607,8 +3607,9 @@ fun NowPlayingScreen(
                                 // ("… (Live)") dissolves into the new one instead of
                                 // snapping while the rest of the switch moves around
                                 // it.
+                                val shownSong = com.music.bitchord.ui.components.rememberShown(song)
                                 Crossfade(
-                                    targetState = song.title to song.artist,
+                                    targetState = shownSong.title to shownSong.artist,
                                     animationSpec = tween(durationMillis = 300),
                                     label = "playerCredits",
                                 ) {
@@ -3616,7 +3617,7 @@ fun NowPlayingScreen(
                                     val artistColor = LocalPlayerTint.current.copy(alpha = 0.55f)
                                     Column {
                                         MarqueeText(
-                                            text = song.title,
+                                            text = it.first,
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontSize = 20.sp,
                                             ),
@@ -3635,9 +3636,9 @@ fun NowPlayingScreen(
                                             modifier = Modifier.opensPage(song.albumId, onOpenAlbum),
                                         )
                                         ArtistCreditsMarquee(
-                                            text = song.artist,
-                                            credits = remember(song.artist, song.artists, song.artistId) {
-                                                artistCredits(song.artist, song.artists, song.artistId)
+                                            text = it.second,
+                                            credits = remember(it.second, song.artists, song.artistId) {
+                                                artistCredits(it.second, song.artists, song.artistId)
                                             },
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontWeight = FontWeight.W500,
