@@ -117,6 +117,12 @@ object LastPlayed {
         prefs.edit().clear().commit()
     }
 
+    /** BitChord Audio: one song as compact JSON (what a Cast queue entry carries). */
+    fun songToJson(song: Song): String = json.encodeToString(StoredTrack.serializer(), StoredTrack.from(song))
+
+    fun songFromJson(text: String): Song? =
+        runCatching { json.decodeFromString(StoredTrack.serializer(), text).toSong() }.getOrNull()
+
     @Serializable
     private data class StoredQueue(
         val tracks: List<StoredTrack>,

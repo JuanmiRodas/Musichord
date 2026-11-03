@@ -302,6 +302,12 @@ fun SettingsScreen(
     if (showDownloadSkips) {
         com.music.bitchord.ui.components.DownloadSkipsDialog(onDismiss = { showDownloadSkips = false })
     }
+    var showLogUpload by remember { mutableStateOf(false) }
+    if (showLogUpload) {
+        com.music.bitchord.ui.components.LogUploadDialog(onDismiss = { showLogUpload = false })
+    }
+    val logRepo by com.music.bitchord.data.LogUpload.repo.collectAsStateWithLifecycle()
+    val logStatus by com.music.bitchord.data.LogUpload.status.collectAsStateWithLifecycle()
     var showAodWidgets by remember { mutableStateOf(false) }
     if (showAodWidgets) {
         com.music.bitchord.aod.AodWidgetsDialog(onDismiss = { showAodWidgets = false })
@@ -1839,6 +1845,16 @@ fun SettingsScreen(
                     title = logsTitle,
                     subtitle = stringResource(R.string.crash_logs_subtitle, crashReports),
                     onClick = { com.music.bitchord.data.CrashLog.share(logsContext) },
+                )
+            }
+            val logUploadTitle = stringResource(R.string.log_upload_title)
+            row(logUploadTitle, "log", "registro", "github", "debug") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = logUploadTitle,
+                    subtitle = if (logRepo.isBlank()) stringResource(R.string.log_upload_off)
+                    else logRepo + (logStatus?.let { " · $it" } ?: ""),
+                    onClick = { showLogUpload = true },
                 )
             }
             val cleanerTitle = stringResource(R.string.cleaner_title)

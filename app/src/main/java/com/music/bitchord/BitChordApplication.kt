@@ -60,6 +60,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         super.onCreate()
         // BitChord Audio: the running log and crash reports, first of all.
         com.music.bitchord.data.CrashLog.init(this)
+        com.music.bitchord.data.LogUpload.init(this)
         com.music.bitchord.data.CrashLog.context = {
             val cast = com.music.bitchord.playback.cast.CastController.state.value
             listOf("Cast: $cast")

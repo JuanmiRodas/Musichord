@@ -1463,4 +1463,11 @@
     <string name="cast_recent_to">Cast to %1$s</string>
     <string name="cast_recent_stop">Back to this phone</string>
     <string name="cast_recent_not_found">%1$s isn\'t reachable right now</string>
+    <string name="log_upload_title">Send the log to GitHub</string>
+    <string name="log_upload_off">Off · the log is still saved here and in pCloud</string>
+    <string name="log_upload_help">Every two minutes the app log (and any crash report) is written to a private repository of yours, so problems can be looked at without sending files. Use a fine-grained token with access to that one repository only, permission Contents: read and write.</string>
+    <string name="log_upload_repo">Repository (owner/name)</string>
+    <string name="log_upload_token">Token (empty keeps the saved one)</string>
+    <string name="log_upload_send_now">Send now</string>
+    <string name="log_upload_stop">Stop sending</string>
 </resources>

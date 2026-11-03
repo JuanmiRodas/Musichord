@@ -76,9 +76,18 @@ object CrashLog {
         scope.launch {
             runCatching { readExitReasons(context) }
             launch {
-                // Once the settings (and pCloud) are in.
+                // Once the settings (and pCloud) are in; then this run's log
+                // every five minutes when it has grown.
                 delay(60_000)
                 runCatching { upload() }
+                var sent = -1L
+                while (true) {
+                    if (TrackLog.written != sent) {
+                        sent = TrackLog.written
+                        runCatching { uploadSession() }
+                    }
+                    delay(300_000)
+                }
             }
             var seen = -1L
             while (true) {
@@ -159,6 +168,12 @@ object CrashLog {
         else -> "reason-$r"
     }
 
+    /** BitChord Audio: this run's log, with the phone and app header. */
+    fun sessionText(): String = header() + TrackLog.recent()
+
+    /** The crash and exit reports on the phone, newest first. */
+    fun reportFileList(): List<File> = reportFiles()
+
     private fun reportFiles(): List<File> =
         dir?.listFiles { f -> f.name.startsWith("crash-") || f.name.startsWith("exit-") }
             ?.sortedByDescending { it.lastModified() }.orEmpty()
@@ -185,6 +200,21 @@ object CrashLog {
             val ok = f.inputStream().use { WebDavClient.putFile(remote + f.name, it, f.length(), "text/plain", u, p, overwrite = true) }.isSuccess
             if (ok) prefs.edit().putBoolean("up:" + f.name, true).apply()
         }
+    }
+
+    private val sessionName = "session-${SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.ROOT).format(Date())}.log"
+
+    /** This run's log to pCloud (`.bitchord-audio/logs/`), the same file updated. */
+    private suspend fun uploadSession() {
+        val base = AppSettings.webdavUrl.value
+        if (!WebDavConfig.isConfigured(base)) return
+        val remote = WebDavConfig.normalizeUrl(base).trimEnd('/') + "/.bitchord-audio/logs/"
+        val u = AppSettings.webdavUsername.value
+        val p = AppSettings.webdavPassword.value
+        WebDavClient.ensureCollection(WebDavConfig.normalizeUrl(base).trimEnd('/') + "/.bitchord-audio/", u, p)
+        WebDavClient.ensureCollection(remote, u, p)
+        val bytes = sessionText().toByteArray()
+        WebDavClient.putFile(remote + sessionName, bytes.inputStream(), bytes.size.toLong(), "text/plain", u, p, overwrite = true)
     }
 
     /** Shares the reports and the logs (this run's and the last). */

@@ -21,6 +21,7 @@ import com.google.android.gms.common.api.Result
 import com.google.android.gms.common.images.WebImage
 import com.music.bitchord.R
 import com.music.bitchord.playback.toMediaItem
+import com.music.bitchord.playback.toSong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -252,6 +253,50 @@ class CastPlayback(
         }
         sink?.onRemoteRouteChanged()
         sink?.onRemotePlaybackChanged()
+        startHeartbeat()
+    }
+
+    private var heartbeat: Job? = null
+
+    /**
+     * BitChord Audio: every 20 seconds while casting, the speaker is asked
+     * where it is and the phone made to agree — the speaker is the truth for
+     * what plays and where; the phone for what comes next. Covers whatever a
+     * missed update left out of step (the phone asleep, the Wi-Fi dozing, the
+     * app reopened): the phone follows the speaker's track, and the speaker's
+     * queue ahead is topped up.
+     */
+    private fun startHeartbeat() {
+        heartbeat?.cancel()
+        heartbeat = scope.launch {
+            while (active) {
+                delay(HEARTBEAT_MS)
+                val remote = client ?: break
+                runCatching { remote.requestStatus() }
+                delay(1_500)
+                if (!active || loading || pendingAdopt != null) continue
+                if (SystemClock.elapsedRealtime() - lastLocalMoveAt < 8_000) continue
+                val status = remote.mediaStatus ?: continue
+                val player = localPlayer() ?: continue
+                val onSpeaker = receiverMediaId(status) ?: continue
+                if (status.playerState == MediaStatus.PLAYER_STATE_IDLE) continue
+                if (!sameTrack(onSpeaker, player.currentMediaItem?.mediaId)) {
+                    Log.d(TAG, "cast: phone was out of step with the speaker; following it")
+                    val index = indexOfMediaId(player, onSpeaker)
+                    if (index != null) {
+                        lastLocalMoveAt = SystemClock.elapsedRealtime()
+                        player.seekTo(index, remote.approximateStreamPosition.coerceAtLeast(0L))
+                    } else {
+                        lastLocalMoveAt = SystemClock.elapsedRealtime()
+                        if (adoptReceiverQueue(player, remote, onSpeaker)) {
+                            player.currentMediaItem?.mediaId?.takeIf { it != onSpeaker }?.let { alias = onSpeaker to it }
+                        }
+                    }
+                }
+                lastItemId = status.currentItemId
+                scheduleReconcile()
+            }
+        }
     }
 
     private class PendingAdopt(val wasPlaying: Boolean, val position: Long, val rejoined: Boolean)
@@ -351,7 +396,9 @@ class CastPlayback(
         }
         // Not in the phone's queue at all: put in where the phone is, so the
         // rest of the queue (the playlist it came from) is kept around it.
-        val item = com.music.bitchord.data.model.Song(
+        val carried = info.customData?.optString(KEY_SONG)?.ifEmpty { null }
+            ?.let(com.music.bitchord.playback.LastPlayed::songFromJson)
+        val item = carried?.toMediaItem() ?: com.music.bitchord.data.model.Song(
             videoId = onReceiver,
             title = title,
             artist = artist,
@@ -360,7 +407,19 @@ class CastPlayback(
             durationText = info.streamDuration.takeIf { it > 0 }?.let { ms -> "%d:%02d".format(ms / 60_000, ms / 1000 % 60) },
         ).toMediaItem()
         if (player.mediaItemCount == 0) {
-            player.setMediaItems(listOf(item), 0, position)
+            // Nothing here at all (another phone, a fresh start): the
+            // speaker's whole queue, as it carries it.
+            val all = status.queueItems.mapNotNull { q ->
+                val m = q.media ?: return@mapNotNull null
+                m.customData?.optString(KEY_SONG)?.ifEmpty { null }
+                    ?.let(com.music.bitchord.playback.LastPlayed::songFromJson)?.toMediaItem()
+            }
+            val at = all.indexOfFirst { it.mediaId == onReceiver }
+            if (at >= 0) {
+                player.setMediaItems(all, at, position)
+            } else {
+                player.setMediaItems(listOf(item), 0, position)
+            }
             player.playWhenReady = false
             player.prepare()
         } else {
@@ -422,6 +481,8 @@ class CastPlayback(
         pendingAdopt = null
         refreshAhead = false
         alias = null
+        heartbeat?.cancel()
+        heartbeat = null
     }
 
     /**
@@ -741,40 +802,45 @@ class CastPlayback(
         }
         if (kept == remoteAhead.size && kept == wanted.size) return
 
-        // BitChord Audio: the slow part (finding each stream) first, then the
-        // edit, and only if nothing moved meanwhile. Resolving can take
-        // seconds; a skip, the speaker moving on, or a new load in that time
-        // made the edit land on a queue it was not planned for — the track
-        // just loaded queued again after itself (a song played twice), or the
-        // one skipped put back after the new one (a skip that came back).
-        val toInsert = mutableListOf<MediaQueueItem>()
-        for (next in wanted.drop(kept)) {
-            val queueItem = buildQueueItem(next, autoplay = true) ?: break
-            toInsert += queueItem
-        }
+        // BitChord Audio: one track at a time — its stream found (the slow
+        // part), then put on the speaker only if nothing moved meanwhile.
+        // Resolving can take seconds; a skip, the speaker moving on, or a new
+        // load in that time made an edit land on a queue it was not planned
+        // for — the track just loaded queued again after itself (a song played
+        // twice), or the one skipped put back after the new one. One at a time
+        // also means the next track is on the speaker as soon as it can be,
+        // not after all the others.
         fun stale(): Boolean =
             !active || loading || generation != loadGeneration ||
                 remote.mediaStatus?.currentItemId != startItemId ||
                 localPlayer()?.currentMediaItem?.mediaId != phoneId
-        if (stale()) {
+        fun replan() {
             Log.d(TAG, "cast: queue changed while finding the next streams; planning again")
             if (refreshing) refreshAhead = true
             reconcileAgain = true
-            return
         }
-        // Read again: what is queued now, not what was when this started.
-        val nowQueue = remote.mediaStatus?.queueItems.orEmpty()
-        val nowHere = nowQueue.indexOfFirst { it.itemId == startItemId }
-        if (nowHere < 0) { reconcileAgain = true; return }
-        val nowAhead = nowQueue.drop(nowHere + 1)
-        val drop = nowAhead.drop(kept)
+        // What doesn't match goes first (quick), then the missing ones.
+        val drop = remoteAhead.drop(kept)
         if (drop.isNotEmpty()) {
+            if (stale()) return replan()
             remote.queueRemoveItems(drop.map { it.itemId }.toIntArray(), null).awaitResult()
         }
-        if (stale()) { reconcileAgain = true; return }
-        if (toInsert.isNotEmpty()) {
-            remote.queueInsertItems(toInsert.toTypedArray(), MediaQueueItem.INVALID_ITEM_ID, null).awaitResult()
-            Log.d(TAG, "cast: queued next on the speaker: " + wanted.drop(kept).take(toInsert.size).joinToString { it.mediaMetadata.title?.toString() ?: it.mediaId })
+        val queued = mutableListOf<String>()
+        for (next in wanted.drop(kept)) {
+            val queueItem = buildQueueItem(next, autoplay = true) ?: break
+            if (stale()) return replan()
+            // The speaker's queue after its track must still be exactly what
+            // was kept plus what this run added, or the insert is misplaced.
+            val nowQueue = remote.mediaStatus?.queueItems.orEmpty()
+            val nowHere = nowQueue.indexOfFirst { it.itemId == startItemId }
+            val tail = if (nowHere < 0) null else nowQueue.drop(nowHere + 1).map { it.mediaId() }
+            val expected = wanted.take(kept).map { it.mediaId } + queued
+            if (tail == null || tail != expected) return replan()
+            remote.queueInsertItems(arrayOf(queueItem), MediaQueueItem.INVALID_ITEM_ID, null).awaitResult()
+            queued += next.mediaId
+        }
+        if (queued.isNotEmpty()) {
+            Log.d(TAG, "cast: speaker has the next ${kept + queued.size} queued (${queued.size} added)")
         }
     }
 
@@ -798,7 +864,13 @@ class CastPlayback(
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
             .setContentType(stream.mimeType)
             .setMetadata(music)
-            .setCustomData(JSONObject().put(KEY_MEDIA_ID, item.mediaId))
+            // The whole song, so a phone that has lost its queue (an update, a
+            // crash, another phone) can take the speaker's up as it is.
+            .setCustomData(
+                JSONObject()
+                    .put(KEY_MEDIA_ID, item.mediaId)
+                    .put(KEY_SONG, runCatching { com.music.bitchord.playback.LastPlayed.songToJson(item.toSong()) }.getOrNull()),
+            )
             .apply { metadata.durationMs?.takeIf { it > 0 }?.let(::setStreamDuration) }
             .build()
         return MediaQueueItem.Builder(info).setAutoplay(autoplay).build()
@@ -848,13 +920,17 @@ class CastPlayback(
     companion object {
         private const val TAG = "BitChordCast"
         private const val KEY_MEDIA_ID = "mediaId"
+        private const val KEY_SONG = "song"
 
-        /** Tracks kept queued on the receiver after the playing one. */
-        private const val AHEAD = 3
+        /** Tracks queued on the speaker after its own: it plays on through them if the phone sleeps. */
+        private const val AHEAD = 8
         private const val RECONCILE_DELAY_MS = 300L
 
         /** A skip waits this long for the next one before its track is fetched. */
         private const val SKIP_SETTLE_MS = 450L
+
+        /** How often the phone checks it agrees with the speaker. */
+        private const val HEARTBEAT_MS = 20_000L
 
         /** How long a resumed session waits for the speaker to say what it plays. */
         private const val ADOPT_WAIT_MS = 6_000L
