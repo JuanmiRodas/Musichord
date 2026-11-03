@@ -120,3 +120,8 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - onLocalTransition load waits SKIP_SETTLE_MS (450 ms) so rapid skips fetch only the final track.
 - IDLE FINISHED < 5 s into a > 30 s track → stream broke: retried once via the phone proxy (CastRouting.proxyOnly) instead of moving on.
 - Log: per-track stream resolve time (direct / served by the phone), speaker load time, every speaker move.
+
+## Logs to GitHub + cast hardening (v1.9.88)
+- LogUpload: Settings → "Send the log to GitHub" (repo owner/name + fine-grained token, Contents RW, that repo only). Every 2 min when new: logs/<maker-model>/<day>/<start time>.log (same file updated); crash/exit reports once to logs/<device>/reports/. CrashLog also uploads the session log to pCloud .bitchord-audio/logs/ every 5 min.
+- Cast: AHEAD 8, inserted one at a time with staleness + exact-tail checks; customData carries the whole song (LastPlayed.songToJson) so an empty/new phone takes up the speaker's whole queue; 20 s heartbeat (requestStatus, phone follows the speaker's track, top-up reconcile).
+- Model: speaker = truth for track/position/play state; phone = truth for what comes next.
