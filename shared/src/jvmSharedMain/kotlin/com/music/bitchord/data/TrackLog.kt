@@ -152,6 +152,7 @@ object TrackLog {
             message
         }
         synchronized(lines) {
+            written++
             lines.addLast(Line(System.currentTimeMillis(), level, text, about))
             held += text.length
             while (held > MAX_HELD_CHARS && lines.isNotEmpty()) {
@@ -170,6 +171,27 @@ object TrackLog {
      * resolved by nobody and would otherwise have no start at all.
      */
     private val startedAt = ConcurrentHashMap<String, Long>()
+
+    /**
+     * BitChord Audio: every line held, oldest first, as text — for the
+     * background log and crash reports (see the app's CrashLog).
+     */
+    fun recent(): String {
+        val fmt = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.ROOT)
+        val copy = synchronized(lines) { lines.toList() }
+        return buildString {
+            for (l in copy) {
+                append(fmt.format(java.util.Date(l.at))).append(' ').append(l.level).append(' ')
+                l.track?.let { append('[').append(it).append("] ") }
+                append(l.text).append('\n')
+            }
+        }
+    }
+
+    /** BitChord Audio: how many lines have been logged — to tell whether the log changed. */
+    @Volatile
+    var written: Long = 0L
+        private set
 
     fun onTrackStarted(videoId: String) {
         if (startedAt.size >= MAX_REMEMBERED) startedAt.clear()

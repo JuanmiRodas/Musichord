@@ -58,6 +58,15 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
     @kotlin.OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate() {
         super.onCreate()
+        // BitChord Audio: the running log and crash reports, first of all.
+        com.music.bitchord.data.CrashLog.init(this)
+        com.music.bitchord.data.CrashLog.context = {
+            val cast = com.music.bitchord.playback.cast.CastController.state.value
+            listOf("Cast: $cast")
+        }
+        // BitChord Audio: the Cast framework up at start, so a session the app
+        // lost (a crash mid-cast) is found and taken up again straight away.
+        com.music.bitchord.playback.cast.CastController.ensureStarted(this)
         // BitChord Audio: settings synced from pCloud last session go in
         // before anything reads them.
         com.music.bitchord.data.sync.SettingsSync.applyPending(this)
@@ -78,6 +87,16 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
                 }
             }
         } else {
+            // BitChord Audio: the shared layer's lines go to the running log
+            // (CrashLog), so a crash report says what led up to it.
+            DebugLog.sink = DebugLog.Sink { level, tag, message, error ->
+                when (level) {
+                    'D' -> com.music.bitchord.data.TrackLog.d(tag, message)
+                    'I' -> com.music.bitchord.data.TrackLog.i(tag, message)
+                    'W' -> if (error != null) com.music.bitchord.data.TrackLog.w(tag, message, error) else com.music.bitchord.data.TrackLog.w(tag, message)
+                    else -> if (error != null) com.music.bitchord.data.TrackLog.e(tag, message, error) else com.music.bitchord.data.TrackLog.e(tag, message)
+                }
+            }
             // R8 strips android.util.Log from a release build (proguard-rules.pro);
             // this stops Media3 composing the lines it would have handed it.
             androidx.media3.common.util.Log.setLogLevel(androidx.media3.common.util.Log.LOG_LEVEL_OFF)

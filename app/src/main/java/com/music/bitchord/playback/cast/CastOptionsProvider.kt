@@ -32,6 +32,11 @@ class CastOptionsProvider : OptionsProvider {
             // Leaving the receiver running after the phone has let go of it
             // keeps a TV on a "casting" screen with nothing driving it.
             .setStopReceiverApplicationWhenEndingSession(true)
+            // BitChord Audio: a session the app lost (it crashed, or the Wi-Fi
+            // dropped) is taken up again — at the next start, and in the
+            // background after a dropped connection.
+            .setResumeSavedSession(true)
+            .setEnableReconnectionService(true)
             .build()
     }
 

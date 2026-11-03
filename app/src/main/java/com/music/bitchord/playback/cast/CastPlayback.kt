@@ -2,7 +2,7 @@ package com.music.bitchord.playback.cast
 
 import android.net.Uri
 import android.os.SystemClock
-import android.util.Log
+import com.music.bitchord.data.DebugLog as Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -20,6 +20,7 @@ import com.google.android.gms.common.api.PendingResult
 import com.google.android.gms.common.api.Result
 import com.google.android.gms.common.images.WebImage
 import com.music.bitchord.R
+import com.music.bitchord.playback.toMediaItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -233,9 +234,13 @@ class CastPlayback(
             val onReceiver = remote.mediaStatus?.queueItems
                 ?.firstOrNull { it.itemId == remote.mediaStatus?.currentItemId }
                 ?.mediaId()
-            if (resumed && currentId != null && currentId == onReceiver) {
+            if (resumed && onReceiver != null && (currentId == onReceiver || adoptReceiverQueue(player, remote, onReceiver))) {
                 // A session that survived the app: the receiver is already on
                 // this track, so it keeps going instead of being restarted.
+                // BitChord Audio: after a crash the phone's queue may not have
+                // it (or be empty): the phone takes up the receiver's queue,
+                // so the controls work again.
+                lastLocalMoveAt = SystemClock.elapsedRealtime()
                 lastItemId = remote.mediaStatus?.currentItemId ?: MediaQueueItem.INVALID_ITEM_ID
                 wantsPlay = remote.mediaStatus?.playerState == MediaStatus.PLAYER_STATE_PLAYING
                 scheduleReconcile()
@@ -245,6 +250,41 @@ class CastPlayback(
         }
         sink?.onRemoteRouteChanged()
         sink?.onRemotePlaybackChanged()
+    }
+
+    /**
+     * BitChord Audio: puts the phone's player on the receiver's track — found
+     * in the phone's queue, or the phone's queue replaced by the receiver's —
+     * held paused, as the speaker plays. True when the phone now matches.
+     */
+    private fun adoptReceiverQueue(player: ExoPlayer, remote: RemoteMediaClient, onReceiver: String): Boolean {
+        val status = remote.mediaStatus ?: return false
+        val position = remote.approximateStreamPosition.coerceAtLeast(0L)
+        indexOfMediaId(player, onReceiver)?.let { index ->
+            player.seekTo(index, position)
+            Log.i(TAG, "rejoined: phone moved to the receiver's track")
+            return true
+        }
+        val items = status.queueItems.mapNotNull { q ->
+            val info = q.media ?: return@mapNotNull null
+            val id = q.mediaId() ?: return@mapNotNull null
+            val meta = info.metadata
+            com.music.bitchord.data.model.Song(
+                videoId = id,
+                title = meta?.getString(MediaMetadata.KEY_TITLE) ?: return@mapNotNull null,
+                artist = meta.getString(MediaMetadata.KEY_ARTIST).orEmpty(),
+                thumbnailUrl = meta.images.firstOrNull()?.url?.toString(),
+                albumName = meta.getString(MediaMetadata.KEY_ALBUM_TITLE),
+                durationText = info.streamDuration.takeIf { it > 0 }?.let { ms -> "%d:%02d".format(ms / 60_000, ms / 1000 % 60) },
+            ).toMediaItem()
+        }
+        val current = items.indexOfFirst { it.mediaId == onReceiver }
+        if (current < 0) return false
+        player.setMediaItems(items, current, position)
+        player.playWhenReady = false
+        player.prepare()
+        Log.i(TAG, "rejoined: phone took up the receiver's queue (${items.size} tracks)")
+        return true
     }
 
     fun onSessionEnding(ending: CastSession) {

@@ -605,6 +605,8 @@
     <string name="source_search_also">También buscado como: %1$s</string>
     <string name="source_artist_too">También las otras %1$d canciones de %2$s (donde esa fuente las tenga)</string>
     <string name="source_artist_done">Artista: %1$d de %2$d canciones con la misma fuente</string>
+    <string name="crash_logs_title">Registro de errores</string>
+    <string name="crash_logs_subtitle">%1$d informes de cierres · compártelos con el registro (también se guardan en pCloud)</string>
     <string name="cleaner_title">Limpiar Me gusta</string>
     <string name="cleaner_subtitle">Duplicados, canciones parecidas y quitar Me gusta en bloque</string>
     <string name="cleaner_close">Cerrar</string>

@@ -822,6 +822,8 @@
     <string name="source_search_also">Also searched as: %1$s</string>
     <string name="source_artist_too">Also the other %1$d songs by %2$s (where that source has them)</string>
     <string name="source_artist_done">Artist: %1$d of %2$d songs set to the same source</string>
+    <string name="crash_logs_title">Error log</string>
+    <string name="crash_logs_subtitle">%1$d crash reports · share them with the running log (also saved to pCloud)</string>
     <string name="cleaner_title">Clean up Liked Music</string>
     <string name="cleaner_subtitle">Duplicates, look-alikes, and un-liking songs in bulk</string>
     <string name="cleaner_close">Close</string>

@@ -1778,6 +1778,17 @@ fun SettingsScreen(
                     onClick = { showDownloadSources = true },
                 )
             }
+            val logsTitle = stringResource(R.string.crash_logs_title)
+            val crashReports by com.music.bitchord.data.CrashLog.reports.collectAsStateWithLifecycle()
+            val logsContext = androidx.compose.ui.platform.LocalContext.current
+            row(logsTitle, "log", "registro", "crash", "error", "fallo", "debug") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = logsTitle,
+                    subtitle = stringResource(R.string.crash_logs_subtitle, crashReports),
+                    onClick = { com.music.bitchord.data.CrashLog.share(logsContext) },
+                )
+            }
             val cleanerTitle = stringResource(R.string.cleaner_title)
             row(cleanerTitle, "liked", "me gusta", "duplicates", "duplicados", "clean", "limpiar") {
                 SettingsRow(
