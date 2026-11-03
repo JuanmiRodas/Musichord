@@ -1778,6 +1778,15 @@ fun SettingsScreen(
                     onClick = { showDownloadSources = true },
                 )
             }
+            val cleanerTitle = stringResource(R.string.cleaner_title)
+            row(cleanerTitle, "liked", "me gusta", "duplicates", "duplicados", "clean", "limpiar") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = cleanerTitle,
+                    subtitle = stringResource(R.string.cleaner_subtitle),
+                    onClick = { com.music.bitchord.ui.components.LikedCleanerUi.show() },
+                )
+            }
             val skipsTitle = stringResource(R.string.download_skips_title)
             row(skipsTitle, "download", "descargas", "skipped", "omitidas", "report", "informe") {
                 SettingsRow(

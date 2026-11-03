@@ -91,7 +91,20 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
         val url = picked ?: return
         val targets = listOf(song) + albumSongs.filter { it.videoId in chosen }
         CoverOverrides.set(targets, url)
-        if (saveToFiles) {
+        if (saveToFiles && com.music.bitchord.data.settings.AppSettings.meteredConnection.value != false) {
+            // On mobile data (or offline): written into the files later, on Wi-Fi.
+            CoroutineScope(Dispatchers.IO).launch {
+                val files = targets.flatMap { CoverSources.filesOf(it).take(1) }.distinctBy { it.videoId }
+                com.music.bitchord.data.covers.PendingCoverWrites.add(files.map { it.videoId }, url)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        app,
+                        if (files.isEmpty()) app.getString(R.string.cover_no_files) else app.getString(R.string.cover_saved_later, files.size),
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        } else if (saveToFiles) {
             CoroutineScope(Dispatchers.IO).launch {
                 val image = CoverWriter.fetch(url)
                 val files = targets.flatMap { CoverSources.filesOf(it).take(1) }.distinctBy { it.videoId }

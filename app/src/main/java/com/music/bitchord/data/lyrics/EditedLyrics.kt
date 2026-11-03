@@ -89,15 +89,22 @@ object EditedLyrics {
     /** Lyrics picked from the search: kept for the song, the .lrc beside your file left alone. */
     fun choose(song: Song, lines: List<LyricLine>) = save(song, lines, besideFile = false)
 
-    fun save(song: Song, lines: List<LyricLine>, besideFile: Boolean = true) {
+    /**
+     * [quiet]: kept without disturbing anything — the song's lyric shift is
+     * left as it is and the player isn't asked to read them again (lyrics
+     * fetched once and kept, see [LyricsKeeper]).
+     */
+    fun save(song: Song, lines: List<LyricLine>, besideFile: Boolean = true, quiet: Boolean = false) {
         // Word timings kept (enhanced LRC) in the app's copy; the .lrc beside
         // your file stays plain LRC, which every player reads.
         val plain = SidecarLyrics.toLrc(lines, song.title, song.artist, 0)
         val text = if (lines.any { it.words.isNotEmpty() }) lines.toEnhancedLrc() else plain
         runCatching { dir?.let { File(it, name(song.videoId)).writeText(text) } }
         misses -= song.videoId
-        LyricOffsets.reset(song.videoId)
-        _version.value += 1
+        if (!quiet) {
+            LyricOffsets.reset(song.videoId)
+            _version.value += 1
+        }
         scope.launch {
             val u = AppSettings.webdavUsername.value
             val p = AppSettings.webdavPassword.value

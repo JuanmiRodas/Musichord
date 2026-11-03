@@ -554,6 +554,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _lyrics.value = selected?.lines
             _lyricsSource.value = selected?.source
             _lyricsChecked.value = true
+            // BitChord Audio: found once, kept — not looked up again.
+            selected?.let { r ->
+                com.music.bitchord.data.lyrics.LyricsKeeper.keep(
+                    Song(videoId = videoId, title = title, artist = artist, thumbnailUrl = null, albumName = album),
+                    r.lines,
+                )
+            }
         }
     }
 
@@ -566,7 +573,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         when (_lyricsProviderStates.value[source]) {
             LyricsProviderState.FOUND -> {
                 selectedLyricsSource = source
-                lyricsProviderResults[source]?.let(::showLyricsResult)
+                lyricsProviderResults[source]?.let { r ->
+                    showLyricsResult(r)
+                    // BitChord Audio: your pick is the one kept for the song.
+                    com.music.bitchord.data.lyrics.LyricsKeeper.keep(
+                        Song(videoId = request.videoId, title = request.title, artist = request.artist, thumbnailUrl = null, albumName = request.album),
+                        r.lines,
+                        picked = true,
+                    )
+                }
             }
             LyricsProviderState.FETCHING -> {
                 // Apply it as soon as the already-running automatic attempt completes.
@@ -926,6 +941,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 libraryStale = true
             }
         }
+    }
+
+    /**
+     * BitChord Audio: un-likes exactly these songs (the Liked Music cleaner) —
+     * each one itself, not the liked song it may stand in for, so a duplicate
+     * goes and the copy you keep stays. One every half second; [onProgress]
+     * says how many are done. Returns how many YouTube accepted.
+     */
+    suspend fun unlikeExactly(ids: List<String>, onProgress: (Int) -> Unit = {}): Int {
+        var done = 0
+        var ok = 0
+        for (id in ids) {
+            if (com.music.bitchord.data.LocalLikes.isYouTubeId(id)) {
+                LikeState.set(id, LikeStatus.INDIFFERENT)
+                if (YtMusicRepository.rate(id, LikeStatus.INDIFFERENT).isSuccess) {
+                    ok++
+                    dropFromLikedLists(id)
+                    runCatching { forgetFromLibrary(id) }
+                } else {
+                    LikeState.set(id, LikeStatus.LIKE)
+                }
+            } else {
+                com.music.bitchord.data.LocalLikes.liked.value[id]?.let { com.music.bitchord.data.LocalLikes.setLocal(it, false) }
+                LikeState.set(id, LikeStatus.INDIFFERENT)
+                dropFromLikedLists(id)
+                ok++
+            }
+            done++
+            onProgress(done)
+            kotlinx.coroutines.delay(500)
+        }
+        libraryStale = true
+        return ok
     }
 
     /** The heart: liked becomes neutral, anything else becomes liked. */

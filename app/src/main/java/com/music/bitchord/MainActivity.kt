@@ -5706,6 +5706,14 @@ private fun BitChordApp(
                 onDismiss = { com.music.bitchord.ui.components.NowPlayingSource.close() },
             )
         }
+        // BitChord Audio: the Liked Music cleaner, from Settings.
+        val cleanerOpen by com.music.bitchord.ui.components.LikedCleanerUi.open.collectAsStateWithLifecycle()
+        if (cleanerOpen) {
+            com.music.bitchord.ui.components.LikedCleanerDialog(
+                unlike = { ids, onProgress -> viewModel.unlikeExactly(ids, onProgress) },
+                onDismiss = { com.music.bitchord.ui.components.LikedCleanerUi.close() },
+            )
+        }
         // BitChord Audio: the cover picker, raised from the player.
         val coverSong by com.music.bitchord.ui.components.CoverPicker.song.collectAsStateWithLifecycle()
         coverSong?.let { song ->

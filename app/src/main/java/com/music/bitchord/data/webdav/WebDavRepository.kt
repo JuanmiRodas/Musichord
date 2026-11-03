@@ -111,6 +111,7 @@ object WebDavRepository {
         com.music.bitchord.data.sources.SourceMap.init(context)
         com.music.bitchord.data.sources.JapaneseNames.init(context)
         com.music.bitchord.data.covers.CoverOverrides.init(context)
+        com.music.bitchord.data.BackgroundWork.init(context)
         com.music.bitchord.data.lyrics.LyricOffsets.init(context)
         com.music.bitchord.data.lyrics.EditedLyrics.init(context)
         com.music.bitchord.data.lyrics.BadLyrics.init(context)

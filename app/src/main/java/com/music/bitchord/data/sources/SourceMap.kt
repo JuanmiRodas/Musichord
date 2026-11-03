@@ -196,7 +196,12 @@ object SourceMap {
         if (job?.isActive == true) return
         job = scope.launch {
             val songs = LikedMusicCache.load(LikedMusicCache.lastProfile)?.songs.orEmpty()
-            if (songs.isEmpty() || WebDavRepository.library().isEmpty()) return@launch
+            if (songs.isEmpty()) return@launch
+            // No pCloud library (yet): JioSaavn's copies are still worth knowing.
+            if (WebDavRepository.library().isEmpty()) {
+                fillSaavn(songs)
+                return@launch
+            }
             val todo = songs.filter { lookup(it.videoId) == null }
             if (todo.isEmpty()) {
                 fillSaavn(songs)

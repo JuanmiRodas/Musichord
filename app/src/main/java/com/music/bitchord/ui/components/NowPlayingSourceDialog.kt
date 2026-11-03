@@ -80,8 +80,28 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
             runCatching { com.music.bitchord.data.sources.AlbumSources.albumMates(song) }.getOrDefault(emptyList())
         }
     }
+    // BitChord Audio: and the artist's other songs, when ticked.
+    var wholeArtist by remember(song.videoId) { mutableStateOf(true) }
+    var artistMates by remember(song.videoId) { mutableStateOf<List<Song>>(emptyList()) }
+    LaunchedEffect(song.videoId, albumMates) {
+        artistMates = withContext(Dispatchers.Default) {
+            runCatching { com.music.bitchord.data.sources.AlbumSources.artistMates(song, albumMates) }.getOrDefault(emptyList())
+        }
+    }
     val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     fun alsoAlbum(picked: Song) {
+        val artistToo = wholeArtist && artistMates.isNotEmpty()
+        val mates = artistMates
+        if (artistToo) kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            val n = runCatching { com.music.bitchord.data.sources.AlbumSources.applyToArtist(song, picked, mates) }.getOrDefault(0)
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    appContext,
+                    appContext.getString(R.string.source_artist_done, n, mates.size),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
         if (!wholeAlbum) return
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             val mates = com.music.bitchord.data.sources.AlbumSources.albumMates(song, picked)
@@ -209,6 +229,19 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                         androidx.compose.material3.Checkbox(checked = wholeAlbum, onCheckedChange = null)
                         Text(
                             stringResource(R.string.source_album_too, albumMates.size),
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
+                }
+                if (artistMates.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { wholeArtist = !wholeArtist }.padding(vertical = 2.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.Checkbox(checked = wholeArtist, onCheckedChange = null)
+                        Text(
+                            stringResource(R.string.source_artist_too, artistMates.size, song.artist.substringBefore(',')),
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier.padding(start = 6.dp),
                         )

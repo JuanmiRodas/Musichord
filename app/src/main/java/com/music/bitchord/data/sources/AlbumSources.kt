@@ -38,6 +38,61 @@ object AlbumSources {
         }.distinctBy { PreferredSource.keyOf(it.title, it.artist) ?: it.videoId }
     }
 
+    /**
+     * BitChord Audio: the artist's other songs (Liked Music and the library),
+     * outside [exclude] (the album, already handled) and without a choice of
+     * their own yet.
+     */
+    fun artistMates(song: Song, exclude: List<Song> = emptyList()): List<Song> {
+        val all = LikedMusicCache.load(LikedMusicCache.lastProfile)?.songs.orEmpty() +
+            LocalLikes.liked.value.values + librarySongs
+        val skip = (exclude + song).mapNotNull { PreferredSource.keyOf(it.title, it.artist) }.toSet()
+        return all.asSequence()
+            .filter { !it.isVideo && (OwnFileMatcher.sameArtist(song.artist, it.artist) || ArtistLinks.linked(it.artist, song.artist)) }
+            .filter { s -> PreferredSource.keyOf(s.title, s.artist).let { it != null && it !in skip } }
+            .filter { PreferredSource.get(it) == null }
+            .distinctBy { PreferredSource.keyOf(it.title, it.artist) }
+            .toList()
+    }
+
+    /**
+     * BitChord Audio: [picked]'s kind of source for the artist's other songs —
+     * each matched strictly (name in any spelling, artist, length) and
+     * remembered as that song's choice: your file, JioSaavn's copy, or YouTube.
+     * Songs with no copy there are left on automatic. Returns how many matched.
+     */
+    suspend fun applyToArtist(song: Song, picked: Song, mates: List<Song>): Int {
+        var matched = 0
+        for (mate in mates) {
+            val sec = seconds(mate.durationText)
+            when {
+                WebDavConfig.isWebDavId(picked.videoId) -> {
+                    val file = runCatching { OwnFileMatcher.matches(mate.title, mate.artist, sec, mate.albumName).firstOrNull() }.getOrNull()
+                    if (file != null) { PreferredSource.chooseFile(mate, file); matched++ }
+                }
+                LocalLikes.isYouTubeId(picked.videoId) -> {
+                    if (LocalLikes.isYouTubeId(mate.videoId)) { PreferredSource.chooseYouTube(mate, mate.videoId); matched++ }
+                }
+                else -> {
+                    val (configId, _) = SourceRegistry.parseTrackKey(picked.videoId) ?: return matched
+                    val copy = if (SourceRegistry.config(configId)?.kind == SourceKind.JIOSAAVN && LocalLikes.isYouTubeId(mate.videoId)) {
+                        runCatching { SourceMap.saavnSongFor(mate) }.getOrNull()
+                    } else {
+                        searchSource(picked, mate.copy(albumName = null))?.let { best(mate, it) }
+                    }
+                    if (copy != null) {
+                        PreferredSource.chooseSong(mate, copy)
+                        LocalLikes.link(copy, mate)
+                        matched++
+                    }
+                    kotlinx.coroutines.delay(400)
+                }
+            }
+        }
+        TrackLog.d(TAG, "artist sources: ${song.artist}: $matched of ${mates.size} songs matched in the same source")
+        return matched
+    }
+
     /** Matches [mates] in [picked]'s source and remembers each match. Returns how many were matched. */
     suspend fun apply(song: Song, picked: Song, mates: List<Song> = albumMates(song, picked)): Int {
         if (mates.isEmpty()) return 0
@@ -119,7 +174,7 @@ object AlbumSources {
         val (configId, _) = SourceRegistry.parseTrackKey(picked.videoId) ?: return null
         val source = SourceRegistry.instance(configId) ?: return null
         return runCatching { source.search("${mate.title} ${mate.artist}", 10, false, null) }.getOrNull()
-            ?.filter { OwnFileMatcher.sameAlbum(picked.albumName, it.albumName) || it.albumName.isNullOrBlank() }
+            ?.filter { mate.albumName == null || OwnFileMatcher.sameAlbum(picked.albumName, it.albumName) || it.albumName.isNullOrBlank() }
     }
 
     /**
