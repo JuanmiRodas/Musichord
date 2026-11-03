@@ -102,6 +102,7 @@ object CastController {
 
         override fun onSessionResumeFailed(session: CastSession, error: Int) {
             Log.w(TAG, "session resume failed: $error; looking for the speaker to join it again")
+            com.music.bitchord.data.TrackLog.d(TAG, "cast: saved session could not be resumed ($error)")
             update { it.copy(connecting = false) }
             rejoinLostSession()
         }
@@ -153,9 +154,7 @@ object CastController {
         // framework hasn't brought the session back by itself: the speaker it
         // was casting to is looked for and joined, taking up what it plays.
         if (prefs?.getString(KEY_DEVICE, null) != null) {
-            Handler(Looper.getMainLooper()).postDelayed({
-                if (castContext?.sessionManager?.currentCastSession?.isConnected != true) rejoinLostSession()
-            }, 8_000)
+            Handler(Looper.getMainLooper()).postDelayed({ rejoinIfLost() }, 5_000)
         }
     }
 
@@ -167,31 +166,69 @@ object CastController {
     private var rejoining = false
 
     private const val KEY_DEVICE = "lastDevice"
+    private const val KEY_DEVICE_NAME = "lastDeviceName"
+    private const val REJOIN_SCAN_MS = 180_000L
 
-    /** The speaker a session is on, kept until the session ends — a crash leaves it. */
+    /** The speaker a session is on, kept until the session ends — a crash or an update leaves it. */
     private fun rememberSession(session: CastSession?) {
-        val id = session?.castDevice?.deviceId
-        prefs?.edit()?.apply { if (id == null) remove(KEY_DEVICE) else putString(KEY_DEVICE, id) }?.apply()
+        val device = session?.castDevice
+        prefs?.edit()?.apply {
+            if (device == null) {
+                remove(KEY_DEVICE)
+                remove(KEY_DEVICE_NAME)
+            } else {
+                putString(KEY_DEVICE, device.deviceId)
+                putString(KEY_DEVICE_NAME, device.friendlyName)
+            }
+        }?.apply()
     }
 
     /**
-     * Scans for the speaker the app was last casting to, for a minute, and
-     * joins it when found. The stock receiver is joined as it runs (not
-     * restarted), so the music carries on and its queue is adopted.
+     * BitChord Audio: called whenever the app comes to the front — a speaker
+     * still playing what the app sent it, with no session here (the app was
+     * updated, crashed or was closed by the system), is looked for and joined.
+     */
+    fun rejoinIfLost() {
+        if (castContext?.sessionManager?.currentCastSession?.isConnected == true) return
+        if (_state.value.connecting) return
+        rejoinLostSession()
+    }
+
+    /**
+     * Scans for the speaker the app was last casting to, for three minutes,
+     * and joins it when found — by its id, or by its name (a speaker group can
+     * come back under another id). The stock receiver is joined as it runs
+     * (not restarted), so the music carries on and its queue is adopted.
      */
     fun rejoinLostSession() {
         val deviceId = prefs?.getString(KEY_DEVICE, null) ?: return
+        val deviceName = prefs?.getString(KEY_DEVICE_NAME, null)
         val router = router ?: return
         val selector = selector ?: return
         if (rejoining) return
         rejoining = true
+        com.music.bitchord.data.TrackLog.d(TAG, "cast: no session; looking for $deviceName ($deviceId) to join it again")
         val main = Handler(Looper.getMainLooper())
         main.post {
+            fun matches(r: MediaRouter.RouteInfo): Boolean {
+                if (!r.matchesSelector(selector) || r.isDefault || r.isBluetooth) return false
+                val id = runCatching { com.google.android.gms.cast.CastDevice.getFromBundle(r.extras)?.deviceId }.getOrNull()
+                if (id != null && id == deviceId) return true
+                if (r.id.contains(deviceId)) return true
+                return deviceName != null && r.name.toString() == deviceName
+            }
             fun tryJoin(): Boolean {
-                val route = router.routes.firstOrNull { r ->
-                    runCatching { com.google.android.gms.cast.CastDevice.getFromBundle(r.extras)?.deviceId }.getOrNull() == deviceId
-                } ?: return false
-                Log.i(TAG, "rejoining the cast session on ${route.name}")
+                if (castContext?.sessionManager?.currentCastSession?.isConnected == true) return true
+                val route = router.routes.firstOrNull(::matches) ?: return false
+                // Something else playing there now (another app took the
+                // speaker): left alone — joining would cut it off.
+                val status = route.description?.toString().orEmpty()
+                if (status.isNotBlank() && !status.contains("Default Media Receiver", ignoreCase = true)) {
+                    com.music.bitchord.data.TrackLog.d(TAG, "cast: ${route.name} is on \"$status\" now; not rejoining")
+                    rememberSession(null)
+                    return true
+                }
+                com.music.bitchord.data.TrackLog.d(TAG, "cast: rejoining the session on ${route.name}")
                 update { it.copy(connecting = true) }
                 router.selectRoute(route)
                 return true
@@ -205,11 +242,18 @@ object CastController {
                     if (tryJoin()) r.removeCallback(this)
                 }
             }
-            router.addCallback(selector, callback, MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN)
+            router.addCallback(selector, callback, MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN or MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY)
             main.postDelayed({
                 router.removeCallback(callback)
-                if (castContext?.sessionManager?.currentCastSession?.isConnected != true) rejoining = false
-            }, 60_000)
+                if (castContext?.sessionManager?.currentCastSession?.isConnected != true) {
+                    rejoining = false
+                    update { it.copy(connecting = false) }
+                    com.music.bitchord.data.TrackLog.d(
+                        TAG,
+                        "cast: $deviceName not found to rejoin; seen: " + router.routes.joinToString { it.name.toString() },
+                    )
+                }
+            }, REJOIN_SCAN_MS)
         }
     }
 
@@ -269,6 +313,12 @@ object CastController {
      * back to this phone, rather than the receiver having gone away — see
      * [CastPlayback.onSessionEnded].
      */
+    /** A rejoined speaker turned out to hold nothing of ours: let go of it, quietly. */
+    fun forgetAndLeave() {
+        rememberSession(null)
+        castContext?.sessionManager?.endCurrentSession(true)
+    }
+
     fun disconnect(resumeHere: Boolean) {
         playback?.resumeHereOnEnd = resumeHere
         castContext?.sessionManager?.endCurrentSession(true)
@@ -287,6 +337,7 @@ object CastController {
     private fun began(session: CastSession, asked: Boolean) {
         // A session joined after a crash takes up the speaker's queue.
         val resumed = asked || rejoining
+        val rejoined = rejoining
         rejoining = false
         rememberSession(session)
         watch(session)
@@ -299,7 +350,7 @@ object CastController {
         publishDevices()
         val target = playback
         if (target != null) {
-            target.onSessionBegan(session, resumed)
+            target.onSessionBegan(session, resumed, rejoined)
         } else {
             // The player service isn't running (the app was restarted): it is
             // started, and adopts the session as it attaches.

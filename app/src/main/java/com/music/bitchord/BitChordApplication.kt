@@ -67,6 +67,14 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         // BitChord Audio: the Cast framework up at start, so a session the app
         // lost (a crash mid-cast) is found and taken up again straight away.
         com.music.bitchord.playback.cast.CastController.ensureStarted(this)
+        // …and each time the app comes to the front without one.
+        runCatching {
+            androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+                override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+                    com.music.bitchord.playback.cast.CastController.rejoinIfLost()
+                }
+            })
+        }
         // BitChord Audio: settings synced from pCloud last session go in
         // before anything reads them.
         com.music.bitchord.data.sync.SettingsSync.applyPending(this)

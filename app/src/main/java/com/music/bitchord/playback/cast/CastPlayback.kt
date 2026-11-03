@@ -201,9 +201,9 @@ class CastPlayback(
         override fun onStatusUpdated() = onStatus()
     }
 
-    fun onSessionBegan(newSession: CastSession, resumed: Boolean) {
+    fun onSessionBegan(newSession: CastSession, resumed: Boolean, rejoined: Boolean = false) {
         try {
-            beginSession(newSession, resumed)
+            beginSession(newSession, resumed, rejoined)
         } catch (t: Throwable) {
             // This runs inside the framework's callback; an exception here ends
             // the app. A receiver that could not be set up is a failed cast.
@@ -213,7 +213,7 @@ class CastPlayback(
         }
     }
 
-    private fun beginSession(newSession: CastSession, resumed: Boolean) {
+    private fun beginSession(newSession: CastSession, resumed: Boolean, rejoined: Boolean = false) {
         val remote = newSession.remoteMediaClient ?: return
         if (active && remote === client) return
         release()
@@ -227,23 +227,25 @@ class CastPlayback(
         if (player != null) {
             val wasPlaying = player.playWhenReady && player.playbackState != Player.STATE_ENDED
             val position = player.currentPosition.coerceAtLeast(0L)
-            val currentId = player.currentMediaItem?.mediaId
             // The phone goes quiet first, whatever happens next, so the two
             // are never both audible.
             player.pause()
-            val onReceiver = remote.mediaStatus?.queueItems
-                ?.firstOrNull { it.itemId == remote.mediaStatus?.currentItemId }
-                ?.mediaId()
-            if (resumed && onReceiver != null && (currentId == onReceiver || adoptReceiverQueue(player, remote, onReceiver))) {
-                // A session that survived the app: the receiver is already on
-                // this track, so it keeps going instead of being restarted.
-                // BitChord Audio: after a crash the phone's queue may not have
-                // it (or be empty): the phone takes up the receiver's queue,
-                // so the controls work again.
-                lastLocalMoveAt = SystemClock.elapsedRealtime()
-                lastItemId = remote.mediaStatus?.currentItemId ?: MediaQueueItem.INVALID_ITEM_ID
-                wantsPlay = remote.mediaStatus?.playerState == MediaStatus.PLAYER_STATE_PLAYING
-                scheduleReconcile()
+            if (resumed) {
+                // BitChord Audio: a session that survived the app (an update,
+                // a crash): what the speaker plays is only known once its
+                // status comes in — right after a resume it often hasn't yet.
+                // Until then nothing is sent, so the music there carries on.
+                pendingAdopt = PendingAdopt(wasPlaying, position, rejoined)
+                if (remote.mediaStatus?.mediaInfo != null) {
+                    adoptOrLoad()
+                } else {
+                    remote.requestStatus()
+                    val generation = pendingAdopt
+                    scope.launch {
+                        delay(ADOPT_WAIT_MS)
+                        if (pendingAdopt === generation) adoptOrLoad()
+                    }
+                }
             } else {
                 load(player.currentMediaItem, position, play = wasPlaying)
             }
@@ -251,6 +253,68 @@ class CastPlayback(
         sink?.onRemoteRouteChanged()
         sink?.onRemotePlaybackChanged()
     }
+
+    private class PendingAdopt(val wasPlaying: Boolean, val position: Long, val rejoined: Boolean)
+
+    /** Set from a resumed session's start until the speaker has said what it plays. */
+    private var pendingAdopt: PendingAdopt? = null
+
+    /** The track the receiver is on: its queue entry, else the media it reports. */
+    private fun receiverMediaId(status: MediaStatus?): String? {
+        status ?: return null
+        return status.queueItems.firstOrNull { it.itemId == status.currentItemId }?.mediaId()
+            ?: status.mediaInfo?.customData?.optString(KEY_MEDIA_ID)?.ifEmpty { null }
+    }
+
+    /**
+     * A resumed session, its status in (or waited for long enough): the phone
+     * follows the speaker when it plays something of ours; a rejoined speaker
+     * that turned out to hold nothing is let go of; otherwise the phone's track
+     * is sent, as for a new session.
+     */
+    private fun adoptOrLoad() {
+        val pending = pendingAdopt ?: return
+        if (adoptingNow) return
+        adoptingNow = true
+        try {
+            adoptOrLoad(pending)
+        } finally {
+            adoptingNow = false
+            pendingAdopt = null
+        }
+    }
+
+    private var adoptingNow = false
+
+    private fun adoptOrLoad(pending: PendingAdopt) {
+        val remote = client ?: return
+        val player = localPlayer() ?: return
+        val status = remote.mediaStatus
+        val onReceiver = receiverMediaId(status)
+        if (onReceiver != null && (player.currentMediaItem?.mediaId == onReceiver || adoptReceiverQueue(player, remote, onReceiver))) {
+            lastLocalMoveAt = SystemClock.elapsedRealtime()
+            lastItemId = status?.currentItemId ?: MediaQueueItem.INVALID_ITEM_ID
+            wantsPlay = status?.playerState == MediaStatus.PLAYER_STATE_PLAYING
+            // What the speaker holds after this track was handed out by the
+            // app before it went away (links that may be dead now): rebuilt.
+            refreshAhead = true
+            player.currentMediaItem?.mediaId?.takeIf { it != onReceiver }?.let { alias = onReceiver to it }
+            scheduleReconcile()
+            com.music.bitchord.data.TrackLog.d(TAG, "cast: took up the speaker's track $onReceiver")
+            sink?.onRemotePlaybackChanged()
+            return
+        }
+        if (pending.rejoined) {
+            com.music.bitchord.data.TrackLog.d(TAG, "cast: the speaker holds nothing of ours; leaving it")
+            active = false
+            CastController.forgetAndLeave()
+            return
+        }
+        load(player.currentMediaItem, pending.position, play = pending.wasPlaying)
+    }
+
+    /** Set after taking up a speaker's queue: everything queued after its track is replaced once. */
+    private var refreshAhead = false
 
     /**
      * BitChord Audio: puts the phone's player on the receiver's track — found
@@ -262,28 +326,49 @@ class CastPlayback(
         val position = remote.approximateStreamPosition.coerceAtLeast(0L)
         indexOfMediaId(player, onReceiver)?.let { index ->
             player.seekTo(index, position)
-            Log.i(TAG, "rejoined: phone moved to the receiver's track")
+            com.music.bitchord.data.TrackLog.d(TAG, "cast: rejoined; phone moved to the speaker's track")
             return true
         }
-        val items = status.queueItems.mapNotNull { q ->
-            val info = q.media ?: return@mapNotNull null
-            val id = q.mediaId() ?: return@mapNotNull null
-            val meta = info.metadata
-            com.music.bitchord.data.model.Song(
-                videoId = id,
-                title = meta?.getString(MediaMetadata.KEY_TITLE) ?: return@mapNotNull null,
-                artist = meta.getString(MediaMetadata.KEY_ARTIST).orEmpty(),
-                thumbnailUrl = meta.images.firstOrNull()?.url?.toString(),
-                albumName = meta.getString(MediaMetadata.KEY_ALBUM_TITLE),
-                durationText = info.streamDuration.takeIf { it > 0 }?.let { ms -> "%d:%02d".format(ms / 60_000, ms / 1000 % 60) },
-            ).toMediaItem()
+        val info = status.queueItems.firstOrNull { it.itemId == status.currentItemId }?.media ?: status.mediaInfo ?: return false
+        val meta = info.metadata
+        val title = meta?.getString(MediaMetadata.KEY_TITLE) ?: return false
+        val artist = meta.getString(MediaMetadata.KEY_ARTIST).orEmpty()
+        // The same song under another id (another copy of it was sent):
+        // found in the phone's queue by its name, so the queue stays as it was.
+        fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+        val wantTitle = norm(title)
+        val wantArtist = norm(artist)
+        val byName = (0 until player.mediaItemCount).firstOrNull { i ->
+            val m = player.getMediaItemAt(i).mediaMetadata
+            norm(m.title?.toString().orEmpty()) == wantTitle &&
+                (wantArtist.isEmpty() || norm(m.artist?.toString().orEmpty()) == wantArtist)
         }
-        val current = items.indexOfFirst { it.mediaId == onReceiver }
-        if (current < 0) return false
-        player.setMediaItems(items, current, position)
-        player.playWhenReady = false
-        player.prepare()
-        Log.i(TAG, "rejoined: phone took up the receiver's queue (${items.size} tracks)")
+        if (byName != null) {
+            player.getMediaItemAt(byName).mediaId.takeIf { it != onReceiver }?.let { alias = onReceiver to it }
+            player.seekTo(byName, position)
+            com.music.bitchord.data.TrackLog.d(TAG, "cast: rejoined; phone moved to the speaker's track (by name)")
+            return true
+        }
+        // Not in the phone's queue at all: put in where the phone is, so the
+        // rest of the queue (the playlist it came from) is kept around it.
+        val item = com.music.bitchord.data.model.Song(
+            videoId = onReceiver,
+            title = title,
+            artist = artist,
+            thumbnailUrl = meta.images.firstOrNull()?.url?.toString(),
+            albumName = meta.getString(MediaMetadata.KEY_ALBUM_TITLE),
+            durationText = info.streamDuration.takeIf { it > 0 }?.let { ms -> "%d:%02d".format(ms / 60_000, ms / 1000 % 60) },
+        ).toMediaItem()
+        if (player.mediaItemCount == 0) {
+            player.setMediaItems(listOf(item), 0, position)
+            player.playWhenReady = false
+            player.prepare()
+        } else {
+            val at = (player.currentMediaItemIndex + 1).coerceIn(0, player.mediaItemCount)
+            player.addMediaItem(at, item)
+            player.seekTo(at, position)
+        }
+        com.music.bitchord.data.TrackLog.d(TAG, "cast: rejoined; the speaker's track put into the phone's queue")
         return true
     }
 
@@ -334,7 +419,19 @@ class CastPlayback(
         wantsPlay = false
         finished = false
         lastItemId = MediaQueueItem.INVALID_ITEM_ID
+        pendingAdopt = null
+        refreshAhead = false
+        alias = null
     }
+
+    /**
+     * BitChord Audio: after taking up a speaker that plays another copy of the
+     * phone's track (same song, other id): the speaker's id, then the phone's.
+     */
+    private var alias: Pair<String, String>? = null
+
+    private fun sameTrack(remoteId: String?, phoneId: String?): Boolean =
+        remoteId != null && phoneId != null && (remoteId == phoneId || alias == (remoteId to phoneId))
 
     // ---- the phone's player moved -------------------------------------------
 
@@ -343,7 +440,8 @@ class CastPlayback(
         if (!active || item == null) return
         lastLocalMoveAt = SystemClock.elapsedRealtime()
         val remote = client ?: return
-        if (item.mediaId == remoteMediaId()) {
+        if (pendingAdopt != null) return
+        if (sameTrack(remoteMediaId(), item.mediaId)) {
             // Already there: the receiver moved first and this is the phone
             // catching up, or a queue edit that left the playing track alone.
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) scheduleReconcile()
@@ -391,6 +489,10 @@ class CastPlayback(
     private fun onStatus() {
         val remote = client ?: return
         val status = remote.mediaStatus ?: return
+        if (pendingAdopt != null) {
+            if (status.mediaInfo != null || status.playerState == MediaStatus.PLAYER_STATE_IDLE) adoptOrLoad()
+            return
+        }
         val state = status.playerState
         // Whatever the phone last asked for has been answered by now.
         requestedAt = 0L
@@ -416,7 +518,7 @@ class CastPlayback(
                     val finishedId = status.getQueueItemById(status.currentItemId)?.mediaId()
                     val phoneId = localPlayer()?.currentMediaItem?.mediaId
                     val justMoved = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
-                    if (justMoved || (finishedId != null && phoneId != null && finishedId != phoneId)) {
+                    if (justMoved || (finishedId != null && phoneId != null && !sameTrack(finishedId, phoneId))) {
                         Log.d(TAG, "receiver finished $finishedId, phone is on $phoneId: not moving on")
                     } else {
                         onReceiverFinished()
@@ -450,7 +552,7 @@ class CastPlayback(
             // Right after the phone moved, the receiver is catching up: what it
             // reports then is the old track, not a move of its own to follow.
             val catchingUp = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
-            if (!catchingUp && mediaId != null && player != null && player.currentMediaItem?.mediaId != mediaId) {
+            if (!catchingUp && mediaId != null && player != null && !sameTrack(mediaId, player.currentMediaItem?.mediaId)) {
                 indexOfMediaId(player, mediaId)?.let { player.seekTo(it, 0L) }
             }
             scheduleReconcile()
@@ -593,6 +695,18 @@ class CastPlayback(
             .map { player.getMediaItemAt(it) }
 
         var kept = 0
+        if (refreshAhead) {
+            refreshAhead = false
+            if (remoteAhead.isNotEmpty()) {
+                remote.queueRemoveItems(remoteAhead.map { it.itemId }.toIntArray(), null).awaitResult()
+            }
+            for (next in wanted) {
+                val queueItem = buildQueueItem(next, autoplay = true) ?: break
+                if (!active) return
+                remote.queueInsertItems(arrayOf(queueItem), MediaQueueItem.INVALID_ITEM_ID, null).awaitResult()
+            }
+            return
+        }
         while (kept < remoteAhead.size && kept < wanted.size && remoteAhead[kept].mediaId() == wanted[kept].mediaId) {
             kept++
         }
@@ -682,6 +796,9 @@ class CastPlayback(
         /** Tracks kept queued on the receiver after the playing one. */
         private const val AHEAD = 3
         private const val RECONCILE_DELAY_MS = 300L
+
+        /** How long a resumed session waits for the speaker to say what it plays. */
+        private const val ADOPT_WAIT_MS = 6_000L
         private const val SEEK_GRACE_MS = 1_500L
 
         /** How long after the phone moves a "finished" from the receiver is taken as stale. */
