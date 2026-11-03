@@ -52,6 +52,15 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
   (`CoverWriter.kt`). Choice by title+artist in `CoverOverrides.kt` (`covers.json`, phone + pCloud), applied
   through `ArtworkOverrides` (shared `Song.artworkAt`) and `rememberRemoteArtworkUrl`.
 
+**Background (Wi-Fi only, `data/BackgroundWork.kt`, every 30 min while on Wi-Fi)**
+- Covers waiting for files (`PendingCoverWrites`; picked on data → deferred), `SourceMap.fill`, lyrics of every
+  liked song (`LyricsKeeper`: kept via EditedLyrics + readable `Artist - Title.lrc` in pCloud `Lyrics/`),
+  local-only likes liked on YouTube Music (`LikeLinker`).
+- Lyrics found once (auto or picked) are kept and never looked up again; "These lyrics are wrong" clears them.
+- Source picker: "also the artist's other songs" (`AlbumSources.applyToArtist`).
+- Liked Music cleaner (Settings): duplicates (length tolerance, versions toggle, keep best), similar, all
+  (by artist/album, filters), bulk un-like (`LikedCleaner.kt`, `LikedCleanerDialog.kt`, `unlikeExactly`).
+
 **Likes**
 - Liked Music saved on the phone (`LikedMusicCache.kt`); hearts use the whole saved list.
 - Copies (pCloud/JioSaavn/another YouTube upload) of a liked song show liked and un-like the original
