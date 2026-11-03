@@ -455,6 +455,7 @@ class CastPlayback(
             finished = false
             requestedPositionMs = 0L
             requestedAt = SystemClock.elapsedRealtime()
+            Log.d(TAG, "cast: phone moved to ${item.mediaMetadata.title}; speaker jumps to its queued copy")
             remote.queueJumpToItem(queued.itemId, null)
             sink?.onRemotePlaybackChanged()
         } else {
@@ -549,6 +550,7 @@ class CastPlayback(
             lastItemId = itemId
             val mediaId = status.getQueueItemById(itemId)?.mediaId()
             val player = localPlayer()
+            Log.d(TAG, "cast: speaker now on ${status.getQueueItemById(itemId)?.media?.metadata?.getString(MediaMetadata.KEY_TITLE) ?: mediaId}")
             // Right after the phone moved, the receiver is catching up: what it
             // reports then is the old track, not a move of its own to follow.
             val catchingUp = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
@@ -563,6 +565,7 @@ class CastPlayback(
     /** The receiver played its last queued track to the end. */
     private fun onReceiverFinished() {
         val player = localPlayer() ?: return
+        Log.d(TAG, "cast: speaker ran out of queued tracks; phone moves on")
         when {
             // The receiver holds only a few tracks ahead, so running out of
             // them is not the end of the phone's queue.
@@ -583,7 +586,12 @@ class CastPlayback(
     private fun load(item: MediaItem?, positionMs: Long, play: Boolean) {
         val remote = client ?: return
         loadJob?.cancel()
+        // A queue being planned for the old track would land after the new one.
+        reconcileJob?.cancel()
+        reconcileJob = null
+        reconcileAgain = false
         val generation = ++loadGeneration
+        Log.d(TAG, "cast: loading ${item?.mediaMetadata?.title ?: item?.mediaId} on the speaker (whole queue replaced)")
         wantsPlay = play
         loading = true
         finished = false
@@ -685,40 +693,63 @@ class CastPlayback(
         val player = localPlayer() ?: return
         val status = remote.mediaStatus ?: return
         val queue = status.queueItems
-        val here = queue.indexOfFirst { it.itemId == status.currentItemId }
+        val startItemId = status.currentItemId
+        val here = queue.indexOfFirst { it.itemId == startItemId }
         if (here < 0) return
         val remoteAhead = queue.drop(here + 1)
 
         val current = player.currentMediaItemIndex
         if (current == C.INDEX_UNSET) return
+        val phoneId = player.currentMediaItem?.mediaId
+        val generation = loadGeneration
         val wanted = ((current + 1)..minOf(current + AHEAD, player.mediaItemCount - 1))
             .map { player.getMediaItemAt(it) }
 
         var kept = 0
-        if (refreshAhead) {
+        val refreshing = refreshAhead
+        if (refreshing) {
             refreshAhead = false
-            if (remoteAhead.isNotEmpty()) {
-                remote.queueRemoveItems(remoteAhead.map { it.itemId }.toIntArray(), null).awaitResult()
+        } else {
+            while (kept < remoteAhead.size && kept < wanted.size && remoteAhead[kept].mediaId() == wanted[kept].mediaId) {
+                kept++
             }
-            for (next in wanted) {
-                val queueItem = buildQueueItem(next, autoplay = true) ?: break
-                if (!active) return
-                remote.queueInsertItems(arrayOf(queueItem), MediaQueueItem.INVALID_ITEM_ID, null).awaitResult()
-            }
-            return
-        }
-        while (kept < remoteAhead.size && kept < wanted.size && remoteAhead[kept].mediaId() == wanted[kept].mediaId) {
-            kept++
         }
         if (kept == remoteAhead.size && kept == wanted.size) return
 
-        if (kept < remoteAhead.size) {
-            remote.queueRemoveItems(remoteAhead.drop(kept).map { it.itemId }.toIntArray(), null).awaitResult()
-        }
+        // BitChord Audio: the slow part (finding each stream) first, then the
+        // edit, and only if nothing moved meanwhile. Resolving can take
+        // seconds; a skip, the speaker moving on, or a new load in that time
+        // made the edit land on a queue it was not planned for — the track
+        // just loaded queued again after itself (a song played twice), or the
+        // one skipped put back after the new one (a skip that came back).
+        val toInsert = mutableListOf<MediaQueueItem>()
         for (next in wanted.drop(kept)) {
             val queueItem = buildQueueItem(next, autoplay = true) ?: break
-            if (!active) return
-            remote.queueInsertItems(arrayOf(queueItem), MediaQueueItem.INVALID_ITEM_ID, null).awaitResult()
+            toInsert += queueItem
+        }
+        fun stale(): Boolean =
+            !active || loading || generation != loadGeneration ||
+                remote.mediaStatus?.currentItemId != startItemId ||
+                localPlayer()?.currentMediaItem?.mediaId != phoneId
+        if (stale()) {
+            Log.d(TAG, "cast: queue changed while finding the next streams; planning again")
+            if (refreshing) refreshAhead = true
+            reconcileAgain = true
+            return
+        }
+        // Read again: what is queued now, not what was when this started.
+        val nowQueue = remote.mediaStatus?.queueItems.orEmpty()
+        val nowHere = nowQueue.indexOfFirst { it.itemId == startItemId }
+        if (nowHere < 0) { reconcileAgain = true; return }
+        val nowAhead = nowQueue.drop(nowHere + 1)
+        val drop = nowAhead.drop(kept)
+        if (drop.isNotEmpty()) {
+            remote.queueRemoveItems(drop.map { it.itemId }.toIntArray(), null).awaitResult()
+        }
+        if (stale()) { reconcileAgain = true; return }
+        if (toInsert.isNotEmpty()) {
+            remote.queueInsertItems(toInsert.toTypedArray(), MediaQueueItem.INVALID_ITEM_ID, null).awaitResult()
+            Log.d(TAG, "cast: queued next on the speaker: " + wanted.drop(kept).take(toInsert.size).joinToString { it.mediaMetadata.title?.toString() ?: it.mediaId })
         }
     }
 

@@ -196,7 +196,10 @@ object CastController {
      * updated, crashed or was closed by the system), is looked for and joined.
      */
     fun rejoinIfLost() {
-        if (castContext?.sessionManager?.currentCastSession?.isConnected == true) return
+        // Any session at all — connecting, or briefly suspended (the Wi-Fi
+        // dozing) — is the framework's to bring back; choosing the speaker
+        // again on top of it restarted the cast.
+        if (castContext?.sessionManager?.currentCastSession != null) return
         if (_state.value.connecting) return
         rejoinLostSession()
     }
@@ -225,7 +228,7 @@ object CastController {
                 return deviceName != null && r.name.toString() == deviceName
             }
             fun tryJoin(): Boolean {
-                if (castContext?.sessionManager?.currentCastSession?.isConnected == true) return true
+                if (castContext?.sessionManager?.currentCastSession != null) return true
                 val route = router.routes.firstOrNull(::matches) ?: return false
                 // Something else playing there now (another app took the
                 // speaker): left alone — joining would cut it off.
