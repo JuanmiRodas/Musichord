@@ -97,3 +97,8 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 ## Data the owner shared (in the old chat, not in the repo)
 - `Liked_Music.json` export (~4,888 tracks) and a `files.tsv` listing of the pCloud music folder — ask for them
   again if a simulation against real data is needed.
+
+## Always-on music screen (v1.9.83)
+- `aod/`: AodTrigger (screen off while playing → AodActivity via full-screen-intent notification), AodActivity (over lock screen: song, lyric line, clock/date/notification icons, widgets, prev/play/next/stop, corner rotation + drift, closes on unlock/tap/1 min paused), AodSettings, AodWidgets (+picker), AodWidgetsDialog. Settings → "Music on the always-on screen".
+- CurrentLyrics: MainViewModel publishes loaded lyrics for it.
+- NotificationIcons: silhouettes painted white; opaque/full-colour small icons fall back to the app icon in colour (was a grey square).
