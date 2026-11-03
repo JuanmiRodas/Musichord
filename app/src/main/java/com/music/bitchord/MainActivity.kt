@@ -5289,7 +5289,7 @@ private fun BitChordApp(
                 onSelectSongs = target.browseId?.takeIf { !target.fromCard }?.let { id ->
                     {
                         browseActions = null
-                        com.music.bitchord.ui.components.ReleaseSelection.start(id)
+                        com.music.bitchord.ui.screens.ReleaseSelection.start(id)
                     }
                 },
             )
