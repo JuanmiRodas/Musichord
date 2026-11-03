@@ -5706,6 +5706,37 @@ private fun BitChordApp(
                 onDismiss = { com.music.bitchord.ui.components.NowPlayingSource.close() },
             )
         }
+        // BitChord Audio: the same song liked more than once, offered for merging.
+        val mergeProposal by com.music.bitchord.ui.components.MergeProposal.state.collectAsStateWithLifecycle()
+        mergeProposal?.let { proposal ->
+            val mergeScope = rememberCoroutineScope()
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { com.music.bitchord.ui.components.MergeProposal.dismiss() },
+                title = { Text(stringResource(R.string.merge_title)) },
+                text = {
+                    Text(
+                        stringResource(
+                            R.string.merge_text,
+                            proposal.keep.title,
+                            proposal.others.joinToString("\n") { "• ${it.title} · ${it.artist}" },
+                            proposal.keep.title + (proposal.keep.albumName?.let { " · $it" } ?: ""),
+                        ),
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        com.music.bitchord.ui.components.MergeProposal.dismiss()
+                        com.music.bitchord.ui.components.MergeProposal.carryChoice(proposal)
+                        mergeScope.launch { viewModel.unlikeExactly(proposal.others.map { it.videoId }) }
+                    }) { Text(stringResource(R.string.merge_yes)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { com.music.bitchord.ui.components.MergeProposal.dismiss() }) {
+                        Text(stringResource(R.string.merge_no))
+                    }
+                },
+            )
+        }
         // BitChord Audio: the Liked Music cleaner, from Settings.
         val cleanerOpen by com.music.bitchord.ui.components.LikedCleanerUi.open.collectAsStateWithLifecycle()
         if (cleanerOpen) {

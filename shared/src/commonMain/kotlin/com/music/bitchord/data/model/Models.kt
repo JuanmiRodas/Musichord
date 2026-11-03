@@ -223,6 +223,12 @@ fun Song.artworkAt(px: Int): String? = (ArtworkOverrides.lookup?.invoke(title, a
  */
 object ArtworkOverrides {
     var lookup: ((title: String, artist: String) -> String?)? = null
+
+    /**
+     * How a row shows [Song]: the copy you picked for it (your file's title,
+     * artist and cover in place of a "MUSIC VIDEO" upload), or null for itself.
+     */
+    var display: ((Song) -> Song?)? = null
 }
 
 /**

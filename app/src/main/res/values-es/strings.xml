@@ -607,6 +607,15 @@
     <string name="source_artist_done">Artista: %1$d de %2$d canciones con la misma fuente</string>
     <string name="crash_logs_title">Registro de errores</string>
     <string name="crash_logs_subtitle">%1$d informes de cierres · compártelos con el registro (también se guardan en pCloud)</string>
+    <string name="cleaner_words">Palabras en el título (separadas por comas)</string>
+    <string name="cleaner_tick">Marcar</string>
+    <string name="cleaner_words_videos">Vídeos subidos</string>
+    <string name="cleaner_only_with_other">Solo si hay otra versión en Me gusta</string>
+    <string name="cleaner_ticked">%1$d marcadas</string>
+    <string name="merge_title">También en Me gusta</string>
+    <string name="merge_text">«%1$s» te gusta más de una vez:\n\n%2$s\n\n¿Dejar solo «%3$s» (y quitar Me gusta a las otras)? Sonará con la copia que elegiste.</string>
+    <string name="merge_yes">Unir</string>
+    <string name="merge_no">Mantener ambas</string>
     <string name="cleaner_title">Limpiar Me gusta</string>
     <string name="cleaner_subtitle">Duplicados, canciones parecidas y quitar Me gusta en bloque</string>
     <string name="cleaner_close">Cerrar</string>

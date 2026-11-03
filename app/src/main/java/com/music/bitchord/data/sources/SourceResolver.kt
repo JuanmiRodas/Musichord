@@ -290,7 +290,9 @@ object SourceResolver {
      * swap a few seconds in.
      */
     suspend fun ownFileFor(target: TrackMatcher.Target): SourceStream? {
-        if (target.title.isBlank() || target.isVideo) return null
+        if (target.title.isBlank()) return null
+        // A video row only when you picked your file for it by hand.
+        if (target.isVideo && PreferredSource.get(target.title, target.artist) !is PreferredSource.File) return null
         // On mobile data only when the listener said so in Settings.
         if (AppSettings.meteredConnection.value == true && !AppSettings.ownFilesOnMobileData.value) return null
         val own = SourceRegistry.activeForPlayback().filter { it.kind == SourceKind.MY_LIBRARY }

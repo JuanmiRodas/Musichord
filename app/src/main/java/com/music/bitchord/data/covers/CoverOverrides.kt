@@ -42,6 +42,7 @@ object CoverOverrides {
     fun init(context: Context) {
         local = File(context.filesDir, FILE)
         ArtworkOverrides.lookup = { title, artist -> if (covers.isEmpty()) null else get(title, artist) }
+        ArtworkOverrides.display = { song -> runCatching { pickedCopyOf(song) }.getOrNull() }
         scope.launch {
             runCatching { local?.takeIf { it.isFile }?.readText() }.getOrNull()?.let { read(it, replace = true) }
             remoteUrl()?.let { url ->
@@ -50,6 +51,28 @@ object CoverOverrides {
             }
             _version.value++
         }
+    }
+
+    @Volatile
+    private var libraryIndex: Pair<List<Song>, Map<String, Song>>? = null
+
+    /**
+     * The copy you picked by hand for [song] (your file, JioSaavn's), shown in
+     * its place in lists — its title, artist and cover — or null.
+     */
+    fun pickedCopyOf(song: Song): Song? {
+        if (WebDavConfig.isWebDavId(song.videoId) || com.music.bitchord.data.sources.SourceRegistry.parseTrackKey(song.videoId) != null) return null
+        val copy = when (val c = PreferredSource.get(song)) {
+            is PreferredSource.File -> {
+                val library = com.music.bitchord.data.webdav.WebDavRepository.library()
+                val index = libraryIndex?.takeIf { it.first === library }?.second
+                    ?: library.associateBy { it.videoId }.also { libraryIndex = library to it }
+                index[c.id]
+            }
+            is PreferredSource.Chosen -> c.song
+            else -> null
+        } ?: return null
+        return copy.copy(isVideo = false)
     }
 
     fun get(title: String, artist: String): String? = PreferredSource.keyOf(title, artist)?.let { covers[it] }

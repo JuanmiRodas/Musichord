@@ -69,6 +69,10 @@ internal class AudioFirst(
 
     private fun wants(song: Song): Boolean =
         song.isVideo &&
+            // A copy picked by hand plays instead (see OwnFirst), not YouTube's audio.
+            com.music.bitchord.data.sources.PreferredSource.get(song).let {
+                it !is com.music.bitchord.data.sources.PreferredSource.File && it !is com.music.bitchord.data.sources.PreferredSource.Chosen
+            } &&
             song.localUri == null &&
             song.videoId !in keepVideo &&
             song.videoId !in noAudio

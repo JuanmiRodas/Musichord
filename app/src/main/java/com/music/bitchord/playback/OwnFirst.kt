@@ -102,7 +102,11 @@ internal class OwnFirst(
     }
 
     private fun wants(song: Song): Boolean =
-        !song.isVideo &&
+        // A video row too when you picked a copy for it by hand (your file in
+        // place of a "MUSIC VIDEO" upload, say): the pick holds.
+        (!song.isVideo || com.music.bitchord.data.sources.PreferredSource.get(song).let {
+            it is com.music.bitchord.data.sources.PreferredSource.File || it is com.music.bitchord.data.sources.PreferredSource.Chosen
+        }) &&
             !WebDavConfig.isWebDavId(song.videoId) &&
             SourceRegistry.parseTrackKey(song.videoId) == null &&
             song.localUri == null &&

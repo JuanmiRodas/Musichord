@@ -158,7 +158,7 @@ fun LikedCleanerDialog(
                         all == null -> Text(stringResource(R.string.browser_loading), modifier = Modifier.padding(16.dp))
                         tab == 0 -> GroupList(duplicates.filter { g -> g.items.any(::matches) }, selected, markBest = true, empty = stringResource(R.string.cleaner_no_duplicates))
                         tab == 1 -> GroupList(similar.filter { g -> g.items.any(::matches) }, selected, markBest = false, empty = stringResource(R.string.cleaner_no_similar))
-                        else -> AllList(all.filter(::matches), selected)
+                        else -> AllList(all.filter(::matches), selected, everything = all)
                     }
                 }
                 HorizontalDivider()
@@ -248,7 +248,7 @@ private fun GroupList(groups: List<LikedCleaner.Group>, selected: SnapshotStateL
 private enum class Grouping { ARTIST, ALBUM, NONE }
 
 @Composable
-private fun AllList(all: List<LikedCleaner.Item>, selected: SnapshotStateList<String>) {
+private fun AllList(all: List<LikedCleaner.Item>, selected: SnapshotStateList<String>, everything: List<LikedCleaner.Item> = all) {
     var grouping by remember { mutableStateOf(Grouping.ARTIST) }
     var onlyYouTube by remember { mutableStateOf(false) }
     var onlyLocal by remember { mutableStateOf(false) }
@@ -276,6 +276,36 @@ private fun AllList(all: List<LikedCleaner.Item>, selected: SnapshotStateList<St
             FilterChip(onlyYouTube, { onlyYouTube = !onlyYouTube }, { Text(stringResource(R.string.cleaner_only_youtube)) })
             FilterChip(onlyLocal, { onlyLocal = !onlyLocal }, { Text(stringResource(R.string.cleaner_only_local)) })
             FilterChip(onlyVersions, { onlyVersions = !onlyVersions }, { Text(stringResource(R.string.cleaner_only_versions)) })
+        }
+        // Tick every song whose title has these words (the video uploads:
+        // "official", "lyric", "MV"…), by default only where another version
+        // of the song is liked too.
+        var words by remember { mutableStateOf("") }
+        var onlyWithOther by remember { mutableStateOf(true) }
+        var lastCount by remember { mutableStateOf<Int?>(null) }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = words,
+                onValueChange = { words = it; lastCount = null },
+                singleLine = true,
+                label = { Text(stringResource(R.string.cleaner_words)) },
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(6.dp))
+            Button(onClick = {
+                val hits = LikedCleaner.containing(everything, words.split(','), onlyWithOther)
+                hits.forEach { if (it.id !in selected) selected += it.id }
+                lastCount = hits.size
+            }, enabled = words.isNotBlank()) { Text(stringResource(R.string.cleaner_tick)) }
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(false, { words = "official, music video, lyric, mv, video, audio"; lastCount = null }, { Text(stringResource(R.string.cleaner_words_videos)) })
+            FilterChip(onlyWithOther, { onlyWithOther = !onlyWithOther; lastCount = null }, { Text(stringResource(R.string.cleaner_only_with_other)) })
+            lastCount?.let { Text(stringResource(R.string.cleaner_ticked, it), style = MaterialTheme.typography.labelMedium) }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.cleaner_shown, shown.size), style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))

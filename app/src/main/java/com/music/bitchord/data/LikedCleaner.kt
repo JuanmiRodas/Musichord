@@ -86,13 +86,33 @@ object LikedCleaner {
             .sorted().joinToString(",")
     }
 
-    /** The keys a title is known by: as written (notes off) and as it sounds. */
-    private fun keys(title: String): Set<String> {
+    private val QUOTED = Regex("""[『「“"](.+?)[』」”"]""")
+    private val VIDEO_NOISE = Regex(
+        """\b(official|oficial|music\s*video|video\s*clip|lyrics?\s*video|lyric|lyrics|audio|video|mv|pv|full|hd|4k|visualizer|letra)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /**
+     * The keys a title is known by: as written (notes off), as it sounds, and —
+     * for an upload's title like "Aimer「季路」MUSIC VIDEO" — the song named in
+     * it, with the artist, the quotes and the video words taken off.
+     */
+    fun keysOf(title: String, artist: String = ""): Set<String> {
         val bare = title.replace(NOTE, " ").replace(DASH_NOTE, "").replace(GUEST, "").trim().ifBlank { title }
         val plain = OwnFileMatcher.key(bare)
         val sound = JapaneseReading.romaji(bare)?.let(JapaneseReading::soundKey)?.takeIf { it.length >= 4 }?.let { "~$it" }
-        return setOfNotNull(plain.takeIf { it.isNotEmpty() }, sound)
+        val quoted = QUOTED.find(title)?.groupValues?.get(1)?.let(OwnFileMatcher::key)?.takeIf { it.length >= 2 }
+        val firstArtist = artist.split(',').first().trim()
+        val stripped = title.replace(NOTE, " ")
+            .let { t -> if (firstArtist.length >= 2) t.replace(firstArtist, " ", ignoreCase = true) else t }
+            .replace(VIDEO_NOISE, " ")
+            .replace(Regex("""^[\s\-–—:|/]+|[\s\-–—:|/]+$"""), "")
+            .let(OwnFileMatcher::key)
+            .takeIf { it.length >= 2 && it != plain }
+        return setOfNotNull(plain.takeIf { it.isNotEmpty() }, sound, quoted, stripped)
     }
+
+    private fun keys(item: Item): Set<String> = keysOf(item.song.title, item.song.artist)
 
     data class Group(val items: List<Item>) {
         /** The copy to keep: best quality, then a known album, then the earliest liked. */
@@ -125,6 +145,24 @@ object LikedCleaner {
             d.size != 1 || d[0].items.size != g.items.size
         }
 
+    /**
+     * The songs whose title has any of [words] ("lyric", "official", "MV"…).
+     * [onlyWithOther]: only those liked in another version too — the same song
+     * (any spelling, the artist) whose title has none of the words — so a song
+     * liked only as its video is never swept away.
+     */
+    fun containing(items: List<Item>, words: List<String>, onlyWithOther: Boolean): List<Item> {
+        val ws = words.map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() }
+        if (ws.isEmpty()) return emptyList()
+        fun has(i: Item) = i.song.title.lowercase(Locale.ROOT).let { t -> ws.any { it in t } }
+        val hits = items.filter(::has)
+        if (!onlyWithOther) return hits
+        val clean = items.filterNot(::has)
+        val byKey = HashMap<String, MutableList<Item>>()
+        clean.forEach { c -> keys(c).forEach { k -> byKey.getOrPut(k) { ArrayList() } += c } }
+        return hits.filter { h -> keys(h).any { k -> byKey[k].orEmpty().any { sameArtist(it, h) } } }
+    }
+
     private fun sameArtist(a: Item, b: Item) =
         OwnFileMatcher.sameArtist(a.song.artist, b.song.artist) ||
             com.music.bitchord.data.sources.ArtistLinks.linked(a.song.artist, b.song.artist) ||
@@ -139,7 +177,7 @@ object LikedCleaner {
     /** Groups of items sharing a title key and joined by [same] (transitively). */
     private fun cluster(items: List<Item>, same: (Item, Item) -> Boolean): List<Group> {
         val byKey = HashMap<String, MutableList<Int>>()
-        items.forEachIndexed { i, it -> keys(it.song.title).forEach { k -> byKey.getOrPut(k) { ArrayList() } += i } }
+        items.forEachIndexed { i, it -> keys(it).forEach { k -> byKey.getOrPut(k) { ArrayList() } += i } }
         val parent = IntArray(items.size) { it }
         fun find(x: Int): Int { var r = x; while (parent[r] != r) r = parent[r]; var c = x; while (parent[c] != r) { val n = parent[c]; parent[c] = r; c = n }; return r }
         for (bucket in byKey.values) {

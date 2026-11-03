@@ -518,6 +518,10 @@ private fun SongRowContent(
     showSourceQuality: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
 ) {
+    // BitChord Audio: the copy picked for the song, as it is shown.
+    val shown = remember(song.videoId, song.title, com.music.bitchord.data.model.ArtworkOverrides.display) {
+        com.music.bitchord.data.model.ArtworkOverrides.display?.invoke(song) ?: song
+    }
     val titleColor by animateColorAsState(
         targetValue = if (isCurrent && !searchPlayingStyle) activeTint else MaterialTheme.colorScheme.onBackground,
         label = "song row title",
@@ -571,9 +575,9 @@ private fun SongRowContent(
                 }
             }
         } else {
-            Box(Modifier.trackArtSize(52.dp, song.isVideo)) {
+            Box(Modifier.trackArtSize(52.dp, shown.isVideo)) {
                 AsyncImage(
-                    model = com.music.bitchord.ui.player.rememberRemoteArtworkUrl(song)?.artworkAt(ROW_ART_PX),
+                    model = com.music.bitchord.ui.player.rememberRemoteArtworkUrl(shown)?.artworkAt(ROW_ART_PX),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -593,13 +597,13 @@ private fun SongRowContent(
         Spacer(Modifier.width(if (trackNumber == null) 14.dp else PAGE_GUTTER))
         Column(Modifier.weight(1f)) {
             ExplicitSongTitle(
-                song = song,
+                song = shown,
                 style = MaterialTheme.typography.titleMedium,
                 color = titleColor,
             )
             Spacer(Modifier.height(2.dp))
             val subtitle = listOfNotNull(
-                song.artist.takeIf { it.isNotBlank() },
+                shown.artist.takeIf { it.isNotBlank() },
                 song.downloadFormat,
             ).joinToString(" · ")
             val quality = if (showSourceQuality) song.sourceQualityBadge() else null

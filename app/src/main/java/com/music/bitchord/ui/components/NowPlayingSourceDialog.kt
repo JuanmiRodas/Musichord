@@ -119,6 +119,7 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
 
     fun switchTo(file: Song) {
         PreferredSource.chooseFile(song, file)
+        MergeProposal.check(song, file)
         alsoAlbum(file)
         if (file.videoId != song.videoId) controller?.swapToVersion(file.carryingQueueOf(song))
         onDismiss()
@@ -150,6 +151,7 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
 
     fun pick(hit: Song) {
         PreferredSource.chooseSong(song, hit)
+        MergeProposal.check(song, hit)
         alsoAlbum(hit)
         if (hit.videoId != song.videoId) controller?.swapToVersion(hit.carryingQueueOf(song))
         onDismiss()

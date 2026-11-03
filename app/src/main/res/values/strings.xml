@@ -824,6 +824,15 @@
     <string name="source_artist_done">Artist: %1$d of %2$d songs set to the same source</string>
     <string name="crash_logs_title">Error log</string>
     <string name="crash_logs_subtitle">%1$d crash reports · share them with the running log (also saved to pCloud)</string>
+    <string name="cleaner_words">Words in the title (comma-separated)</string>
+    <string name="cleaner_tick">Tick</string>
+    <string name="cleaner_words_videos">Video uploads</string>
+    <string name="cleaner_only_with_other">Only if another version is liked</string>
+    <string name="cleaner_ticked">%1$d ticked</string>
+    <string name="merge_title">Also in Liked Music</string>
+    <string name="merge_text">\"%1$s\" is liked more than once:\n\n%2$s\n\nKeep only \"%3$s\" (and un-like the others)? The copy you picked plays for it.</string>
+    <string name="merge_yes">Merge</string>
+    <string name="merge_no">Keep both</string>
     <string name="cleaner_title">Clean up Liked Music</string>
     <string name="cleaner_subtitle">Duplicates, look-alikes, and un-liking songs in bulk</string>
     <string name="cleaner_close">Close</string>
