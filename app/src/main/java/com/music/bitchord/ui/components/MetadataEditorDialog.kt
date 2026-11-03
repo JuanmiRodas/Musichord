@@ -5,18 +5,24 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -30,6 +36,7 @@ import com.music.bitchord.R
 import com.music.bitchord.data.covers.CoverSources
 import com.music.bitchord.data.covers.CoverTags
 import com.music.bitchord.data.covers.CoverWriter
+import com.music.bitchord.data.edits.DetailsLookup
 import com.music.bitchord.data.edits.MetadataEdits
 import com.music.bitchord.data.edits.TagWriter
 import com.music.bitchord.data.model.Song
@@ -76,6 +83,26 @@ fun MetadataEditorDialog(songs: List<Song>, onDismiss: () -> Unit) {
     var year by remember { mutableStateOf(shared { _, e -> e?.year }) }
     var track by remember { mutableStateOf(if (single) MetadataEdits.get(first)?.track ?: first.trackNumber?.toString().orEmpty() else "") }
     var genre by remember { mutableStateOf(shared { _, e -> e?.genre }) }
+    // BitChord Audio: what Apple Music, Deezer, MusicBrainz and Wikipedia say.
+    var found by remember { mutableStateOf<List<DetailsLookup.Suggestion>?>(null) }
+    val autoFilled = remember { mutableStateListOf<String>() }
+    var useTracks by remember { mutableStateOf(true) }
+    var trackList by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        val results = runCatching { DetailsLookup.find(songs) }.getOrDefault(emptyList())
+        found = results
+        val c = DetailsLookup.consensus(results)
+        trackList = c.tracks
+        // Empty fields filled from what the catalogues agree on; the rest offered.
+        fun fill(name: String, current: String, value: String?, set: (String) -> Unit) {
+            if (current.isBlank() && !value.isNullOrBlank()) { set(value); autoFilled += name }
+        }
+        fill("album", album, c.album) { album = it }
+        fill("albumArtist", albumArtist, c.albumArtist) { albumArtist = it }
+        fill("year", year, c.year) { year = it }
+        fill("genre", genre, c.genre) { genre = it }
+        if (single) fill("track", track, c.track) { track = it }
+    }
     var intoPcloud by remember { mutableStateOf(true) }
     var intoDownloads by remember { mutableStateOf(true) }
 
@@ -103,6 +130,15 @@ fun MetadataEditorDialog(songs: List<Song>, onDismiss: () -> Unit) {
             )
         }
         MetadataEdits.set(songs, edit, replace = single)
+        // Several songs of an album: each one's number from the album's track list.
+        if (!single && useTracks && trackList.isNotEmpty()) {
+            songs.forEach { s ->
+                val shownTitle = (MetadataEdits.applied(s) ?: s).title
+                trackList[DetailsLookup.norm(shownTitle)]?.let { n ->
+                    MetadataEdits.set(listOf(s), MetadataEdits.Edit(track = n.toString()))
+                }
+            }
+        }
         if (!intoPcloud && !intoDownloads) {
             onDismiss()
             return
@@ -173,24 +209,69 @@ fun MetadataEditorDialog(songs: List<Song>, onDismiss: () -> Unit) {
                     stringResource(if (single) R.string.edit_info_help else R.string.edit_info_help_many),
                     style = MaterialTheme.typography.bodySmall,
                 )
+                when (val f = found) {
+                    null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Text("  " + stringResource(R.string.edit_info_looking), style = MaterialTheme.typography.bodySmall)
+                    }
+                    else -> Text(
+                        if (f.isEmpty()) stringResource(R.string.edit_info_nothing_found)
+                        else stringResource(R.string.edit_info_found, f.map { it.source }.distinct().joinToString(", ")),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 @Composable
-                fun field(label: Int, value: String, onChange: (String) -> Unit, number: Boolean = false) {
+                fun field(
+                    name: String,
+                    label: Int,
+                    value: String,
+                    onChange: (String) -> Unit,
+                    number: Boolean = false,
+                    suggest: (DetailsLookup.Suggestion) -> String? = { null },
+                ) {
                     OutlinedTextField(
                         value = value,
-                        onValueChange = onChange,
+                        onValueChange = { autoFilled.remove(name); onChange(it) },
                         label = { Text(stringResource(label)) },
+                        supportingText = if (name in autoFilled) {
+                            { Text(stringResource(R.string.edit_info_filled)) }
+                        } else null,
                         singleLine = true,
                         keyboardOptions = if (number) KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    // Other answers for this field, to tap.
+                    val offers = found.orEmpty()
+                        .mapNotNull { sug -> suggest(sug)?.takeIf { it.isNotBlank() }?.let { sug.source to it } }
+                        .distinctBy { it.second.lowercase() }
+                        .filter { it.second != value }
+                        .take(4)
+                    if (offers.isNotEmpty()) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            offers.forEach { (source, v) ->
+                                AssistChip(
+                                    onClick = { autoFilled.remove(name); onChange(v) },
+                                    label = { Text("$v · $source", maxLines = 1) },
+                                )
+                            }
+                        }
+                    }
                 }
-                if (single) field(R.string.edit_info_title, title, { title = it })
-                field(R.string.edit_info_artist, artist, { artist = it })
-                field(R.string.edit_info_album, album, { album = it })
-                field(R.string.edit_info_album_artist, albumArtist, { albumArtist = it })
-                field(R.string.edit_info_year, year, { year = it }, number = true)
-                if (single) field(R.string.edit_info_track, track, { track = it }, number = true)
-                field(R.string.edit_info_genre, genre, { genre = it })
+                if (single) field("title", R.string.edit_info_title, title, { title = it }, suggest = { it.title })
+                field("artist", R.string.edit_info_artist, artist, { artist = it }, suggest = { it.artist })
+                field("album", R.string.edit_info_album, album, { album = it }, suggest = { it.album })
+                field("albumArtist", R.string.edit_info_album_artist, albumArtist, { albumArtist = it }, suggest = { it.albumArtist })
+                field("year", R.string.edit_info_year, year, { year = it }, number = true, suggest = { it.year })
+                if (single) field("track", R.string.edit_info_track, track, { track = it }, number = true, suggest = { it.track })
+                field("genre", R.string.edit_info_genre, genre, { genre = it }, suggest = { it.genre })
+                if (!single && trackList.isNotEmpty()) {
+                    val matched = songs.count { s -> trackList.containsKey(DetailsLookup.norm((MetadataEdits.applied(s) ?: s).title)) }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { useTracks = !useTracks }) {
+                        Checkbox(checked = useTracks, onCheckedChange = { useTracks = it })
+                        Text(stringResource(R.string.edit_info_track_numbers, matched, songs.size), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { intoPcloud = !intoPcloud }) {
                     Checkbox(checked = intoPcloud, onCheckedChange = { intoPcloud = it })
                     Text(stringResource(R.string.edit_info_into_pcloud), style = MaterialTheme.typography.bodyMedium)

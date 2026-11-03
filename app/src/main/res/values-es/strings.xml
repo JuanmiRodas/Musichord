@@ -1599,4 +1599,9 @@
     <string name="select_songs">Seleccionar canciones</string>
     <string name="selection_cover">Portada</string>
     <string name="selection_edit">Datos</string>
+    <string name="edit_info_looking">Buscando en Apple Music, Deezer, MusicBrainz y Wikipedia…</string>
+    <string name="edit_info_nothing_found">No se encontró nada sobre estos datos en otros sitios.</string>
+    <string name="edit_info_found">Encontrado en %1$s — campos vacíos rellenados, otras respuestas debajo de cada campo.</string>
+    <string name="edit_info_filled">Rellenado con lo encontrado</string>
+    <string name="edit_info_track_numbers">Números de pista según la lista del álbum (%1$d de %2$d canciones)</string>
 </resources>

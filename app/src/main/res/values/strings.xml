@@ -1491,4 +1491,9 @@
     <string name="select_songs">Select songs</string>
     <string name="selection_cover">Cover</string>
     <string name="selection_edit">Details</string>
+    <string name="edit_info_looking">Looking in Apple Music, Deezer, MusicBrainz and Wikipedia…</string>
+    <string name="edit_info_nothing_found">Nothing found elsewhere for these details.</string>
+    <string name="edit_info_found">Found in %1$s — empty fields filled in, other answers below each field.</string>
+    <string name="edit_info_filled">Filled in from what was found</string>
+    <string name="edit_info_track_numbers">Track numbers from the album\'s track list (%1$d of %2$d songs)</string>
 </resources>
