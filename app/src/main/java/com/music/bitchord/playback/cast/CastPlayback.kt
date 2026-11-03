@@ -644,19 +644,19 @@ class CastPlayback(
             val leftLength = leftItem?.media?.streamDuration ?: 0L
             val askedToMove = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
             val leftId = leftItem?.mediaId()
-            val player = localPlayer()
-            if (!askedToMove && !loading && leftId != null && player != null && leftLength > 30_000 &&
+            val phone = localPlayer()
+            if (!askedToMove && !loading && leftId != null && phone != null && leftLength > 30_000 &&
                 leftPlayed != null && leftPlayed < 5_000
             ) {
-                val index = indexOfMediaId(player, leftId)
+                val index = indexOfMediaId(phone, leftId)
                 Log.w(TAG, "cast: speaker skipped ${leftItem.media?.metadata?.getString(MediaMetadata.KEY_TITLE) ?: leftId} after ${leftPlayed ?: 0}ms (its stream failed)")
                 if (index != null && CastRouting.proxyOnly.add(leftId)) {
                     lastItemId = itemId
-                    if (player.currentMediaItemIndex != index) {
+                    if (phone.currentMediaItemIndex != index) {
                         lastLocalMoveAt = SystemClock.elapsedRealtime()
-                        player.seekTo(index, 0L)
+                        phone.seekTo(index, 0L)
                     }
-                    load(player.getMediaItemAt(index), 0L, play = true)
+                    load(phone.getMediaItemAt(index), 0L, play = true)
                     return
                 }
             }
