@@ -10,7 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /**
@@ -40,7 +39,7 @@ object BackgroundWork {
         LyricsKeeper.init(context)
         LikeLinker.init(context)
         scope.launch {
-            AppSettings.meteredConnection.distinctUntilChanged().collect { metered ->
+            AppSettings.meteredConnection.collect { metered ->
                 if (metered == false) start() else job?.cancel()
             }
         }
