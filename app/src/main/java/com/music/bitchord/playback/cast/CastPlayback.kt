@@ -459,7 +459,8 @@ class CastPlayback(
             remote.queueJumpToItem(queued.itemId, null)
             sink?.onRemotePlaybackChanged()
         } else {
-            load(item, 0L, play = true)
+            // Skips in quick succession: only the one stopped on is fetched.
+            load(item, 0L, play = true, settleMs = SKIP_SETTLE_MS)
         }
     }
 
@@ -487,6 +488,9 @@ class CastPlayback(
     /** When the phone last moved to another track (a skip, a tap in the queue). */
     private var lastLocalMoveAt = 0L
 
+    /** When the speaker started playing each of its queue entries, by item id. */
+    private val playStartedAt = HashMap<Int, Long>()
+
     private fun onStatus() {
         val remote = client ?: return
         val status = remote.mediaStatus ?: return
@@ -500,6 +504,9 @@ class CastPlayback(
 
         when (state) {
             MediaStatus.PLAYER_STATE_PLAYING -> {
+                // When this entry started, by the clock (pauses only make it
+                // look longer played, never shorter).
+                playStartedAt.getOrPut(status.currentItemId) { SystemClock.elapsedRealtime() - status.streamPosition }
                 wantsPlay = true
                 loading = false
                 finished = false
@@ -519,9 +526,24 @@ class CastPlayback(
                     val finishedId = status.getQueueItemById(status.currentItemId)?.mediaId()
                     val phoneId = localPlayer()?.currentMediaItem?.mediaId
                     val justMoved = SystemClock.elapsedRealtime() - lastLocalMoveAt < LOCAL_MOVE_GRACE_MS
+                    val played = playStartedAt[status.currentItemId]?.let { SystemClock.elapsedRealtime() - it } ?: Long.MAX_VALUE
+                    val length = status.getQueueItemById(status.currentItemId)?.media?.streamDuration ?: 0L
+                    val player = localPlayer()
+                    val index = finishedId?.let { id -> player?.let { indexOfMediaId(it, id) } }
                     if (justMoved || (finishedId != null && phoneId != null && !sameTrack(finishedId, phoneId))) {
                         Log.d(TAG, "receiver finished $finishedId, phone is on $phoneId: not moving on")
+                    } else if (length > 30_000 && played < 5_000 && finishedId != null && player != null && index != null &&
+                        CastRouting.proxyOnly.add(finishedId)
+                    ) {
+                        // BitChord Audio: "finished" seconds into a whole song
+                        // is a stream that broke off (an expired or cut link),
+                        // not the end of it: tried again, served by the phone,
+                        // instead of skipping the song.
+                        Log.w(TAG, "cast: speaker ended $finishedId after ${played}ms of ${length}ms; its stream broke — trying it again from the phone")
+                        load(player.getMediaItemAt(index), played, play = true)
+                        return
                     } else {
+                        Log.d(TAG, "cast: speaker finished $finishedId after ${played}ms of ${length}ms")
                         onReceiverFinished()
                     }
                 } else if (status.idleReason == MediaStatus.IDLE_REASON_ERROR) {
@@ -583,7 +605,7 @@ class CastPlayback(
      * before the receiver is asked to start: the rest are resolved while it
      * plays, so a cast begins as quickly as a single stream resolves.
      */
-    private fun load(item: MediaItem?, positionMs: Long, play: Boolean) {
+    private fun load(item: MediaItem?, positionMs: Long, play: Boolean, settleMs: Long = 0L) {
         val remote = client ?: return
         loadJob?.cancel()
         // A queue being planned for the old track would land after the new one.
@@ -601,7 +623,10 @@ class CastPlayback(
 
         loadJob = scope.launch {
             try {
+                if (settleMs > 0) delay(settleMs)
+                val t0 = SystemClock.elapsedRealtime()
                 loadNow(item, positionMs, play, generation, remote)
+                Log.d(TAG, "cast: speaker load took ${SystemClock.elapsedRealtime() - t0}ms")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -827,6 +852,9 @@ class CastPlayback(
         /** Tracks kept queued on the receiver after the playing one. */
         private const val AHEAD = 3
         private const val RECONCILE_DELAY_MS = 300L
+
+        /** A skip waits this long for the next one before its track is fetched. */
+        private const val SKIP_SETTLE_MS = 450L
 
         /** How long a resumed session waits for the speaker to say what it plays. */
         private const val ADOPT_WAIT_MS = 6_000L

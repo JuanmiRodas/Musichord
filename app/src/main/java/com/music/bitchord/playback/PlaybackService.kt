@@ -1955,7 +1955,20 @@ class PlaybackService : MediaLibraryService() {
      * phone itself ([CastStreamServer]) through the same stream chain the
      * phone's player reads, so whatever plays here can be cast.
      */
-    private suspend fun resolveForCast(item: MediaItem): CastStream? = withContext(Dispatchers.IO) {
+    private suspend fun resolveForCast(item: MediaItem): CastStream? {
+        val started = SystemClock.elapsedRealtime()
+        val stream = resolveForCastNow(item)
+        val took = SystemClock.elapsedRealtime() - started
+        TrackLog.d(
+            "BitChordCast",
+            "cast: stream for ${item.mediaMetadata.title ?: item.mediaId} in ${took}ms" +
+                (stream?.url?.let { if (it.contains("127.0.0.1") || it.contains("192.168.") || it.contains("/cast/")) " (served by the phone)" else " (direct)" } ?: " — none found"),
+            about = item.mediaId,
+        )
+        return stream
+    }
+
+    private suspend fun resolveForCastNow(item: MediaItem): CastStream? = withContext(Dispatchers.IO) {
         val uri = item.localConfiguration?.uri ?: return@withContext null
         val resolver = streamResolver ?: return@withContext null
         val proxyOnly = item.mediaId in CastRouting.proxyOnly
@@ -4124,6 +4137,16 @@ class PlaybackService : MediaLibraryService() {
             error,
             about = mediaId,
         )
+        // BitChord Audio: while a speaker plays, the phone's own player only
+        // holds the place in the queue — the speaker fetches its own stream.
+        // Its failing to load (slow after several skips, many fetches at once)
+        // skipped the song on the speaker too. Left alone; it is prepared
+        // again when the music comes back to the phone.
+        if (castPlayback.active || CastController.state.value.casting) {
+            TrackLog.d("BitChord", "phone-side load failed while casting; the speaker has its own stream, not skipping", about = mediaId)
+            recoveries.remove(mediaId)
+            return
+        }
         // A local file that is not there is the one failure retrying cannot
         // touch, and the only one where the fix is to stop asking for the file.
         //
