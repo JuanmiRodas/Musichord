@@ -203,12 +203,32 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
                         Row(
                             Modifier.fillMaxWidth().clickable {
                                 if (s.videoId in chosen) chosen -= s.videoId else chosen += s.videoId
-                            },
+                            }.padding(vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Checkbox(checked = s.videoId in chosen, onCheckedChange = null)
                             Spacer(Modifier.width(8.dp))
-                            Text(s.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            // The cover it shows now, then its title, album and artist.
+                            AsyncImage(
+                                model = rememberRemoteArtworkUrl(s),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .width(40.dp)
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(4.dp)),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(s.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    listOfNotNull(s.albumName?.takeIf { it.isNotBlank() }, s.artist.takeIf { it.isNotBlank() }).joinToString(" · "),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
