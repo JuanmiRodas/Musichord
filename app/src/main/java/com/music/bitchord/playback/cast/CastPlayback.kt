@@ -322,7 +322,54 @@ class CastPlayback(
      * app reopened): the phone follows the speaker's track, and the speaker's
      * queue ahead is topped up.
      */
+    private var stallWatch: Job? = null
+    private val stallRetries = HashMap<String, Int>()
+
+    /**
+     * BitChord Audio: a speaker left hanging — sent to a song (a skip) and
+     * then sitting on its loading screen, or idle with nothing loaded, while
+     * you want music. Seen in the log: a skip, the speaker "interrupted" with
+     * no song, then nothing for a minute until the session dropped. After 12
+     * seconds like that the song the phone is on is sent again (twice at
+     * most per song; then the next one).
+     */
+    private fun startStallWatch() {
+        stallWatch?.cancel()
+        stallWatch = scope.launch {
+            var since = 0L
+            while (active) {
+                delay(3_000)
+                val remote = client ?: break
+                if (connect != null || pendingAdopt != null || loading || !wantsPlay || finished) { since = 0L; continue }
+                val status = remote.mediaStatus
+                val state = status?.playerState
+                val stuck = status == null ||
+                    state == MediaStatus.PLAYER_STATE_LOADING ||
+                    state == MediaStatus.PLAYER_STATE_BUFFERING ||
+                    (state == MediaStatus.PLAYER_STATE_IDLE && status.idleReason != MediaStatus.IDLE_REASON_FINISHED) ||
+                    (state == MediaStatus.PLAYER_STATE_UNKNOWN)
+                if (!stuck) { since = 0L; continue }
+                if (since == 0L) { since = SystemClock.elapsedRealtime(); continue }
+                if (SystemClock.elapsedRealtime() - since < STALL_MS) continue
+                since = 0L
+                val player = localPlayer() ?: continue
+                val item = player.currentMediaItem ?: continue
+                val tries = (stallRetries[item.mediaId] ?: 0) + 1
+                stallRetries[item.mediaId] = tries
+                if (tries <= 2) {
+                    Log.w(TAG, "cast: speaker stuck (state $state, idle ${status?.idleReason}) on ${item.mediaMetadata.title}; sending it again (try $tries)")
+                    if (tries == 2) { CastRouting.proxyOnly.add(item.mediaId); streams.keys.removeAll { it.startsWith(item.mediaId) } }
+                    load(item, remote.approximateStreamPosition.coerceAtLeast(0L).takeIf { tries == 1 } ?: 0L, play = true)
+                } else if (player.hasNextMediaItem()) {
+                    Log.w(TAG, "cast: ${item.mediaMetadata.title} won't start on the speaker; going on to the next song")
+                    player.seekToNextMediaItem()
+                }
+            }
+        }
+    }
+
     private fun startHeartbeat() {
+        startStallWatch()
         heartbeat?.cancel()
         heartbeat = scope.launch {
             while (active) {
@@ -543,6 +590,8 @@ class CastPlayback(
         alias = null
         heartbeat?.cancel()
         heartbeat = null
+        stallWatch?.cancel()
+        stallWatch = null
         ledger.clear()
         connect?.stop()
         connect = null
@@ -1128,6 +1177,9 @@ class CastPlayback(
 
         /** How long a found stream is reused (links last hours; kept well short of that). */
         private const val STREAM_TTL_MS = 20 * 60_000L
+
+        /** How long the speaker may hang (loading, idle with nothing) before the song is sent again. */
+        private const val STALL_MS = 12_000L
 
         /** How often the phone checks it agrees with the speaker. */
         private const val HEARTBEAT_MS = 20_000L
