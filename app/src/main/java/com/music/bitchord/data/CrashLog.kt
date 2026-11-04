@@ -80,6 +80,7 @@ object CrashLog {
                 // every five minutes when it has grown.
                 delay(60_000)
                 runCatching { upload() }
+                runCatching { syncNotes() }
                 var sent = -1L
                 while (true) {
                     if (TrackLog.written != sent) {
@@ -203,6 +204,29 @@ object CrashLog {
     }
 
     private val sessionName = "session-${SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.ROOT).format(Date())}.log"
+
+    /**
+     * BitChord Audio: the notes kept with the app's code (`docs/ON_HOLD.md` —
+     * plans on hold, set-up steps) copied to your pCloud `.bitchord-audio/`
+     * folder as "README-on-hold.md", whenever they change.
+     */
+    private suspend fun syncNotes() {
+        val base = AppSettings.webdavUrl.value
+        if (!WebDavConfig.isConfigured(base)) return
+        val text = com.music.bitchord.data.Http.client.newCall(
+            okhttp3.Request.Builder().url("https://raw.githubusercontent.com/JuanmiRodas/Musichord/main/docs/ON_HOLD.md").build(),
+        ).execute().use { r -> if (r.isSuccessful) r.body?.string() else null } ?: return
+        val prefs = app?.getSharedPreferences(PREFS, Context.MODE_PRIVATE) ?: return
+        val hash = text.hashCode()
+        if (prefs.getInt("notesHash", 0) == hash) return
+        val dir = WebDavConfig.normalizeUrl(base).trimEnd('/') + "/.bitchord-audio/"
+        val u = AppSettings.webdavUsername.value
+        val p = AppSettings.webdavPassword.value
+        WebDavClient.ensureCollection(dir, u, p)
+        val bytes = text.toByteArray()
+        val ok = WebDavClient.putFile(dir + "README-on-hold.md", bytes.inputStream(), bytes.size.toLong(), "text/markdown", u, p, overwrite = true).isSuccess
+        if (ok) prefs.edit().putInt("notesHash", hash).apply()
+    }
 
     /** This run's log to pCloud (`.bitchord-audio/logs/`), the same file updated. */
     private suspend fun uploadSession() {
