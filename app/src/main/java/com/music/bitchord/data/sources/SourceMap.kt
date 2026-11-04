@@ -53,7 +53,7 @@ object SourceMap {
     )
 
     /** Bumped when JioSaavn matching improves: songs it missed are looked up again. */
-    private const val SAAVN_VERSION = 3
+    private const val SAAVN_VERSION = 4
 
     /** JioSaavn's tier for every row it returns: 320 kbps AAC. */
     const val SAAVN_KBPS = 320
@@ -88,7 +88,7 @@ object SourceMap {
     private fun gen(): Int = WebDavRepository.library().size * 100 + MATCHER_VERSION
 
     /** Bumped when matching improves: songs with no file then get another look. */
-    private const val MATCHER_VERSION = 6
+    private const val MATCHER_VERSION = 7
 
     /** The entry for [videoId], if it still holds for the library as it is. */
     fun lookup(videoId: String): Entry? {
@@ -176,6 +176,15 @@ object SourceMap {
         ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
 
     fun fileSong(id: String): Song? = WebDavRepository.library().firstOrNull { it.videoId == id }
+
+    /** BitChord Audio: JioSaavn's copy found for [videoId] is another song. */
+    fun forgetSaavn(videoId: String) {
+        val old = entries[videoId] ?: return
+        entries[videoId] = old.copy(saavn = null, saavnChecked = true, saavnVersion = SAAVN_VERSION)
+        save()
+    }
+
+    fun saavnKeyOf(videoId: String): String? = entries[videoId]?.saavn
 
     /** BitChord Audio: what [videoId] was matched to is wrong — matched again next time. */
     fun forget(videoId: String) {
@@ -383,6 +392,7 @@ object SourceMap {
         if (!saavnPlayable()) return null
         ensureSaavn(song)
         val key = entries[song.videoId]?.saavn ?: return null
+        if (NotSame.blocked(song.videoId, key)) return null
         return song.copy(
             videoId = key,
             sourceQuality = "MP3 $SAAVN_KBPS kbps",
@@ -393,6 +403,7 @@ object SourceMap {
 
     /** What was playing turned out to be JioSaavn's copy of [videoId] (track key [saavnKey]). */
     fun recordSaavn(videoId: String, saavnKey: String) {
+        if (NotSame.blocked(videoId, saavnKey)) return
         val old = entries[videoId] ?: Entry(null, 0, false, gen())
         if (old.saavn == saavnKey) return
         entries[videoId] = old.copy(saavn = saavnKey, saavnChecked = true, saavnVersion = SAAVN_VERSION)
@@ -435,7 +446,7 @@ object SourceMap {
                 val best = tracks.mapNotNull { t ->
                     val tSec = t.moreInfo.duration.toIntOrNull() ?: return@mapNotNull null
                     val drift = if (sec == null) 0 else kotlin.math.abs(sec - tSec)
-                    if (drift > 6) return@mapNotNull null
+                    if (drift > 3) return@mapNotNull null
                     val tKeys = OwnFileMatcher.titleKeys(t.title) + runCatching { OwnFileMatcher.soundKeys(t.title) }.getOrDefault(emptySet())
                     val score = when {
                         tKeys.any { it in keys } -> 3

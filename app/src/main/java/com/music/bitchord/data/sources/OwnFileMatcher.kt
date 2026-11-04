@@ -31,7 +31,8 @@ import kotlin.math.abs
  */
 object OwnFileMatcher {
 
-    private const val MAX_DRIFT_SEC = 15
+    /** BitChord Audio: two songs are only the same when they last the same (to a few seconds). */
+    private const val MAX_DRIFT_SEC = 3
     private const val UPLOADER_DRIFT_SEC = 2
     private val UPLOADER = Regex(
         """(\bchannel\b|vevo|\brecords?\b|\btopic\b|\bofficial\b|unknown artist|\bmusic\s+(japan|channel|entertainment)\b)""",
@@ -209,7 +210,9 @@ object OwnFileMatcher {
         return found
             .filter { file ->
                 val got = file.durationMillis().takeIf { it > 0 }?.let { (it / 1000).toInt() }
-                if (durationSec == null || got == null) return@filter true
+                // A length not known on one side: only the same artist under
+                // the same name counts (checked below); no guessing past that.
+                if (durationSec == null || got == null) return@filter sameArtist(artist, file.artist)
                 val limit = if (videoUpload && got < durationSec && got >= durationSec * 6 / 10) {
                     maxOf(60, durationSec / 4)
                 } else {
@@ -240,7 +243,7 @@ object OwnFileMatcher {
                         ArtistLinks.learn(artist, file.artist)
                         true
                     }
-                    artists.any { ArtistLinks.linked(artist, it) } -> true
+                    close && artists.any { ArtistLinks.linked(artist, it) } -> true
                     UPLOADER.containsMatchIn(artist) && drift != null && drift <= UPLOADER_DRIFT_SEC -> true
                     else -> false
                 }

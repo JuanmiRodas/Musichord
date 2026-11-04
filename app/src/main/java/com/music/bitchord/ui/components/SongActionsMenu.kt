@@ -402,27 +402,26 @@ fun SongActionsMenu(
         ActionRow(SfIcons.Pencil, stringResource(R.string.edit_info), accent = palette.accent) {
             MetadataEditor.open(listOf(song))
         }
-        // BitChord Audio: the copy this song plays as, when it is another
-        // song's file (the same name, a similar length) — to say it isn't.
-        val playsAs by produceState<Song?>(initialValue = null, song.videoId) {
+        // BitChord Audio: every other song this one is tied to — the file or
+        // JioSaavn copy it plays as, or (playing now) the song it stands in
+        // for — each to say "not the same song".
+        val links by produceState<List<Pair<String, String>>>(initialValue = emptyList(), song.videoId) {
             value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching {
-                    val sec = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }?.fold(0) { a, p -> a * 60 + p }?.takeIf { it > 0 }
-                    (com.music.bitchord.data.sources.OwnFileMatcher.decide(song.title, song.artist, sec, song.albumName, song.videoId)
-                        as? com.music.bitchord.data.sources.OwnFileMatcher.Play)?.file?.takeIf { it.videoId != song.videoId }
-                }.getOrNull()
+                runCatching { com.music.bitchord.data.SongLinks.linksOf(song) }.getOrDefault(emptyList())
             }
         }
-        playsAs?.let { other ->
+        if (links.isNotEmpty()) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            ActionRow(
-                icon = SfIcons.Revert,
-                label = stringResource(R.string.not_same_song),
-                description = stringResource(R.string.plays_as, other.title, other.artist, other.albumName.orEmpty()),
-                accent = palette.accent,
-            ) {
-                com.music.bitchord.data.SongLinks.unlink(song, other)
-                android.widget.Toast.makeText(context, context.getString(R.string.unlinked_songs), android.widget.Toast.LENGTH_SHORT).show()
+            links.forEach { (otherId, label) ->
+                ActionRow(
+                    icon = SfIcons.Revert,
+                    label = stringResource(R.string.not_same_song),
+                    description = label,
+                    accent = palette.accent,
+                ) {
+                    com.music.bitchord.data.SongLinks.unlinkFrom(song, otherId)
+                    android.widget.Toast.makeText(context, context.getString(R.string.unlinked_songs), android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
         // BitChord Audio: the other albums this song is on (a single, a
