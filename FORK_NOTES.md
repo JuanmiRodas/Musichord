@@ -153,3 +153,10 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - AlbumAppearances: same song = exact title + first artist (versions separate), from LikedMusicCache.likedSongs (new flow) + pCloud library; likedCopy(), known(), search() (+ YouTube Music song search).
 - LikeStar on album/playlist rows (DetailScreen trailing, after duration): filled when liked here or elsewhere, "+" inside when on several albums; tap → LikeLookup.toggle on the liked copy (or this one).
 - Song menu: "Also on" rows for the other albums (open album).
+
+## BitChord Connect — own Cast receiver (v1.9.98+)
+- docs/receiver/index.html: CAF v3 receiver holding the whole queue (window from the phone, topped up via "more"/"ended"), playing item by item; links asked of phones ("need" → "stream", viaPhone retry on error), prefetch chain AHEAD 6, waits for a phone instead of skipping when none is connected; broadcasts "state" (with ids/items on hello/connect) every 5 s and on changes; speaker's own next/prev (QUEUE_UPDATE/NEXT/PREV interceptors); disableIdleTimeout. Namespace urn:x-cast:com.bitchord.connect.
+- Hosting: GitHub Pages from main /docs (user must enable in repo Settings → Pages); URL https://juanmirodas.github.io/Musichord/receiver/ (raw.githack works meanwhile).
+- App: CastConnect (prefs bitchord_cast/connectAppId; CastOptionsProvider uses it, restart needed); CastPlayback delegates to ConnectLink when the session is ours (DMR path untouched): pushes the phone queue when the user moves playback from the phone, else takes up the speaker; phone follows "state".
+- Settings → "BitChord Connect (own speaker app)": App ID dialog. User must register a Custom Receiver at cast.google.com/publish ($5 once) and publish it.
+- Logs repo JuanmiRodas/bitchord-logs attached (empty until the app's token is set).

@@ -68,7 +68,14 @@ class ConnectLink(
      * (as Spotify moves playback onto a device); otherwise a speaker already
      * playing is taken up as it is.
      */
+    private var pushed = false
+    private var startPosition = 0L
+    private var startPlay = false
+
     fun start(pushPhone: Boolean, positionMs: Long, play: Boolean) {
+        startPosition = positionMs
+        startPlay = play
+        pushed = pushPhone
         runCatching { session.setMessageReceivedCallbacks(CastConnect.NAMESPACE, callback) }
         TrackLog.d(tag, "connect: joined the BitChord speaker (push phone queue: $pushPhone)")
         if (pushPhone) {
@@ -231,7 +238,16 @@ class ConnectLink(
             }
             m.optJSONArray("ids")?.let { arr -> sentIds = (0 until arr.length()).map { arr.optString(it) } }
         }
-        val id = m.optString("id").ifEmpty { null } ?: run { onChanged(); return }
+        val id = m.optString("id").ifEmpty { null } ?: run {
+            // The speaker holds nothing yet: this phone's queue goes over.
+            if (!pushed && (localPlayer()?.mediaItemCount ?: 0) > 0) {
+                pushed = true
+                sendQueue(localPlayer()?.currentMediaItem?.mediaId, startPosition, startPlay, keep = false)
+            }
+            onChanged()
+            return
+        }
+        pushed = true
         if (player != null && player.currentMediaItem?.mediaId != id) {
             val index = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == id }
             following = true
