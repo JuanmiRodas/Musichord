@@ -5758,6 +5758,14 @@ private fun BitChordApp(
                 onDismiss = { com.music.bitchord.ui.components.LikedCleanerUi.close() },
             )
         }
+        // BitChord Audio: sending the log to GitHub, offered once.
+        var logSetup by remember { mutableStateOf(!com.music.bitchord.data.LogUpload.configured && !com.music.bitchord.data.LogUpload.asked()) }
+        if (logSetup) {
+            com.music.bitchord.ui.components.LogUploadDialog(onDismiss = {
+                com.music.bitchord.data.LogUpload.markAsked()
+                logSetup = false
+            })
+        }
         // BitChord Audio: the details editor.
         val editSongs by com.music.bitchord.ui.components.MetadataEditor.songs.collectAsStateWithLifecycle()
         if (editSongs.isNotEmpty()) {

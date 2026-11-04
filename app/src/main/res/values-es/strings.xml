@@ -1617,4 +1617,5 @@
     <string name="connect_app_id">App ID (8 caracteres)</string>
     <string name="connect_restart">Se aplica al cerrar y volver a abrir la app. Vacío: vuelve al reproductor de Google.</string>
     <string name="connect_saved">Guardado. Cierra la app (deslízala) y ábrela de nuevo para usarla.</string>
+    <string name="log_upload_create_token">Crear el token en GitHub (elige "Only select repositories" → bitchord-logs, luego Generate y Copy — se rellena aquí al volver)</string>
 </resources>

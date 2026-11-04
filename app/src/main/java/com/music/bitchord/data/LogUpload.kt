@@ -80,6 +80,13 @@ object LogUpload {
         sendNow()
     }
 
+    /** Whether the set-up was offered once already (it is, once, at start). */
+    fun asked(): Boolean = prefs()?.getBoolean("asked", false) ?: true
+
+    fun markAsked() {
+        prefs()?.edit()?.putBoolean("asked", true)?.apply()
+    }
+
     fun clear() {
         prefs()?.edit()?.clear()?.apply()
         _repo.value = ""

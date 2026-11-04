@@ -31,14 +31,40 @@ import com.music.bitchord.data.LogUpload
 fun LogUploadDialog(onDismiss: () -> Unit) {
     val current by LogUpload.repo.collectAsState()
     val status by LogUpload.status.collectAsState()
-    var repo by remember { mutableStateOf(current) }
+    // BitChord Audio: your logs repository by default — only the token to give.
+    var repo by remember { mutableStateOf(current.ifBlank { "JuanmiRodas/bitchord-logs" }) }
     var token by remember { mutableStateOf("") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // A token copied on GitHub is picked up from the clipboard when coming back.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && token.isBlank()) {
+                val clip = runCatching {
+                    (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .primaryClip?.getItemAt(0)?.text?.toString()?.trim()
+                }.getOrNull()
+                if (clip != null && (clip.startsWith("github_pat_") || clip.startsWith("ghp_"))) token = clip
+            }
+        }
+        lifecycle.lifecycle.addObserver(observer)
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.log_upload_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(stringResource(R.string.log_upload_help), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = {
+                    val url = "https://github.com/settings/personal-access-tokens/new" +
+                        "?name=BitChord+logs&description=BitChord+Audio+sends+its+log+here" +
+                        "&target_name=" + repo.substringBefore('/').ifBlank { "JuanmiRodas" } +
+                        "&expires_in=366&contents=write"
+                    runCatching {
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }) { Text(stringResource(R.string.log_upload_create_token)) }
                 OutlinedTextField(
                     value = repo,
                     onValueChange = { repo = it },
