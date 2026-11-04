@@ -98,7 +98,7 @@ object LocalGroups {
     fun songsOf(browseId: String, folderSongs: List<Song>): List<Song> {
         val group = parse(browseId) ?: return emptyList()
         return when (group.kind) {
-            ALBUM -> folderSongs.filter { it.albumName == group.name }.sortedForAlbum()
+            ALBUM -> folderSongs.filter { it.albumName == group.name }.oneOfEach().sortedForAlbum()
             FOLDER -> folderSongs.filter { it.directory() == group.name }.sortedByTitle()
             else -> folderSongs.filter { it.artist == group.name }.sortedByTitle()
         }
@@ -293,4 +293,29 @@ fun List<Song>.useTrackTags(): Boolean {
     if (isEmpty() || none { it.trackNumber != null }) return false
     val album = first().albumName ?: return false
     return all { it.albumName == album }
+}
+
+/**
+ * BitChord Audio: an album's songs with each track once — the same track
+ * (number, title and length) kept in two copies (a FLAC and an MP3, or the
+ * same folder in two places) shows as the better copy only.
+ */
+private fun List<Song>.oneOfEach(): List<Song> {
+    fun seconds(s: Song) = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }?.fold(0) { a, p -> a * 60 + p }
+    val groups = LinkedHashMap<String, MutableList<Song>>()
+    for (s in this) {
+        val key = "${s.trackNumber ?: ""}|${s.title.lowercase().filter { it.isLetterOrDigit() }}|${s.artist.lowercase().filter { it.isLetterOrDigit() }}"
+        groups.getOrPut(key) { ArrayList() } += s
+    }
+    return groups.values.flatMap { copies ->
+        if (copies.size == 1) return@flatMap copies
+        // Copies within two seconds of each other are one track; longer apart, both stay.
+        val kept = ArrayList<Song>()
+        for (c in copies.sortedByDescending { com.music.bitchord.data.sources.OwnFileMatcher.qualityRank(it) }) {
+            val sc = seconds(c)
+            val twin = kept.any { k -> val sk = seconds(k); sk == null || sc == null || kotlin.math.abs(sk - sc) <= 2 }
+            if (!twin) kept += c
+        }
+        kept
+    }
 }

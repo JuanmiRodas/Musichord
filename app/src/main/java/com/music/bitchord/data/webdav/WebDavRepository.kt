@@ -280,7 +280,10 @@ object WebDavRepository {
         roots = listed.filter { it.first.hasMusic }.map { WebDavConfig.normalizeUrl(it.first.url).trimEnd('/') + "/" }
         val music = listed.filter { it.first.hasMusic }.map { it.second }
         val listing = WebDavClient.Listing(
-            audio = music.flatMap { it.audio }.distinctBy { it.url },
+            // BitChord Audio: by the decoded path — two folders that overlap
+            // list the same file with its name escaped differently
+            // ("[nZk]" / "%5BnZk%5D"), and it showed twice everywhere.
+            audio = music.flatMap { it.audio }.distinctBy { android.net.Uri.decode(it.url) },
             images = music.flatMap { it.images }.distinctBy { it.url },
             // Lyrics from every folder, music and lyrics alike, first folder first.
             lyrics = (listed.flatMap { it.second.lyrics } + autoLyrics.flatMap { it.lyrics }).distinctBy { it.url },
