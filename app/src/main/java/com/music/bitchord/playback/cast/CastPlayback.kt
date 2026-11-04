@@ -734,6 +734,29 @@ class CastPlayback(
             // went on to the next (a Cast queue does that). Not a skip anyone
             // asked for: that track is played again, served by the phone.
             val left = lastItemId
+            // BitChord Audio: the speaker was sent to a song (a skip) and left
+            // it again before it ever played — its stream failed and a Cast
+            // queue goes on to the next by itself, which skipped a second song.
+            // That song is sent again (from the phone, as a fresh load), once.
+            val wantedId = target
+            val nowId = status.getQueueItemById(itemId)?.mediaId() ?: ledger[itemId]
+            val leftId0 = status.getQueueItemById(left)?.mediaId() ?: ledger[left]
+            if (wantedId != null && !loading && sameTrack(leftId0, wantedId) && !sameTrack(nowId, wantedId)) {
+                val phone = localPlayer()
+                val index = phone?.let { indexOfMediaId(it, wantedId) }
+                if (phone != null && index != null && retriedFromPhone.add(wantedId)) {
+                    Log.w(TAG, "cast: speaker couldn't start ${phone.getMediaItemAt(index).mediaMetadata.title} and went on by itself; sending it again")
+                    CastRouting.proxyOnly.add(wantedId)
+                    streams.keys.removeAll { it.startsWith(wantedId) }
+                    lastItemId = itemId
+                    if (phone.currentMediaItemIndex != index) {
+                        lastLocalMoveAt = SystemClock.elapsedRealtime()
+                        phone.seekTo(index, 0L)
+                    }
+                    load(phone.getMediaItemAt(index), 0L, play = true)
+                    return
+                }
+            }
             val leftItem = status.getQueueItemById(left)
             val leftPlayed = playStartedAt[left]?.let { SystemClock.elapsedRealtime() - it }
             val leftLength = leftItem?.media?.streamDuration ?: 0L
