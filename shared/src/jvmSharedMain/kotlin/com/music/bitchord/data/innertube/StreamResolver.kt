@@ -262,6 +262,11 @@ object StreamResolver {
     suspend fun resolve(videoId: String): String {
         init
 
+        // BitChord Audio: a pCloud file or another source's track ("webdav:…",
+        // "src:…") is never a YouTube video — asking YouTube for one only
+        // failed three times over, slowly, logging pages of stack each time.
+        if (!YOUTUBE_ID.matches(videoId)) throw PermanentlyUnplayableException("not a YouTube video: ${videoId.take(40)}")
+
         recent[videoId]
             ?.takeIf { MonotonicClock.nowMs() - it.at < URL_TTL_MS }
             ?.let { return it.url }
@@ -1206,6 +1211,8 @@ object StreamResolver {
         resolve(videoId).toHttpUrlOrNull()?.queryParameter("clen")?.toLongOrNull()
 
     private class Resolved(val url: String, val at: Long)
+
+    private val YOUTUBE_ID = Regex("""[A-Za-z0-9_-]{11}""")
 
     /**
      * Stream URLs already resolved, by videoId — and, since [resolve] only ever

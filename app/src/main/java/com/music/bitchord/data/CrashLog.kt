@@ -108,6 +108,7 @@ object CrashLog {
         append("Android ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(") · ")
             .append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
         append("Written ").append(Date()).append('\n')
+        runCatching { append(MemoryWatch.line()).append('\n') }
         runCatching { context() }.getOrDefault(emptyList()).forEach { append(it).append('\n') }
         append("\n")
     }
