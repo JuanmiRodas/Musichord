@@ -165,3 +165,8 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - OwnFileMatcher: MAX_DRIFT_SEC 15 → 3 (official-video exception kept); unknown length → only sameArtist; ArtistLinks.linked only with close length. SourceMap MATCHER_VERSION 7, SAAVN_VERSION 4 (old matches redone); JioSaavn album match drift ≤ 3; NotSame respected by saavnSongFor/recordSaavn.
 - SongLinks.linksOf(song): stand-in's original (LocalLikes.youTubeOf), pCloud file it plays as, JioSaavn copy, picked copy → song menu "Not the same song" rows; unlinkFrom clears NotSame/SourceMap/saavn/LocalLikes/PreferredSource.
 - bitchord-logs repo still empty (app token not set) as of 4 Nov 14:00.
+
+## Logs live + unlink of picked copies (v1.9.103)
+- Logs arrive in JuanmiRodas/bitchord-logs (cloned at /home/claude/bitchord-logs): logs/OnePlus-CPH2747/<day>/<start>.log, reports/.
+- Case from the log: デイドリームジェネレーション (Matsuko Mawatari) kept playing Ricardo Cruz's JioSaavn cover — a copy picked by hand in the source chooser (PreferredSource.Chosen, spread by AlbumSources.applyToArtist). Unlink now clears Chosen/File for that id; OwnFirst/OwnFileMatcher ignore a Chosen copy blocked by NotSame; AlbumSources.best needs known lengths ≤ 3 s apart.
+- To look at: two OutOfMemoryError crashes on 3 Nov (heap 256 MB full) — main thread and binder.
