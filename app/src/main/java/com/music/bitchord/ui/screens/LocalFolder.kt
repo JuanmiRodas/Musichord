@@ -361,6 +361,9 @@ internal fun LazyListScope.localFolderItems(
                     onSwipeToQueue = { onSongSwipe(song) },
                     trailing = folder.onDownload?.let { download ->
                         { RowDownloadButton(song, palette) { download(listOf(song)) } }
+                    } ?: if (state.selecting) null else {
+                        // BitChord Audio: liked or not, beside the time.
+                        { com.music.bitchord.ui.components.LikeStar(song, palette.accent, palette.background) }
                     },
                 )
                 if (index < songs.lastIndex) FolderDivider(palette)

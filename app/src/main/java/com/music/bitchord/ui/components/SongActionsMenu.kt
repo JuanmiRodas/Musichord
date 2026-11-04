@@ -402,6 +402,29 @@ fun SongActionsMenu(
         ActionRow(SfIcons.Pencil, stringResource(R.string.edit_info), accent = palette.accent) {
             MetadataEditor.open(listOf(song))
         }
+        // BitChord Audio: the copy this song plays as, when it is another
+        // song's file (the same name, a similar length) — to say it isn't.
+        val playsAs by produceState<Song?>(initialValue = null, song.videoId) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val sec = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }?.fold(0) { a, p -> a * 60 + p }?.takeIf { it > 0 }
+                    (com.music.bitchord.data.sources.OwnFileMatcher.decide(song.title, song.artist, sec, song.albumName, song.videoId)
+                        as? com.music.bitchord.data.sources.OwnFileMatcher.Play)?.file?.takeIf { it.videoId != song.videoId }
+                }.getOrNull()
+            }
+        }
+        playsAs?.let { other ->
+            val context = androidx.compose.ui.platform.LocalContext.current
+            ActionRow(
+                icon = SfIcons.Revert,
+                label = stringResource(R.string.not_same_song),
+                description = stringResource(R.string.plays_as, other.title, other.artist, other.albumName.orEmpty()),
+                accent = palette.accent,
+            ) {
+                com.music.bitchord.data.SongLinks.unlink(song, other)
+                android.widget.Toast.makeText(context, context.getString(R.string.unlinked_songs), android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
         // BitChord Audio: the other albums this song is on (a single, a
         // compilation, a deluxe edition) — what is known here at once, and
         // what YouTube Music adds a moment later.

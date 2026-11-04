@@ -76,6 +76,14 @@ object LocalLikes {
 
     fun youTubeOf(id: String): String? = _links.value[id]
 
+    /** BitChord Audio: [a] and [b] are not the same song — a heart on one isn't on the other. */
+    fun unlink(a: String, b: String) {
+        val drop = _links.value.filter { (k, v) -> (k == a && v == b) || (k == b && v == a) }.keys
+        if (drop.isEmpty()) return
+        _links.value = _links.value - drop
+        prefs?.edit()?.apply { drop.forEach { remove(LINK + it) } }?.apply()
+    }
+
     /**
      * [id] is the same recording as the liked song [likedId] (another upload
      * of it on YouTube, your file, JioSaavn's copy) — found for a search or

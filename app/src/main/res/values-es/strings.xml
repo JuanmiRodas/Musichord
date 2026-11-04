@@ -1607,4 +1607,7 @@
     <string name="unlike">Quitar de me gusta</string>
     <string name="also_on_albums">También en</string>
     <string name="also_on_looking">Buscando otros álbumes…</string>
+    <string name="not_same_song">No es la misma canción</string>
+    <string name="plays_as">Suena como %1$s · %2$s · %3$s — toca si es otra canción</string>
+    <string name="unlinked_songs">Desvinculadas: cada una suena como ella misma</string>
 </resources>

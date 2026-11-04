@@ -88,7 +88,7 @@ object SourceMap {
     private fun gen(): Int = WebDavRepository.library().size * 100 + MATCHER_VERSION
 
     /** Bumped when matching improves: songs with no file then get another look. */
-    private const val MATCHER_VERSION = 5
+    private const val MATCHER_VERSION = 6
 
     /** The entry for [videoId], if it still holds for the library as it is. */
     fun lookup(videoId: String): Entry? {
@@ -176,6 +176,11 @@ object SourceMap {
         ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
 
     fun fileSong(id: String): Song? = WebDavRepository.library().firstOrNull { it.videoId == id }
+
+    /** BitChord Audio: what [videoId] was matched to is wrong — matched again next time. */
+    fun forget(videoId: String) {
+        if (entries.remove(videoId) != null) save()
+    }
 
     fun record(videoId: String, file: Song?) {
         if (!WebDavConfig.isConfigured(AppSettings.webdavUrl.value)) return

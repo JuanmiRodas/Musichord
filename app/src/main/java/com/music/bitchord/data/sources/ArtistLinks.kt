@@ -50,6 +50,15 @@ object ArtistLinks {
         return out - k
     }
 
+    /** BitChord Audio: the two names are different artists after all (both ways round). */
+    fun forget(a: String, b: String) {
+        val ka = key(a)
+        val kb = key(b)
+        listOf(ka to kb, kb to ka).forEach { (x, y) ->
+            links[x]?.let { set -> if (set.remove(y)) prefs?.edit()?.putStringSet(x, HashSet(set))?.apply() }
+        }
+    }
+
     fun linked(youtubeArtist: String, fileArtist: String): Boolean =
         links[key(youtubeArtist)]?.contains(key(fileArtist)) == true
 }

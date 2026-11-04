@@ -107,6 +107,7 @@ object WebDavRepository {
         LibraryFolders.init(context)
         com.music.bitchord.data.sources.PreferredSource.init(context)
         com.music.bitchord.data.sources.ArtistLinks.init(context)
+        com.music.bitchord.data.sources.NotSame.init(context)
         com.music.bitchord.data.LocalLikes.init(context)
         com.music.bitchord.data.sources.SourceMap.init(context)
         com.music.bitchord.data.sources.JapaneseNames.init(context)

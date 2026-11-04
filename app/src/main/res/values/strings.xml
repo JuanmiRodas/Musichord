@@ -1499,4 +1499,7 @@
     <string name="unlike">Remove from liked</string>
     <string name="also_on_albums">Also on</string>
     <string name="also_on_looking">Looking for other albums…</string>
+    <string name="not_same_song">Not the same song</string>
+    <string name="plays_as">Plays as %1$s · %2$s · %3$s — tap if it\'s another song</string>
+    <string name="unlinked_songs">Unlinked: each one plays as itself now</string>
 </resources>

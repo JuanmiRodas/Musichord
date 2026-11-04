@@ -227,8 +227,14 @@ object OwnFileMatcher {
                     file.durationMillis().takeIf { it > 0 }?.let { abs(want - (it / 1000).toInt()) }
                 }
                 val close = drift != null && drift <= CONFIRM_DRIFT_SEC
+                // BitChord Audio: an album with both artists on it, each
+                // under their own name (a soundtrack, a split, a compilation),
+                // says they are two artists — not one under two names. Two
+                // songs there with the same title are two songs.
+                val bothOnAlbum = !artists.any { sameArtist(artist, it) } && hasOwnTracksOn(artist, file.albumName)
                 when {
                     artists.any { sameArtist(artist, it) } -> true
+                    bothOnAlbum -> false
                     close && artists.any { nearSpelling(artist, it) } -> true
                     close && sameAlbum(album, file.albumName) -> {
                         ArtistLinks.learn(artist, file.artist)
@@ -262,6 +268,12 @@ object OwnFileMatcher {
     }
 
     private const val CONFIRM_DRIFT_SEC = 3
+
+    /** Whether your library has songs by [artist] (under that name) on [album]. */
+    private fun hasOwnTracksOn(artist: String, album: String?): Boolean {
+        if (album.isNullOrBlank()) return false
+        return WebDavRepository.library().any { f -> sameAlbum(album, f.albumName) && sameArtist(artist, f.artist) }
+    }
 
     private val VIDEO_UPLOAD = Regex(
         """(official|oficial|music|lyric)\s*(music\s*)?(video|vídeo|clip|mv)|music\s*clip|\bm/?v\b|vídeo\s+oficial|video\s+oficial""",
@@ -374,12 +386,13 @@ object OwnFileMatcher {
         val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value
         if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return Keep("Settings: YouTube first")
         // Worked out before for this song (see SourceMap): no matching again.
-        val known = videoId?.let(SourceMap::lookup)
+        val known = videoId?.let(SourceMap::lookup)?.takeUnless { NotSame.blocked(videoId, it.file) }
         val best = if (known != null) {
             known.file?.let(SourceMap::fileSong)
                 ?: return Keep("no file of yours matches (${library.size} songs in your library)")
         } else {
-            matches(title, artist, durationSec, album).firstOrNull()
+            // BitChord Audio: never one you said is another song.
+            matches(title, artist, durationSec, album).firstOrNull { !NotSame.blocked(videoId, it.videoId) }
                 .also { found -> videoId?.let { SourceMap.record(it, found) } }
                 ?: return Keep("no file of yours matches (${library.size} songs in your library)")
         }
