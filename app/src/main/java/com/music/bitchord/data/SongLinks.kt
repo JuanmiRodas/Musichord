@@ -65,6 +65,13 @@ object SongLinks {
         val other = LocalLikes.songFor(otherId)
         if (other != null) unlink(song, other) else unlinkIds(song.videoId, otherId)
         unlinkIds(song.videoId, otherId)
+        // A copy picked by hand for it (and spread to the artist's other songs)
+        // is let go of too — that was what kept coming back.
+        when (val c = PreferredSource.get(song)) {
+            is PreferredSource.Chosen -> if (c.song.videoId == otherId) PreferredSource.clear(song)
+            is PreferredSource.File -> if (c.id == otherId) PreferredSource.clear(song)
+            else -> Unit
+        }
         // The song it replaced keeps its own copy choices clean too.
         LocalLikes.songFor(otherId)?.let { o ->
             if ((PreferredSource.get(o) as? PreferredSource.File)?.id == song.videoId) PreferredSource.clear(o)

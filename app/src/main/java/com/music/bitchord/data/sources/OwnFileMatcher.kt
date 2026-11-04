@@ -376,13 +376,14 @@ object OwnFileMatcher {
 
     fun decide(title: String, artist: String, durationSec: Int?, album: String? = null, videoId: String? = null): Verdict {
         // A copy picked by hand from another source holds without pCloud.
-        (PreferredSource.get(title, artist) as? PreferredSource.Chosen)?.let { return Play(it.song) }
+        (PreferredSource.get(title, artist) as? PreferredSource.Chosen)
+            ?.takeUnless { NotSame.blocked(videoId, it.song.videoId) }?.let { return Play(it.song) }
         if (!WebDavRepository.isConfigured()) return Keep("pCloud not connected")
         val library = WebDavRepository.library()
         if (library.isEmpty()) return Keep("pCloud library not loaded yet")
         when (val choice = PreferredSource.get(title, artist)) {
             PreferredSource.YouTube -> return Keep("you chose YouTube for this song")
-            is PreferredSource.Chosen -> return Play(choice.song)
+            is PreferredSource.Chosen -> if (!NotSame.blocked(videoId, choice.song.videoId)) return Play(choice.song)
             is PreferredSource.File -> library.firstOrNull { it.videoId == choice.id }?.let { return Play(it) }
             null -> Unit
         }

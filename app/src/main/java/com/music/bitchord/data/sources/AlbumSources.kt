@@ -187,8 +187,13 @@ object AlbumSources {
         val keys = OwnFileMatcher.titleKeys(song.title) + runCatching { OwnFileMatcher.soundKeys(song.title) }.getOrDefault(emptySet())
         return pool.mapNotNull { c ->
             val cSec = seconds(c.durationText)
-            val drift = if (sec == null || cSec == null) 3 else abs(sec - cSec)
-            if (drift > 6) return@mapNotNull null
+            // BitChord Audio: the same song lasts the same — a length not
+            // known on either side isn't taken on trust, and nothing you said
+            // is another song.
+            if (sec == null || cSec == null) return@mapNotNull null
+            val drift = abs(sec - cSec)
+            if (drift > 3) return@mapNotNull null
+            if (NotSame.blocked(song.videoId, c.videoId)) return@mapNotNull null
             val cKeys = OwnFileMatcher.titleKeys(c.title) + runCatching { OwnFileMatcher.soundKeys(c.title) }.getOrDefault(emptySet())
             val score = when {
                 cKeys.any { it in keys } -> 3

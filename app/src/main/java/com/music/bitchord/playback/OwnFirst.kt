@@ -72,7 +72,8 @@ internal class OwnFirst(
         // your choice, not the own-files rule (which waits for Wi-Fi).
         when (val choice = com.music.bitchord.data.sources.PreferredSource.get(song)) {
             is com.music.bitchord.data.sources.PreferredSource.Chosen ->
-                return if (AppSettings.meteredConnection.value != null && !ListenTogether.state.value.inParty) {
+                // Unless you said it is another song.
+                return if (!com.music.bitchord.data.sources.NotSame.blocked(song.videoId, choice.song.videoId) && AppSettings.meteredConnection.value != null && !ListenTogether.state.value.inParty) {
                     asStandIn(choice.song, song)
                 } else {
                     null
