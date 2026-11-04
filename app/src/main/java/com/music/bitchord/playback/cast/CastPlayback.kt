@@ -234,6 +234,8 @@ class CastPlayback(
 
     // ---- session lifecycle --------------------------------------------------
 
+    private val queueCallback = object : com.google.android.gms.cast.framework.media.MediaQueue.Callback() {}
+
     private val callback = object : RemoteMediaClient.Callback() {
         override fun onStatusUpdated() = onStatus()
     }
@@ -257,6 +259,8 @@ class CastPlayback(
         session = newSession
         client = remote
         remote.registerCallback(callback)
+        // Keeps the speaker's full queue (item ids) followed — see [remoteIds].
+        runCatching { remote.mediaQueue.registerCallback(queueCallback) }
         active = true
         finished = false
 
@@ -525,6 +529,7 @@ class CastPlayback(
     fun release() {
         loadJob?.cancel()
         reconcileJob?.cancel()
+        runCatching { client?.mediaQueue?.unregisterCallback(queueCallback) }
         client?.unregisterCallback(callback)
         client = null
         session = null
@@ -538,6 +543,7 @@ class CastPlayback(
         alias = null
         heartbeat?.cancel()
         heartbeat = null
+        ledger.clear()
         connect?.stop()
         connect = null
         target = null
@@ -571,8 +577,11 @@ class CastPlayback(
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) scheduleReconcile()
             return
         }
-        val queued = remote.mediaStatus?.queueItems?.firstOrNull { it.mediaId() == item.mediaId }
-        if (queued != null && !loading) {
+        val queuedId = remoteIds(remote).let { ids ->
+            val here = ids.indexOf(remote.mediaStatus?.currentItemId ?: MediaQueueItem.INVALID_ITEM_ID)
+            ids.drop(here + 1).firstOrNull { remoteIdOf(remote, it) == item.mediaId }
+        }
+        if (queuedId != null && !loading) {
             // A track the receiver already holds is a jump, not a reload, and
             // the jump is instant.
             wantsPlay = true
@@ -581,7 +590,7 @@ class CastPlayback(
             requestedAt = SystemClock.elapsedRealtime()
             Log.d(TAG, "cast: phone moved to ${item.mediaMetadata.title}; speaker jumps to its queued copy")
             expect(item.mediaId)
-            remote.queueJumpToItem(queued.itemId, null)
+            remote.queueJumpToItem(queuedId, null)
             sink?.onRemotePlaybackChanged()
         } else {
             // Skips in quick succession: only the one stopped on is fetched.
@@ -855,6 +864,8 @@ class CastPlayback(
                 return@run
             }
             lastItemId = remote.mediaStatus?.currentItemId ?: lastItemId
+            ledger.clear()
+            item?.let { if (lastItemId != MediaQueueItem.INVALID_ITEM_ID) ledger[lastItemId] = it.mediaId }
             loading = false
             sink?.onRemotePlaybackChanged()
             scheduleReconcile()
@@ -896,11 +907,16 @@ class CastPlayback(
         val remote = client ?: return
         val player = localPlayer() ?: return
         val status = remote.mediaStatus ?: return
-        val queue = status.queueItems
         val startItemId = status.currentItemId
-        val here = queue.indexOfFirst { it.itemId == startItemId }
+        // BitChord Audio: the speaker's whole queue, by item id. The media
+        // status only carries the few items around the one playing — read
+        // from there, most of the queue looked missing, so every pass removed
+        // what it could see and added the rest again: the queue grew with
+        // copies, and songs came round a second time.
+        val ids = remoteIds(remote)
+        val here = ids.indexOf(startItemId)
         if (here < 0) return
-        val remoteAhead = queue.drop(here + 1)
+        val aheadIds = ids.drop(here + 1)
 
         val current = player.currentMediaItemIndex
         if (current == C.INDEX_UNSET) return
@@ -914,20 +930,15 @@ class CastPlayback(
         if (refreshing) {
             refreshAhead = false
         } else {
-            while (kept < remoteAhead.size && kept < wanted.size && remoteAhead[kept].mediaId() == wanted[kept].mediaId) {
+            while (kept < aheadIds.size && kept < wanted.size && remoteIdOf(remote, aheadIds[kept]) == wanted[kept].mediaId) {
                 kept++
             }
         }
-        if (kept == remoteAhead.size && kept == wanted.size) return
+        if (kept == aheadIds.size && kept == wanted.size) return
 
-        // BitChord Audio: one track at a time — its stream found (the slow
-        // part), then put on the speaker only if nothing moved meanwhile.
-        // Resolving can take seconds; a skip, the speaker moving on, or a new
-        // load in that time made an edit land on a queue it was not planned
-        // for — the track just loaded queued again after itself (a song played
-        // twice), or the one skipped put back after the new one. One at a time
-        // also means the next track is on the speaker as soon as it can be,
-        // not after all the others.
+        // One track at a time — its stream found (the slow part), then put on
+        // the speaker only if nothing moved meanwhile (a skip, the speaker
+        // moving on, a new load).
         fun stale(): Boolean =
             !active || loading || generation != loadGeneration ||
                 remote.mediaStatus?.currentItemId != startItemId ||
@@ -935,25 +946,60 @@ class CastPlayback(
         fun replan() {
             Log.d(TAG, "cast: queue changed while finding the next streams; planning again")
             if (refreshing) refreshAhead = true
-            // At most a few times in a row; the next change plans again anyway.
             if (++replans <= 3) reconcileAgain = true
         }
         // What doesn't match goes first (quick), then the missing ones.
-        val drop = remoteAhead.drop(kept)
+        val drop = aheadIds.drop(kept)
         if (drop.isNotEmpty()) {
             if (stale()) return replan()
-            remote.queueRemoveItems(drop.map { it.itemId }.toIntArray(), null).awaitResult()
+            remote.queueRemoveItems(drop.toIntArray(), null).awaitResult()
+            drop.forEach { ledger.remove(it) }
+            if (drop.size > wanted.size) Log.d(TAG, "cast: took ${drop.size} stray entries off the speaker's queue")
         }
         val queued = mutableListOf<String>()
         for (next in wanted.drop(kept)) {
             val queueItem = buildQueueItem(next, autoplay = true) ?: break
             if (stale()) return replan()
+            val before = remoteIds(remote).toHashSet()
             remote.queueInsertItems(arrayOf(queueItem), MediaQueueItem.INVALID_ITEM_ID, null).awaitResult()
+            learnNewId(remote, before, next.mediaId)
             queued += next.mediaId
         }
         replans = 0
         if (queued.isNotEmpty()) {
             Log.d(TAG, "cast: speaker has the next ${kept + queued.size} queued (${queued.size} added)")
+        }
+    }
+
+    /** Receiver item id → the phone's media id, for the items this phone put there. */
+    private val ledger = java.util.concurrent.ConcurrentHashMap<Int, String>()
+
+    /** Every item id in the speaker's queue, in order (the media status alone holds only a few). */
+    private fun remoteIds(remote: RemoteMediaClient): List<Int> {
+        val all = runCatching { remote.mediaQueue.itemIds.toList() }.getOrDefault(emptyList())
+        if (all.isNotEmpty()) return all
+        return remote.mediaStatus?.queueItems?.map { it.itemId }.orEmpty()
+    }
+
+    private fun remoteIdOf(remote: RemoteMediaClient, itemId: Int): String? =
+        ledger[itemId]
+            ?: remote.mediaStatus?.getQueueItemById(itemId)?.mediaId()?.also { ledger[itemId] = it }
+            ?: runCatching {
+                val q = remote.mediaQueue
+                val at = q.indexOfItemWithId(itemId)
+                if (at >= 0) q.getItemAtIndex(at, true)?.mediaId() else null
+            }.getOrNull()?.also { ledger[itemId] = it }
+
+    /** After an insert: the one new item id is [mediaId]'s. */
+    private suspend fun learnNewId(remote: RemoteMediaClient, before: Set<Int>, mediaId: String) {
+        repeat(15) {
+            val fresh = remoteIds(remote).filter { it !in before }
+            if (fresh.size == 1) {
+                ledger[fresh.first()] = mediaId
+                return
+            }
+            if (fresh.isNotEmpty()) return
+            delay(100)
         }
     }
 
@@ -1006,7 +1052,7 @@ class CastPlayback(
 
     private fun remoteMediaId(): String? {
         val status = client?.mediaStatus ?: return null
-        return status.getQueueItemById(status.currentItemId)?.mediaId()
+        return status.getQueueItemById(status.currentItemId)?.mediaId() ?: ledger[status.currentItemId]
     }
 
     /**
