@@ -147,3 +147,9 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - MetadataEditorDialog (MetadataEditor.open): song menu "Edit details"; album ⋯ "Edit album details" (shared fields only); selection.
 - CoverPicker.open(list): album ⋯ "Change cover of all songs", selection.
 - ReleaseSelection: album/playlist ⋯ "Select songs" → tap ticks; bar: select all, cover, details, play next, add to queue, cancel.
+
+## Suggestions, like star, other albums (v1.9.95)
+- DetailsLookup: iTunes (song/album + album track list), Deezer (search + album: date, genre, tracks), MusicBrainz (release-group/recording, tags), Wikidata (P31 album/song, P175, P577, P136, P361). Filtered by artist; consensus fills empty fields in MetadataEditorDialog (marked "filled in"), chips per field for other answers; album edit can set each song's track number from the found track list.
+- AlbumAppearances: same song = exact title + first artist (versions separate), from LikedMusicCache.likedSongs (new flow) + pCloud library; likedCopy(), known(), search() (+ YouTube Music song search).
+- LikeStar on album/playlist rows (DetailScreen trailing, after duration): filled when liked here or elsewhere, "+" inside when on several albums; tap → LikeLookup.toggle on the liked copy (or this one).
+- Song menu: "Also on" rows for the other albums (open album).
