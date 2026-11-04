@@ -170,3 +170,8 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - Logs arrive in JuanmiRodas/bitchord-logs (cloned at /home/claude/bitchord-logs): logs/OnePlus-CPH2747/<day>/<start>.log, reports/.
 - Case from the log: デイドリームジェネレーション (Matsuko Mawatari) kept playing Ricardo Cruz's JioSaavn cover — a copy picked by hand in the source chooser (PreferredSource.Chosen, spread by AlbumSources.applyToArtist). Unlink now clears Chosen/File for that id; OwnFirst/OwnFileMatcher ignore a Chosen copy blocked by NotSame; AlbumSources.best needs known lengths ≤ 3 s apart.
 - To look at: two OutOfMemoryError crashes on 3 Nov (heap 256 MB full) — main thread and binder.
+
+## Cast queue read in full; failed jump retried (v1.9.105)
+- From the log: "speaker has the next 8 queued (7 added)" every 20 s — MediaStatus.queueItems only holds a few items, so reconcile saw the queue as short, removed what it saw and appended the rest again: the speaker queue grew with copies (EVERCHiLD came round 3 times). reconcileOnce now uses RemoteMediaClient.mediaQueue item ids (MediaQueue.Callback registered) + a ledger itemId→mediaId (learned on insert/load), removes strays.
+- New World → Orion: jumped to New World (served by the phone; "cast stream: Connection reset"), the speaker failed it and moved on by itself. If the target song is left before playing, it's reloaded once (proxyOnly) instead of skipped.
+- pCloud API login fails ("1022 Please provide 'code'": 2FA), so pCloud files always go through the phone proxy; proxy's first request probes the whole file for its length (slow).
