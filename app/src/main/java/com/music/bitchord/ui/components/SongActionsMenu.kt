@@ -402,6 +402,30 @@ fun SongActionsMenu(
         ActionRow(SfIcons.Pencil, stringResource(R.string.edit_info), accent = palette.accent) {
             MetadataEditor.open(listOf(song))
         }
+        // BitChord Audio: the other albums this song is on (a single, a
+        // compilation, a deluxe edition) — what is known here at once, and
+        // what YouTube Music adds a moment later.
+        val appearances by produceState(
+            initialValue = com.music.bitchord.data.AlbumAppearances.known(song),
+            song.videoId,
+        ) {
+            value = runCatching { com.music.bitchord.data.AlbumAppearances.search(song) }.getOrDefault(value)
+        }
+        val others = appearances.filter { a ->
+            a.name.lowercase().filter(Char::isLetterOrDigit) != song.albumName.orEmpty().lowercase().filter(Char::isLetterOrDigit)
+        }
+        if (others.isNotEmpty()) {
+            IosMenuSeparator()
+            others.take(6).forEach { a ->
+                ActionRow(
+                    icon = SfIcons.Album,
+                    label = a.name,
+                    description = stringResource(R.string.also_on_albums) + " · " + a.source,
+                    accent = palette.accent,
+                    enabled = a.browseId != null,
+                ) { a.browseId?.let(onOpenAlbum) }
+            }
+        }
 
         // The player's own: about the track playing right now rather than
         // about the song as a thing in a library.

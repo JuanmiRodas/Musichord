@@ -1496,4 +1496,7 @@
     <string name="edit_info_found">Found in %1$s — empty fields filled in, other answers below each field.</string>
     <string name="edit_info_filled">Filled in from what was found</string>
     <string name="edit_info_track_numbers">Track numbers from the album\'s track list (%1$d of %2$d songs)</string>
+    <string name="unlike">Remove from liked</string>
+    <string name="also_on_albums">Also on</string>
+    <string name="also_on_looking">Looking for other albums…</string>
 </resources>

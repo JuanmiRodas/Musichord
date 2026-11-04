@@ -65,7 +65,13 @@ object LikedMusicCache {
 
     private fun publish(songs: List<Song>) {
         _likedIds.value = songs.mapTo(HashSet()) { it.videoId }
+        _likedSongs.value = songs
     }
+
+    private val _likedSongs = kotlinx.coroutines.flow.MutableStateFlow<List<Song>>(emptyList())
+
+    /** BitChord Audio: the saved Liked Music itself (albums included), for [AlbumAppearances]. */
+    val likedSongs: kotlinx.coroutines.flow.StateFlow<List<Song>> = _likedSongs
 
     /** The profile Liked Music was last saved for — whose list an export takes. */
     @Volatile

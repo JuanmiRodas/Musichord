@@ -1604,4 +1604,7 @@
     <string name="edit_info_found">Encontrado en %1$s — campos vacíos rellenados, otras respuestas debajo de cada campo.</string>
     <string name="edit_info_filled">Rellenado con lo encontrado</string>
     <string name="edit_info_track_numbers">Números de pista según la lista del álbum (%1$d de %2$d canciones)</string>
+    <string name="unlike">Quitar de me gusta</string>
+    <string name="also_on_albums">También en</string>
+    <string name="also_on_looking">Buscando otros álbumes…</string>
 </resources>

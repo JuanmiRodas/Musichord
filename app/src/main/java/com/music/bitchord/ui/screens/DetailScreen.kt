@@ -785,6 +785,16 @@ fun DetailScreen(
                             isPlaying = isCurrent && isPlaying,
                             activeTint = palette.accent,
                             searchPlayingStyle = true,
+                            // BitChord Audio: liked or not, beside the time — a tap to change it.
+                            trailing = if (picking) null else {
+                                {
+                                    com.music.bitchord.ui.components.LikeStar(
+                                        song = song,
+                                        tint = palette.accent,
+                                        background = palette.background,
+                                    )
+                                }
+                            },
                         )
                         if (position < matches.lastIndex) {
                             HorizontalDivider(
