@@ -1610,4 +1610,11 @@
     <string name="not_same_song">No es la misma canción</string>
     <string name="plays_as">Suena como %1$s · %2$s · %3$s — toca si es otra canción</string>
     <string name="unlinked_songs">Desvinculadas: cada una suena como ella misma</string>
+    <string name="connect_title">BitChord Connect (app propia en el altavoz)</string>
+    <string name="connect_off">Desactivado · se usa el reproductor de Google</string>
+    <string name="connect_on">Activado · la app %1$s guarda la cola en el altavoz</string>
+    <string name="connect_help">Con nuestra propia app en el altavoz, el altavoz guarda toda la cola, como Spotify: sigue de canción en canción sin el teléfono, y cualquier teléfono que se conecte muestra y controla la misma música. Regístrala una vez en la consola de Google Cast (cast.google.com/publish): Add new application → Custom Receiver, con esta dirección; después publícala y escribe aquí su App ID.</string>
+    <string name="connect_app_id">App ID (8 caracteres)</string>
+    <string name="connect_restart">Se aplica al cerrar y volver a abrir la app. Vacío: vuelve al reproductor de Google.</string>
+    <string name="connect_saved">Guardado. Cierra la app (deslízala) y ábrela de nuevo para usarla.</string>
 </resources>

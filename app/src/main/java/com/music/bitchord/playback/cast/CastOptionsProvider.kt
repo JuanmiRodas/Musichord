@@ -27,7 +27,9 @@ class CastOptionsProvider : OptionsProvider {
             .setMediaSessionEnabled(false)
             .build()
         return CastOptions.Builder()
-            .setReceiverApplicationId(CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID)
+            // BitChord Audio: our own speaker app when its id is set in
+            // Settings (BitChord Connect), else Google's default one.
+            .setReceiverApplicationId(CastConnect.appId(context) ?: CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID)
             .setCastMediaOptions(media)
             // Leaving the receiver running after the phone has let go of it
             // keeps a TV on a "casting" screen with nothing driving it.

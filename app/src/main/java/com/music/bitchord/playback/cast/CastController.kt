@@ -145,6 +145,7 @@ object CastController {
 
     private fun onReady(app: Context, ctx: CastContext) {
         appContext = app
+        CastConnect.appId(app)
         prefs = app.getSharedPreferences("bitchord_cast", Context.MODE_PRIVATE)
         castContext = ctx
         router = MediaRouter.getInstance(app)

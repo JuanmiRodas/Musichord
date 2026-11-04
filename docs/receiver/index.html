@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>BitChord Audio</title>
+  <!--
+    BitChord Audio's own Cast receiver ("BitChord Connect").
+
+    The speaker holds the whole queue itself — as Spotify's does — so the music
+    goes on from song to song whether a phone is connected or not, and any
+    phone (or, later, the browser) that connects sees the same queue and the
+    same song and controls it.
+
+    The phone only finds streams: when the speaker needs the link for a song it
+    asks ("need"), a connected phone answers ("stream"). Links are asked for a
+    few songs ahead, so the next ones are ready even if the phone sleeps.
+
+    Messages, on urn:x-cast:com.bitchord.connect (JSON):
+      phone → speaker
+        hello                                  → state (with the queue)
+        queue  {items, current, position, play, keep}
+               items: [{id, song, url?, mime?}]   (song: the app's song JSON)
+               keep: the song playing goes on if it is `current`
+        jump   {id, position?}
+        next | prev | stop
+        repeat {mode: 0 off, 1 one, 2 all}
+        stream {id, url, mime, art?} | {id, error}
+      speaker → phones
+        state  {index, id, position, duration, playing, repeat, version, ids?, items?}
+        need   {id, viaPhone}          a link for this song, please
+        more   {lastId}                the queue is nearly done: more after this
+        ended  {lastId}                the queue ran out
+  -->
+  <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <style>
+    body { margin: 0; background: #000; }
+    cast-media-player {
+      --background-color: #000;
+      --progress-color: #fff;
+      --font-family: "Google Sans", Roboto, sans-serif;
+    }
+  </style>
+</head>
+<body>
+<cast-media-player></cast-media-player>
+<script>
+(function () {
+  'use strict';
+  const NS = 'urn:x-cast:com.bitchord.connect';
+  const AHEAD = 6;                       // links kept ready ahead
+  const LINK_MAX_AGE = 4 * 3600 * 1000;  // a link older than this is asked for again
+  const NEED_TIMEOUT = 20000;
+  const MORE_WHEN_LEFT = 10;
+
+  const context = cast.framework.CastReceiverContext.getInstance();
+  const player = context.getPlayerManager();
+  const Msg = cast.framework.messages;
+  const Ev = cast.framework.events;
+
+  /** The queue: [{id, song, url, mime, at, viaPhone}] */
+  let queue = [];
+  let index = -1;
+  let repeat = 0;
+  let version = 0;
+  let loadingId = null;
+  const waiting = new Map();   // id -> [resolve]
+  const retried = new Set();   // ids tried once more, served by the phone
+
+  const log = (...a) => console.log('[BitChord]', ...a);
+
+  function send(data, to) {
+    try { context.sendCustomMessage(NS, to, data); } catch (e) { log('send failed', e); }
+  }
+
+  function senders() { return context.getSenders().length; }
+
+  function state(withQueue, to) {
+    const media = player.getMediaInformation();
+    const s = {
+      type: 'state',
+      index,
+      id: queue[index] ? queue[index].id : null,
+      position: Math.round((player.getCurrentTimeSec() || 0) * 1000),
+      duration: Math.round(((media && media.duration) || 0) * 1000),
+      playing: player.getPlayerState() === Msg.PlayerState.PLAYING,
+      buffering: player.getPlayerState() === Msg.PlayerState.BUFFERING || loadingId !== null,
+      repeat,
+      version,
+    };
+    if (withQueue) {
+      s.ids = queue.map(q => q.id);
+      // The songs too, as far as one message holds them, for a phone that has none.
+      let size = 0;
+      const items = [];
+      const from = Math.max(0, index - 20);
+      for (let i = from; i < queue.length && size < 45000; i++) {
+        const json = queue[i].song || null;
+        size += (json ? JSON.stringify(json).length : 0) + 40;
+        items.push({ id: queue[i].id, song: json });
+      }
+      s.items = items;
+      s.itemsFrom = from;
+    }
+    send(s, to);
+  }
+
+  function fresh(item) {
+    return item.url && (Date.now() - item.at) < LINK_MAX_AGE;
+  }
+
+  /** The link for [item]: had already, or asked of the phones. */
+  function linkFor(item) {
+    if (fresh(item)) return Promise.resolve(item);
+    return new Promise((resolve) => {
+      const list = waiting.get(item.id) || [];
+      list.push(resolve);
+      waiting.set(item.id, list);
+      if (list.length === 1) send({ type: 'need', id: item.id, viaPhone: !!item.viaPhone });
+      setTimeout(() => {
+        const l = waiting.get(item.id);
+        if (l && l.includes(resolve)) {
+          waiting.set(item.id, l.filter(r => r !== resolve));
+          resolve(fresh(item) ? item : null);
+        }
+      }, NEED_TIMEOUT);
+    });
+  }
+
+  function gotStream(m) {
+    const items = queue.filter(q => q.id === m.id);
+    items.forEach(it => {
+      if (m.url) { it.url = m.url; it.mime = m.mime || 'audio/mp4'; it.at = Date.now(); if (m.art) it.art = m.art; }
+    });
+    const list = waiting.get(m.id) || [];
+    waiting.delete(m.id);
+    list.forEach(r => r(items.find(it => it.url) || null));
+  }
+
+  function prefetch() {
+    for (let i = index + 1; i <= index + AHEAD && i < queue.length; i++) {
+      if (!fresh(queue[i])) { linkFor(queue[i]); break; }  // one at a time; the next when it lands
+    }
+  }
+
+  function metadataOf(item) {
+    const md = new Msg.MusicTrackMediaMetadata();
+    const s = item.song || {};
+    md.title = s.title || '';
+    md.artist = s.artist || '';
+    md.albumName = s.album || '';
+    const art = item.art || s.artwork;
+    if (art) md.images = [new Msg.Image(art)];
+    return md;
+  }
+
+  async function play(i, positionMs, autoplay) {
+    if (i < 0 || i >= queue.length) return;
+    index = i;
+    const item = queue[i];
+    loadingId = item.id;
+    state(false);
+    const ready = await linkFor(item);
+    if (loadingId !== item.id) return;      // moved on meanwhile
+    if (!ready) {
+      log('no link for', item.id, '- next');
+      loadingId = null;
+      return advance(1, true);
+    }
+    const media = new Msg.MediaInformation();
+    media.contentId = ready.url;
+    media.contentUrl = ready.url;
+    media.contentType = ready.mime || 'audio/mp4';
+    media.streamType = Msg.StreamType.BUFFERED;
+    media.metadata = metadataOf(ready);
+    media.customData = { mediaId: item.id };
+    const req = new Msg.LoadRequestData();
+    req.media = media;
+    req.autoplay = autoplay !== false;
+    req.currentTime = (positionMs || 0) / 1000;
+    try {
+      await player.load(req);
+    } catch (e) {
+      log('load failed', item.id, e);
+    }
+    if (loadingId === item.id) loadingId = null;
+    state(false);
+    prefetch();
+    if (queue.length - index <= MORE_WHEN_LEFT) send({ type: 'more', lastId: queue[queue.length - 1].id });
+  }
+
+  function advance(step, auto) {
+    if (repeat === 1 && auto && step === 1) return play(index, 0, true);
+    let next = index + step;
+    if (next >= queue.length) {
+      if (repeat === 2 && queue.length) next = 0;
+      else { send({ type: 'ended', lastId: queue.length ? queue[queue.length - 1].id : null }); return; }
+    }
+    if (next < 0) next = 0;
+    return play(next, 0, true);
+  }
+
+  function onMessage(from, m) {
+    if (!m || !m.type) return;
+    switch (m.type) {
+      case 'hello':
+        state(true, from);
+        break;
+      case 'queue': {
+        const known = new Map(queue.map(q => [q.id, q]));
+        queue = (m.items || []).map(x => {
+          const old = known.get(x.id);
+          return {
+            id: x.id,
+            song: x.song || (old && old.song) || null,
+            url: x.url || (old && old.url) || null,
+            mime: x.mime || (old && old.mime) || null,
+            at: x.url ? Date.now() : (old ? old.at : 0),
+            viaPhone: old ? old.viaPhone : false,
+          };
+        });
+        version++;
+        const target = queue.findIndex(q => q.id === m.current);
+        const nowId = (player.getMediaInformation() && player.getMediaInformation().customData || {}).mediaId;
+        if (m.keep && target >= 0 && nowId === m.current) {
+          index = target;
+          state(true);
+          prefetch();
+        } else if (target >= 0) {
+          play(target, m.position || 0, m.play !== false);
+          state(true);
+        } else {
+          state(true);
+        }
+        break;
+      }
+      case 'jump': {
+        const i = queue.findIndex(q => q.id === m.id);
+        if (i >= 0) play(i, m.position || 0, true);
+        break;
+      }
+      case 'next': advance(1, false); break;
+      case 'prev':
+        if ((player.getCurrentTimeSec() || 0) > 3) player.seek(0);
+        else advance(-1, false);
+        break;
+      case 'stop':
+        loadingId = null;
+        player.stop();
+        break;
+      case 'repeat':
+        repeat = m.mode | 0;
+        state(false);
+        break;
+      case 'stream':
+        gotStream(m);
+        break;
+    }
+  }
+
+  // A song that ended, or broke: the next one; a broken one once more via the phone.
+  player.addEventListener(Ev.EventType.MEDIA_FINISHED, (e) => {
+    const reason = e.endedReason;
+    const id = queue[index] ? queue[index].id : null;
+    log('finished', id, reason);
+    if (reason === Ev.EndedReason.END_OF_STREAM) {
+      advance(1, true);
+    } else if (reason === Ev.EndedReason.ERROR && id) {
+      if (!retried.has(id)) {
+        retried.add(id);
+        const item = queue[index];
+        item.url = null; item.viaPhone = true;
+        play(index, Math.round((player.getCurrentTimeSec() || 0) * 1000), true);
+      } else {
+        advance(1, true);
+      }
+    }
+  });
+  player.addEventListener(Ev.EventType.ERROR, (e) => log('player error', e && e.detailedErrorCode));
+  [Ev.EventType.PLAYING, Ev.EventType.PAUSE, Ev.EventType.SEEKED, Ev.EventType.BUFFERING]
+    .forEach(t => player.addEventListener(t, () => state(false)));
+
+  // The speaker's own buttons (a Nest Hub's screen, Google Home, the lock
+  // screen of any phone): next and previous are this queue's.
+  player.setMessageInterceptor(Msg.MessageType.QUEUE_UPDATE, (req) => {
+    if (req.jump && req.jump > 0) advance(1, false);
+    else if (req.jump && req.jump < 0) onMessage(null, { type: 'prev' });
+    return null;
+  });
+  if (Msg.MessageType.QUEUE_NEXT) player.setMessageInterceptor(Msg.MessageType.QUEUE_NEXT, () => { advance(1, false); return null; });
+  if (Msg.MessageType.QUEUE_PREV) player.setMessageInterceptor(Msg.MessageType.QUEUE_PREV, () => { onMessage(null, { type: 'prev' }); return null; });
+
+  context.addCustomMessageListener(NS, (e) => onMessage(e.senderId, e.data));
+  context.addEventListener(cast.framework.system.EventType.SENDER_CONNECTED, (e) => state(true, e.senderId));
+
+  // Every few seconds, where it is — any phone that missed something catches up.
+  setInterval(() => { if (senders() > 0) state(false); }, 5000);
+
+  const options = new cast.framework.CastReceiverOptions();
+  options.disableIdleTimeout = true;            // a queue playing on with no phone connected
+  options.customNamespaces = { [NS]: cast.framework.system.MessageType.JSON };
+  options.supportedCommands = Msg.Command.ALL_BASIC_MEDIA | Msg.Command.QUEUE_NEXT | Msg.Command.QUEUE_PREV;
+  options.maxInactivity = 3600;
+  context.start(options);
+  log('BitChord Connect receiver up');
+})();
+</script>
+</body>
+</html>

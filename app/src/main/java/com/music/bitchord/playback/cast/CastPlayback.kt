@@ -261,6 +261,19 @@ class CastPlayback(
         finished = false
 
         val player = localPlayer()
+        // BitChord Audio: our own speaker app holds the queue itself.
+        if (CastConnect.isOurs(newSession)) {
+            val wasPlaying = player != null && player.playWhenReady && player.playbackState != Player.STATE_ENDED
+            val position = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+            player?.pause()
+            wantsPlay = wasPlaying
+            connect = ConnectLink(scope, newSession, localPlayer, resolve) {
+                sink?.onRemotePlaybackChanged()
+            }.also { it.start(pushPhone = !resumed && wasPlaying, positionMs = position, play = wasPlaying) }
+            sink?.onRemoteRouteChanged()
+            sink?.onRemotePlaybackChanged()
+            return
+        }
         if (player != null) {
             val wasPlaying = player.playWhenReady && player.playbackState != Player.STATE_ENDED
             val position = player.currentPosition.coerceAtLeast(0L)
@@ -293,6 +306,9 @@ class CastPlayback(
     }
 
     private var heartbeat: Job? = null
+
+    /** Set while the session is with our own speaker app (BitChord Connect). */
+    private var connect: ConnectLink? = null
 
     /**
      * BitChord Audio: every 20 seconds while casting, the speaker is asked
@@ -522,6 +538,8 @@ class CastPlayback(
         alias = null
         heartbeat?.cancel()
         heartbeat = null
+        connect?.stop()
+        connect = null
         target = null
         targetWatch?.cancel()
     }
@@ -541,6 +559,10 @@ class CastPlayback(
     override fun onLocalTransition(item: MediaItem?, reason: Int) {
         if (!active || item == null) return
         lastLocalMoveAt = SystemClock.elapsedRealtime()
+        connect?.let { c ->
+            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) c.onPhoneMoved(item) else c.onQueueChanged()
+            return
+        }
         val remote = client ?: return
         if (pendingAdopt != null) return
         if (sameTrack(remoteMediaId(), item.mediaId)) {
@@ -568,10 +590,14 @@ class CastPlayback(
     }
 
     /** The phone's queue changed under the playing track. */
-    override fun onLocalQueueChanged() = scheduleReconcile()
+    override fun onLocalQueueChanged() {
+        connect?.let { it.onQueueChanged(); return }
+        scheduleReconcile()
+    }
 
     override fun onLocalRepeatChanged(repeatMode: Int) {
         if (!active) return
+        connect?.let { it.repeat(repeatMode); return }
         client?.queueSetRepeatMode(receiverRepeat(repeatMode), null)
     }
 
@@ -597,6 +623,18 @@ class CastPlayback(
     private fun onStatus() {
         val remote = client ?: return
         val status = remote.mediaStatus ?: return
+        if (connect != null) {
+            // Our speaker moves on by itself and says so (ConnectLink): only
+            // whether it is playing is read from here.
+            requestedAt = 0L
+            when (status.playerState) {
+                MediaStatus.PLAYER_STATE_PLAYING -> { wantsPlay = true; loading = false }
+                MediaStatus.PLAYER_STATE_PAUSED -> { wantsPlay = false; loading = false }
+                else -> Unit
+            }
+            sink?.onRemotePlaybackChanged()
+            return
+        }
         if (pendingAdopt != null) {
             if (status.mediaInfo != null || status.playerState == MediaStatus.PLAYER_STATE_IDLE) adoptOrLoad()
             return

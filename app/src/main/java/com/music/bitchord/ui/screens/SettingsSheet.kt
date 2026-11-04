@@ -302,6 +302,10 @@ fun SettingsScreen(
     if (showDownloadSkips) {
         com.music.bitchord.ui.components.DownloadSkipsDialog(onDismiss = { showDownloadSkips = false })
     }
+    var showConnect by remember { mutableStateOf(false) }
+    if (showConnect) {
+        com.music.bitchord.ui.components.ConnectAppDialog(onDismiss = { showConnect = false })
+    }
     var showLogUpload by remember { mutableStateOf(false) }
     if (showLogUpload) {
         com.music.bitchord.ui.components.LogUploadDialog(onDismiss = { showLogUpload = false })
@@ -1845,6 +1849,17 @@ fun SettingsScreen(
                     title = logsTitle,
                     subtitle = stringResource(R.string.crash_logs_subtitle, crashReports),
                     onClick = { com.music.bitchord.data.CrashLog.share(logsContext) },
+                )
+            }
+            val connectTitle = stringResource(R.string.connect_title)
+            row(connectTitle, "cast", "chromecast", "speaker", "altavoz", "connect", "receiver") {
+                val connectContext = androidx.compose.ui.platform.LocalContext.current
+                val connectId = remember(showConnect) { com.music.bitchord.playback.cast.CastConnect.appId(connectContext) }
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = connectTitle,
+                    subtitle = connectId?.let { stringResource(R.string.connect_on, it) } ?: stringResource(R.string.connect_off),
+                    onClick = { showConnect = true },
                 )
             }
             val logUploadTitle = stringResource(R.string.log_upload_title)

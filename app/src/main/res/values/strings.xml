@@ -1502,4 +1502,11 @@
     <string name="not_same_song">Not the same song</string>
     <string name="plays_as">Plays as %1$s · %2$s · %3$s — tap if it\'s another song</string>
     <string name="unlinked_songs">Unlinked: each one plays as itself now</string>
+    <string name="connect_title">BitChord Connect (own speaker app)</string>
+    <string name="connect_off">Off · casting uses Google\'s default player</string>
+    <string name="connect_on">On · app %1$s holds the queue on the speaker</string>
+    <string name="connect_help">With our own app on the speaker, the speaker keeps the whole queue itself, like Spotify: it plays on from song to song without the phone, and any phone that connects shows and controls the same music. Register it once in the Google Cast developer console (cast.google.com/publish): Add new application → Custom Receiver, with this address, then publish it and enter its App ID here.</string>
+    <string name="connect_app_id">App ID (8 characters)</string>
+    <string name="connect_restart">Takes effect after closing and opening the app again. Empty: back to Google\'s player.</string>
+    <string name="connect_saved">Saved. Close the app (swipe it away) and open it again to use it.</string>
 </resources>
