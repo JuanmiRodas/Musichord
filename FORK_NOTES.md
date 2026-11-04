@@ -160,3 +160,8 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - App: CastConnect (prefs bitchord_cast/connectAppId; CastOptionsProvider uses it, restart needed); CastPlayback delegates to ConnectLink when the session is ours (DMR path untouched): pushes the phone queue when the user moves playback from the phone, else takes up the speaker; phone follows "state".
 - Settings → "BitChord Connect (own speaker app)": App ID dialog. User must register a Custom Receiver at cast.google.com/publish ($5 once) and publish it.
 - Logs repo JuanmiRodas/bitchord-logs attached (empty until the app's token is set).
+
+## Strict matching + unlink anything (v1.9.101)
+- OwnFileMatcher: MAX_DRIFT_SEC 15 → 3 (official-video exception kept); unknown length → only sameArtist; ArtistLinks.linked only with close length. SourceMap MATCHER_VERSION 7, SAAVN_VERSION 4 (old matches redone); JioSaavn album match drift ≤ 3; NotSame respected by saavnSongFor/recordSaavn.
+- SongLinks.linksOf(song): stand-in's original (LocalLikes.youTubeOf), pCloud file it plays as, JioSaavn copy, picked copy → song menu "Not the same song" rows; unlinkFrom clears NotSame/SourceMap/saavn/LocalLikes/PreferredSource.
+- bitchord-logs repo still empty (app token not set) as of 4 Nov 14:00.
