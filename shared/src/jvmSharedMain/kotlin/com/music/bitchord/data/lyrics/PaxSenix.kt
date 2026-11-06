@@ -82,28 +82,59 @@ object PaxSenix {
         artist: String,
         durationMs: Long,
     ): String? {
-        val token = appleToken() ?: return null
         val url = APPLE_SEARCH.toHttpUrl().newBuilder()
             .addQueryParameter("term", "$title $artist")
             .addQueryParameter("types", "songs")
             .addQueryParameter("limit", "10")
             .addQueryParameter("l", "en-US")
             .build()
-        val root = lyricsGetAuthorized(url.toString(), token)
-            ?.let { runCatching { lyricsJson.parseToJsonElement(it) }.getOrNull() }
-            ?: return null
-        return bestCandidate(root, title, artist, durationMs)?.id
+        // BitChord Audio: Apple rotates the web player's token; one refused
+        // search drops it and fetches a fresh one before giving up.
+        repeat(2) {
+            val token = appleToken() ?: return null
+            val raw = lyricsGetAuthorized(url.toString(), token)
+            if (raw == null) {
+                cachedAppleToken.compareAndSet(token, null)
+                return@repeat
+            }
+            val root = runCatching { lyricsJson.parseToJsonElement(raw) }.getOrNull() ?: return null
+            return bestCandidate(root, title, artist, durationMs)?.id
+        }
+        return null
     }
 
-    private suspend fun appleToken(): String? = cachedAppleToken.get() ?: tokenMutex.withLock {
-        cachedAppleToken.get() ?: scrapeAppleToken()?.also(cachedAppleToken::set)
+    private suspend fun appleToken(): String? {
+        cachedAppleToken.get()?.takeIf { !expired(it) }?.let { return it }
+        return tokenMutex.withLock {
+            cachedAppleToken.get()?.takeIf { !expired(it) }
+                ?: scrapeAppleToken()?.also(cachedAppleToken::set)
+        }
     }
 
+    /** Whether the JWT [token] has run out (or will within ten minutes). */
+    private fun expired(token: String): Boolean = runCatching {
+        val payload = token.split('.')[1]
+        val json = String(java.util.Base64.getUrlDecoder().decode(payload.padEnd((payload.length + 3) / 4 * 4, '=')))
+        val exp = Regex("\"exp\"\\s*:\\s*(\\d+)").find(json)?.groupValues?.get(1)?.toLong() ?: return@runCatching false
+        exp * 1000 < System.currentTimeMillis() + 10 * 60_000
+    }.getOrDefault(false)
+
+    /**
+     * The token Apple's web player uses, read from its script — from the
+     * main site, else the beta site (as MusicBeat does), whichever answers.
+     */
     private fun scrapeAppleToken(): String? {
-        val page = lyricsGet("https://music.apple.com/us/new") ?: return null
-        val scriptPath = APPLE_INDEX_SCRIPT.find(page)?.value ?: return null
-        val script = lyricsGet("https://music.apple.com$scriptPath") ?: return null
-        return APPLE_TOKEN.find(script)?.value
+        for (origin in listOf("https://music.apple.com", "https://beta.music.apple.com")) {
+            for (pagePath in listOf("/us/new", "/us/browse", "/")) {
+                val page = lyricsGet(origin + pagePath) ?: continue
+                val scripts = APPLE_INDEX_SCRIPT.findAll(page).map { it.value }.distinct().toList()
+                for (scriptPath in scripts) {
+                    val script = lyricsGet(origin + scriptPath) ?: continue
+                    APPLE_TOKEN.findAll(script).map { it.value }.firstOrNull { !expired(it) }?.let { return it }
+                }
+            }
+        }
+        return null
     }
 
     private fun searchTrackId(
@@ -346,7 +377,7 @@ object PaxSenix {
     private val ARTIST_KEYS = listOf("artistName", "artist_name")
     private val DURATION_KEYS = listOf("durationInMillis", "durationMs", "duration_ms", "duration")
 
-    private val APPLE_INDEX_SCRIPT = Regex("""/assets/index~[^\"]+\.js""")
+    private val APPLE_INDEX_SCRIPT = Regex("""/assets/index[~-][^"' <]+\.js""")
     private val APPLE_TOKEN = Regex("""eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+""")
 }
 

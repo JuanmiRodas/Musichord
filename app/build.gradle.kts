@@ -122,6 +122,19 @@ android {
             dimension = "env"
             // Matches defaultConfig — this is the package already shipped/installed.
         }
+        // BitChord Audio: the Dolby Atmos edition. OnePlus/OPPO (ColorOS,
+        // OxygenOS) only let a fixed list of music apps use Dolby Atmos,
+        // Dirac and OReality; this edition is installed under one of those
+        // names (QQ Music's), so the phone's sound settings work while it
+        // plays. A separate app: it sits beside the standard one, can't be
+        // installed together with the real QQ Music, and updates from its own
+        // "BitChordDolby-" files.
+        create("dolby") {
+            dimension = "env"
+            applicationId = "com.tencent.qqmusic"
+            resValue("string", "app_name", "BitChord Dolby")
+            buildConfigField("String", "UPDATE_APK_PREFIX", "\"BitChordDolby-\"")
+        }
     }
 
     signingConfigs {
@@ -273,6 +286,10 @@ val newPipeExtractorStripped = tasks.register<org.gradle.api.tasks.bundling.Jar>
 dependencies {
     implementation(project(":shared"))
     implementation(project(":sharedUi"))
+
+    // BitChord Audio: TagLib — tags, lyrics and covers in every audio format
+    // (as MusicBeat uses it).
+    implementation("io.github.kyant0:taglib:1.0.6")
 
     // ---- Compose (Material 3) ----
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
@@ -535,6 +552,8 @@ abstract class BundleWearApk : DefaultTask() {
 if (providers.gradleProperty("bitchord.bundleWear").orNull != "false" && findProject(":wearos") != null) {
     androidComponents.onVariants { variant ->
         val flavor = variant.productFlavors.firstOrNull { it.first == "env" }?.second ?: return@onVariants
+        // The Dolby edition has no watch app of its own.
+        if (flavor == "dolby") return@onVariants
         val type = variant.buildType ?: return@onVariants
         // The benchmark build has no watch counterpart.
         if (type != "debug" && type != "release") return@onVariants

@@ -875,6 +875,28 @@ fun DetailScreen(
             if (isArtist) aboutItem()
         }
 
+                // BitChord Audio: MusicBeat's fast scroller on long lists — drag
+                // the thumb at the right edge; the bubble shows the letter (title
+                // order) or the song's number (any other order).
+                if (reorder == null && !isArtist && !searching && !picking && songs.size >= FAST_SCROLL_MIN) {
+                    val byTitle = songSort == SongSort.TITLE_ASC || songSort == SongSort.TITLE_DESC ||
+                        folderSort == com.music.bitchord.data.settings.LocalMusicSort.TITLE_ASC ||
+                        folderSort == com.music.bitchord.data.settings.LocalMusicSort.TITLE_DESC
+                    com.music.bitchord.ui.components.FastScroller(
+                        listState = listState,
+                        itemCount = songs.size,
+                        sectionNameForIndex = { i ->
+                            val s = songs.getOrNull(i)
+                            if (byTitle) com.music.bitchord.ui.components.SectionIndexer.getSectionName(s?.title)
+                            else (i + 1).toString()
+                        },
+                        contentPadding = PaddingValues(
+                            top = topBarContentPadding() + 8.dp,
+                            bottom = contentPadding.calculateBottomPadding() + 8.dp,
+                        ),
+                    )
+                }
+
                 if (picking) {
                     ReleaseSelectionBar(
                         songs = songs,
@@ -1218,6 +1240,9 @@ private fun DetailSearchField(
         }
     }
 }
+
+/** BitChord Audio: songs a page needs before the fast scroller shows. */
+private const val FAST_SCROLL_MIN = 40
 
 internal fun List<Song>.sortedForDetail(sort: SongSort): List<Song> = when (sort) {
     SongSort.DEFAULT -> this

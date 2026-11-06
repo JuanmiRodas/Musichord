@@ -1589,8 +1589,8 @@
     <string name="edit_info_year">Año</string>
     <string name="edit_info_track">Número de pista</string>
     <string name="edit_info_genre">Género</string>
-    <string name="edit_info_into_pcloud">Escribirlos también en mis archivos de pCloud (MP3 y FLAC)</string>
-    <string name="edit_info_into_downloads">Escribirlos también en mis descargas (MP3 y FLAC)</string>
+    <string name="edit_info_into_pcloud">Escribirlos también en mis archivos de pCloud</string>
+    <string name="edit_info_into_downloads">Escribirlos también en mis descargas</string>
     <string name="edit_info_restore">Volver a los datos originales</string>
     <string name="edit_info_no_files">Guardado. No hay archivos de pCloud ni descargas de estas canciones donde escribirlos.</string>
     <string name="edit_info_saved_files">Guardado, y escrito en %1$d de %2$d archivos</string>
@@ -1618,4 +1618,6 @@
     <string name="connect_restart">Se aplica al cerrar y volver a abrir la app. Vacío: vuelve al reproductor de Google.</string>
     <string name="connect_saved">Guardado. Cierra la app (deslízala) y ábrela de nuevo para usarla.</string>
     <string name="log_upload_create_token">Crear el token en GitHub (elige "Only select repositories" → bitchord-logs, luego Generate y Copy — se rellena aquí al volver)</string>
+    <string name="embed_lyrics">Guardar letras en mis archivos</string>
+    <string name="embed_lyrics_subtitle">Las letras guardadas se escriben también dentro del archivo (cualquier formato): descargas al momento, archivos de pCloud con Wi-Fi</string>
 </resources>

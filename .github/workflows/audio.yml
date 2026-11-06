@@ -46,7 +46,7 @@ jobs:
         run: |
           chmod +x gradlew
           set -o pipefail
-          ./gradlew :app:assembleProdRelease --stacktrace 2>&1 | tee build.log
+          ./gradlew :app:assembleProdRelease :app:assembleDolbyRelease --stacktrace 2>&1 | tee build.log
 
       # Compiler errors as annotations, readable from the API without the log.
       - name: Report compile errors
@@ -82,6 +82,13 @@ jobs:
             case "$(basename "$f")" in
               *unsigned*) echo "::error::$f is unsigned; it would not install" ;;
               *arm64-v8a*) cp "$f" "out/BitChord-v${v}_arm64-v8a.apk" ;;
+            esac
+          done
+          # The Dolby Atmos edition (installed as QQ Music for OnePlus/OPPO).
+          for f in app/build/outputs/apk/dolby/release/*.apk; do
+            case "$(basename "$f")" in
+              *unsigned*) echo "::error::$f is unsigned; it would not install" ;;
+              *arm64-v8a*) cp "$f" "out/BitChordDolby-v${v}_arm64-v8a.apk" ;;
             esac
           done
           ls -l out

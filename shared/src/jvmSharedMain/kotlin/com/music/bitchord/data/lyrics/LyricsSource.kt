@@ -63,7 +63,7 @@ enum class LyricsSource(
         wordSynced = true,
     ),
     PAXSENIX(
-        label = "PaxSenix",
+        label = "Apple Music (PaxSenix)",
         detail = "Apple Music timings through the original keyless provider",
         wordSynced = true,
     ),

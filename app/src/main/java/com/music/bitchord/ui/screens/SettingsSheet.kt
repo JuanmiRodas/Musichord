@@ -1254,6 +1254,22 @@ fun SettingsScreen(
                         onClick = { AppSettings.setOwnLyricsFirst(!ownLyricsFirst) },
                     )
                 }
+                val embedLyricsTitle = stringResource(R.string.embed_lyrics)
+                row(embedLyricsTitle, "lyrics", "tag", "embed", "files", "pcloud", "letras", "archivos") {
+                    val embedLyrics by com.music.bitchord.data.lyrics.LyricsKeeper.embed.collectAsStateWithLifecycle()
+                    SettingsRow(
+                        icon = SfIcons.Language,
+                        title = embedLyricsTitle,
+                        subtitle = stringResource(R.string.embed_lyrics_subtitle),
+                        trailing = {
+                            IosSwitch(
+                                checked = embedLyrics,
+                                onCheckedChange = com.music.bitchord.data.lyrics.LyricsKeeper::setEmbed,
+                            )
+                        },
+                        onClick = { com.music.bitchord.data.lyrics.LyricsKeeper.setEmbed(!embedLyrics) },
+                    )
+                }
                 val romajiFirstTitle = stringResource(R.string.romaji_first_lyrics)
                 row(romajiFirstTitle, "lyrics", "romaji", "romanized", "romanised", "japanese", "korean", "transliteration") {
                     SettingsRow(

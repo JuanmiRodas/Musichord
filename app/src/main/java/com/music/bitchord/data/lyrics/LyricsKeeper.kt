@@ -15,6 +15,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import com.music.bitchord.data.covers.CoverSources
+import com.music.bitchord.data.covers.CoverWriter
+import com.music.bitchord.data.edits.TagWriter
+import com.music.bitchord.download.Downloads
 
 /**
  * BitChord Audio: lyrics found once are kept — so a song's lyrics are never
@@ -28,6 +37,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  *  - Every Liked Music song's lyrics are looked up in the background, on
  *    Wi-Fi, a song every few seconds, and kept the same way. Songs no source
  *    has are tried again after a month.
+ *  - The lyrics are also written inside the song's own files (the LYRICS
+ *    tag, any format, through TagLib): a download at once, its pCloud file
+ *    on Wi-Fi — so any player, on any device, shows them. Kept lyrics from
+ *    before are written the same way, in the background.
  */
 object LyricsKeeper {
 
@@ -36,11 +49,29 @@ object LyricsKeeper {
     private const val RETRY_AFTER_MS = 30L * 24 * 60 * 60 * 1000
 
     private var prefs: SharedPreferences? = null
+    private var app: Context? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val embedLock = Mutex()
+
+    private val _embed = MutableStateFlow(true)
+
+    /** Whether lyrics are written inside the song files too. */
+    val embed: StateFlow<Boolean> = _embed.asStateFlow()
 
     fun init(context: Context) {
-        prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs = p
+        app = context.applicationContext
+        _embed.value = p.getBoolean(KEY_EMBED, true)
     }
+
+    fun setEmbed(on: Boolean) {
+        _embed.value = on
+        prefs?.edit()?.putBoolean(KEY_EMBED, on)?.apply()
+    }
+
+    private const val KEY_EMBED = "embed_in_files"
+    private const val EMBEDDED = "embedded:"
 
     /**
      * Keeps [lines] as [song]'s lyrics. [picked]: you chose them, so they
@@ -52,6 +83,69 @@ object LyricsKeeper {
         EditedLyrics.save(song, lines, besideFile = false, quiet = !picked)
         prefs?.edit()?.remove(song.videoId)?.apply()
         scope.launch { runCatching { writeToFolder(song, lines) } }
+        if (picked) forgetEmbedded(song)
+        scope.launch { runCatching { embedInFiles(song, lines) } }
+    }
+
+    private fun forgetEmbedded(song: Song) {
+        val e = prefs?.edit() ?: return
+        e.remove(EMBEDDED + "d:" + song.videoId)
+        CoverSources.filesOf(song).forEach { e.remove(EMBEDDED + "p:" + it.videoId) }
+        e.apply()
+    }
+
+    /**
+     * [lines] written into [song]'s download (at once) and its pCloud file
+     * (on Wi-Fi only: the whole file is fetched and sent back). Each file
+     * once; choosing other lyrics writes them again.
+     */
+    private suspend fun embedInFiles(song: Song, lines: List<LyricLine>, wifiOnlyAll: Boolean = false) {
+        val ctx = app ?: return
+        if (!_embed.value || song.isVideo) return
+        val lrc = SidecarLyrics.toLrc(lines, null, null, 0).trim()
+        if (lrc.isBlank()) return
+        embedLock.withLock {
+            val p = prefs ?: return
+            val change = TagWriter.Change(lyrics = lrc)
+            val download = song.localUri ?: Downloads.verifiedSavedUri(song.videoId)
+            if (download != null && !p.contains(EMBEDDED + "d:" + song.videoId) &&
+                (!wifiOnlyAll || AppSettings.meteredConnection.value == false)
+            ) {
+                val o = TagWriter.intoDownload(ctx, download, change)
+                if (o !is CoverWriter.Outcome.Failed) p.edit().putBoolean(EMBEDDED + "d:" + song.videoId, true).apply()
+                TrackLog.d(TAG, "lyrics into the download of ${song.title}: $o")
+            }
+            if (AppSettings.meteredConnection.value != false) return
+            CoverSources.filesOf(song).take(1).forEach { f ->
+                if (p.contains(EMBEDDED + "p:" + f.videoId)) return@forEach
+                val o = TagWriter.intoPcloud(ctx, f.videoId, change)
+                // Skipped (a format that holds no tags, not a pCloud file): don't try again either.
+                if (o !is CoverWriter.Outcome.Failed) p.edit().putBoolean(EMBEDDED + "p:" + f.videoId, true).apply()
+                TrackLog.d(TAG, "lyrics into the pCloud file of ${song.title}: $o")
+            }
+        }
+    }
+
+    /** Lyrics kept before (or while on mobile data) written into the liked songs' files. */
+    private suspend fun embedKept(songs: List<Song>) {
+        if (!_embed.value) return
+        val p = prefs ?: return
+        var done = 0
+        for (s in songs) {
+            if (AppSettings.meteredConnection.value != false || !_embed.value) break
+            if (s.isVideo || !EditedLyrics.has(s.videoId)) continue
+            val hasDownload = (s.localUri ?: Downloads.verifiedSavedUri(s.videoId)) != null
+            val files = CoverSources.filesOf(s).take(1)
+            val pending = (hasDownload && !p.contains(EMBEDDED + "d:" + s.videoId)) ||
+                files.any { !p.contains(EMBEDDED + "p:" + it.videoId) }
+            if (!pending) continue
+            val lines = EditedLyrics.get(s.videoId) ?: continue
+            if (lines.none { it.timeMs > 0 }) continue
+            runCatching { embedInFiles(s, lines, wifiOnlyAll = true) }
+            done++
+            delay(1_500)
+        }
+        if (done > 0) TrackLog.d(TAG, "lyrics: written into the files of $done songs")
     }
 
     /** The lyrics folder on pCloud the readable copies go to; made the first time. */
@@ -93,7 +187,10 @@ object LyricsKeeper {
                 !s.isVideo && !EditedLyrics.has(s.videoId) &&
                     (prefs?.getLong(s.videoId, 0L) ?: 0L).let { tried -> now - tried > RETRY_AFTER_MS }
             }
-            if (todo.isEmpty()) return
+            if (todo.isEmpty()) {
+                embedKept(songs)
+                return
+            }
             TrackLog.d(TAG, "lyrics: looking up ${todo.size} liked songs in the background")
             var found = 0
             for (s in todo) {
@@ -108,6 +205,7 @@ object LyricsKeeper {
                 delay(2_500)
             }
             TrackLog.d(TAG, "lyrics: kept $found of ${todo.size} looked up")
+            embedKept(songs)
         } finally {
             running = false
         }

@@ -1481,8 +1481,8 @@
     <string name="edit_info_year">Year</string>
     <string name="edit_info_track">Track number</string>
     <string name="edit_info_genre">Genre</string>
-    <string name="edit_info_into_pcloud">Also write into my pCloud files (MP3 and FLAC)</string>
-    <string name="edit_info_into_downloads">Also write into my downloads (MP3 and FLAC)</string>
+    <string name="edit_info_into_pcloud">Also write into my pCloud files</string>
+    <string name="edit_info_into_downloads">Also write into my downloads</string>
     <string name="edit_info_restore">Back to the original details</string>
     <string name="edit_info_no_files">Saved. No pCloud file or download of these songs to write into.</string>
     <string name="edit_info_saved_files">Saved, and written into %1$d of %2$d files</string>
@@ -1510,4 +1510,6 @@
     <string name="connect_restart">Takes effect after closing and opening the app again. Empty: back to Google\'s player.</string>
     <string name="connect_saved">Saved. Close the app (swipe it away) and open it again to use it.</string>
     <string name="log_upload_create_token">Create the token on GitHub (choose "Only select repositories" → bitchord-logs, then Generate and Copy — it is filled in here when you come back)</string>
+    <string name="embed_lyrics">Write lyrics into my files</string>
+    <string name="embed_lyrics_subtitle">Kept lyrics go inside the song file too (any format): downloads at once, pCloud files on Wi-Fi</string>
 </resources>

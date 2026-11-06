@@ -77,7 +77,12 @@ object CoverWriter {
         val url = WebDavConfig.fileUrlOf(file.videoId) ?: return@withContext Outcome.Skipped("not a pCloud file")
         val ext = url.substringAfterLast('.', "").substringBefore('?').lowercase()
         val kind = CoverTags.kindOf(ext)
-        if (kind == CoverTags.Kind.Unsupported) return@withContext Outcome.Skipped("$ext files aren't written to (MP3 and FLAC only)")
+        // BitChord Audio: M4A, Opus, OGG… through TagLib.
+        if (kind == CoverTags.Kind.Unsupported) {
+            return@withContext com.music.bitchord.data.edits.TagWriter.intoPcloud(
+                context, file.videoId, com.music.bitchord.data.edits.TagWriter.Change(cover = image),
+            )
+        }
         val u = AppSettings.webdavUsername.value
         val p = AppSettings.webdavPassword.value
         val dir = File(context.cacheDir, "cover-write").apply { mkdirs() }

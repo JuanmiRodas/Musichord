@@ -81,6 +81,23 @@ object EmbeddedLyrics {
     private fun read(context: Context, uri: Uri): String? =
         sidecar(uri.path.takeIf { uri.scheme == "file" })
             ?: open(context, uri)?.use { fromBytes(it.readAtMost(MAX_TAG_BYTES)) }
+            ?: withTagLib(context, uri)
+
+    /** BitChord Audio: any other format's lyrics tag (MP3 USLT, OGG, Opus, WAV…), through TagLib. */
+    private fun withTagLib(context: Context, uri: Uri): String? = runCatching {
+        val pfd = when (uri.scheme) {
+            "file" -> uri.path?.let(::File)?.takeIf { it.isFile && !it.name.endsWith(".m3u8", true) }
+                ?.let { android.os.ParcelFileDescriptor.open(it, android.os.ParcelFileDescriptor.MODE_READ_ONLY) }
+            "content" -> context.contentResolver.openFileDescriptor(uri, "r")
+            else -> null
+        } ?: return@runCatching null
+        pfd.use { d ->
+            val props = com.kyant.taglib.TagLib.getMetadata(d.dup().detachFd(), false)?.propertyMap.orEmpty()
+            listOf("LYRICS", "UNSYNCEDLYRICS", "UNSYNCED LYRICS").firstNotNullOfOrNull { k ->
+                props.entries.firstOrNull { it.key.equals(k, true) }?.value?.firstOrNull { it.isNotBlank() }
+            }
+        }
+    }.getOrNull()
 
     /**
      * The `lyrics.lrc` written next to the offline package playlist at [path].
