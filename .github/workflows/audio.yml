@@ -118,6 +118,8 @@ jobs:
           v="1.9.${AUDIO_BUILD_NUMBER}"
           new="out/BitChord-v${v}_arm64-v8a.apk"
           sha256sum "$new" | cut -d' ' -f1 > "${new}.sha256"
+          dolby="out/BitChordDolby-v${v}_arm64-v8a.apk"
+          [ -f "$dolby" ] && sha256sum "$dolby" | cut -d' ' -f1 > "${dolby}.sha256"
           for tag in $(gh api "repos/${{ github.repository }}/releases?per_page=3" --jq '.[].tag_name'); do
             rm -rf old && mkdir old
             gh release download "$tag" -R "${{ github.repository }}" -p '*_arm64-v8a.apk' -D old || continue

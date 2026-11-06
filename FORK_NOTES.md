@@ -175,3 +175,12 @@ installed on a OnePlus 15. Owner: juanmirodas@gmail.com. Replies in English (own
 - From the log: "speaker has the next 8 queued (7 added)" every 20 s — MediaStatus.queueItems only holds a few items, so reconcile saw the queue as short, removed what it saw and appended the rest again: the speaker queue grew with copies (EVERCHiLD came round 3 times). reconcileOnce now uses RemoteMediaClient.mediaQueue item ids (MediaQueue.Callback registered) + a ledger itemId→mediaId (learned on insert/load), removes strays.
 - New World → Orion: jumped to New World (served by the phone; "cast stream: Connection reset"), the speaker failed it and moved on by itself. If the target song is left before playing, it's reloaded once (proxyOnly) instead of skipped.
 - pCloud API login fails ("1022 Please provide 'code'": 2FA), so pCloud files always go through the phone proxy; proxy's first request probes the whole file for its length (slow).
+
+
+## MusicBeat port (v1.9.108)
+From SamuelAdmand/MusicBeat, chosen by the owner:
+- **Dolby edition**: flavor `dolby`, applicationId `com.tencent.qqmusic` (OnePlus/OPPO whitelist Dolby Atmos/Dirac for it). Separate app (own data; use Export/Import), APK `BitChordDolby-v*.apk`, updates itself via `UPDATE_APK_PREFIX`. No watch bundling. Can't coexist with real QQ Music.
+- **TagLib** (`io.github.kyant0:taglib`): `TagWriter` writes details, disc no., lyrics, covers into any format (pCloud: download → edit → upload temp → MOVE; downloads in place). `CoverWriter` falls back to it for non-MP3/FLAC.
+- **Lyrics in files**: `LyricsKeeper` writes kept lyrics into the LYRICS tag (download at once, pCloud on Wi-Fi; backfills liked songs; prefs `embedded:d:/p:`), setting "Write lyrics into my files". `EmbeddedLyrics` reads via TagLib as last fallback.
+- **Apple lyrics**: PaxSenix token now expiry-aware, tries music.apple.com + beta.music.apple.com pages, retries once on refusal. MusicBeat's hard-coded token expired 2026-10-19 — not copied.
+- **Fast scroller**: `ui/components/FastScroller.kt` + `fastscroll/*` on DetailScreen (non-artist, ≥40 songs, not searching/selecting); bubble = letter when sorted by title, else song number.
