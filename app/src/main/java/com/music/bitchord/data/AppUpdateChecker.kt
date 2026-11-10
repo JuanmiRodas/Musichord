@@ -69,11 +69,34 @@ object AppUpdateChecker {
     @Volatile
     private var downloadCancelled = false
 
+    @Volatile
+    private var lastCheckAt = 0L
+
+    /**
+     * BitChord Audio: [check] again when the app comes back to the front and
+     * the last check is older than [RECHECK_MS]. Playing music keeps the app
+     * alive for hours, so checking only at process start missed every build
+     * published in the meantime.
+     */
+    suspend fun checkIfStale() {
+        if (System.currentTimeMillis() - lastCheckAt < RECHECK_MS) return
+        check()
+    }
+
+    private const val RECHECK_MS = 20L * 60 * 1000
+
     suspend fun check() = withContext(Dispatchers.IO) {
+        lastCheckAt = System.currentTimeMillis()
         runCatching {
-            val request = Request.Builder().url(LATEST_RELEASE_URL).build()
+            val request = Request.Builder().url(LATEST_RELEASE_URL)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "BitChordAudio-updater")
+                .build()
             val body = Http.client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) null else response.body?.string()
+                if (!response.isSuccessful) {
+                    TrackLog.w("BitChord", "update check: GitHub answered HTTP ${response.code}")
+                    null
+                } else response.body?.string()
             } ?: return@runCatching
             val release = json.parseToJsonElement(body) as? JsonObject ?: return@runCatching
             val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
@@ -81,6 +104,10 @@ object AppUpdateChecker {
             val apkUrl = apkAssetUrl(release)
             val notes = release["body"]?.jsonPrimitive?.contentOrNull
             val latest = tag.removePrefix("v")
+            TrackLog.d(
+                "BitChord",
+                "update check: latest $latest, this ${BuildConfig.VERSION_NAME} (${BuildConfig.UPDATE_APK_PREFIX}) · apk ${apkUrl?.substringAfterLast('/') ?: "none"}",
+            )
             if (isNewer(latest, BuildConfig.VERSION_NAME)) {
                 val assets = assetUrls(release)
                 val apkName = apkUrl?.substringAfterLast('/')
@@ -90,7 +117,7 @@ object AppUpdateChecker {
                 val shaUrl = apkName?.let { assets["$it.sha256"] }
                 _available.value = UpdateInfo(latest, url, apkUrl, notes, patchUrl, shaUrl)
             }
-        }
+        }.onFailure { TrackLog.w("BitChord", "update check failed: ${it.message}") }
     }
 
     /**

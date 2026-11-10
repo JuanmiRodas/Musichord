@@ -894,11 +894,27 @@ private fun BitChordApp(
      */
     val updateNotice = updateAvailable
 
+    // BitChord Audio: once per *version*, not once per launch — a newer build
+    // found while the app stays open (music keeps it alive) is offered too.
+    var updateDialogShownFor by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(updateNotice) {
-        if (updateNotice != null && !updateDialogShown) {
+        if (updateNotice != null && updateDialogShownFor != updateNotice.version) {
             updateDialogShown = true
+            updateDialogShownFor = updateNotice.version
             showUpdateDialog = true
         }
+    }
+    // BitChord Audio: look again whenever the app comes back to the front.
+    val updateLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val updateScope = rememberCoroutineScope()
+    androidx.compose.runtime.DisposableEffect(updateLifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                updateScope.launch { AppUpdateChecker.checkIfStale() }
+            }
+        }
+        updateLifecycle.lifecycle.addObserver(observer)
+        onDispose { updateLifecycle.lifecycle.removeObserver(observer) }
     }
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
