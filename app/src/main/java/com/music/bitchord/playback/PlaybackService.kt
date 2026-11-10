@@ -2780,9 +2780,13 @@ class PlaybackService : MediaLibraryService() {
         val index = activePlayer.currentMediaItemIndex
         if (index !in 0 until activePlayer.mediaItemCount) return
         val song = activePlayer.currentMediaItem?.toSong() ?: return
+        // BitChord Audio: what decides is whether YouTube itself is playing —
+        // not the pin, which choosing YouTube sets just before asking for this.
+        val alreadyDirect = activePlayer.currentMediaItem?.localConfiguration?.uri
+            ?.getQueryParameter(DIRECT_YOUTUBE_PARAMETER) == "1"
         if (!song.hasYouTubeOriginal() ||
             song.localUri != null ||
-            OriginalVersion.isPinned(song.videoId)
+            alreadyDirect
         ) {
             return
         }

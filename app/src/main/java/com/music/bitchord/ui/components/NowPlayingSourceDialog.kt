@@ -71,6 +71,16 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
     val playingFrom = NerdStats.sourceFor(song.videoId)
         ?: if (WebDavConfig.isWebDavId(song.videoId)) "pCloud" else "YouTube"
     val isFile = WebDavConfig.isWebDavId(song.videoId) || song.localUri != null
+    // BitChord Audio: the song as it was queued, before any copy took its place
+    // (recorded at every swap; the liked-song link for older ones).
+    val original = remember(song.videoId) {
+        com.music.bitchord.data.sources.SongOrigins.originOf(song.videoId)
+            ?: com.music.bitchord.data.LocalLikes.youTubeOf(song.videoId)?.let { id ->
+                com.music.bitchord.data.LikedMusicCache.load(com.music.bitchord.data.LikedMusicCache.lastProfile)
+                    ?.songs?.firstOrNull { it.videoId == id }
+            }
+            ?: song
+    }
 
     // BitChord Audio: the rest of the album from the same source, when ticked.
     var wholeAlbum by remember(song.videoId) { mutableStateOf(true) }
@@ -158,6 +168,16 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
     }
 
     fun switchToYouTube() {
+        // BitChord Audio: a JioSaavn (or other) copy playing in a YouTube song's
+        // place: back to that very YouTube song, the choice changed under both
+        // names — see PreferredSource.familyKeys.
+        if (original.videoId != song.videoId && com.music.bitchord.data.LocalLikes.isYouTubeId(original.videoId)) {
+            PreferredSource.chooseYouTube(original, original.videoId, song)
+            alsoAlbum(original)
+            controller?.swapToVersion(original.carryingQueueOf(song))
+            onDismiss()
+            return
+        }
         if (!isFile) {
             PreferredSource.chooseYouTube(song, song.videoId)
             alsoAlbum(song)
@@ -249,12 +269,41 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                         )
                     }
                 }
+                // BitChord Audio: back to exactly what was queued — the original
+                // song, from its own source — and kept that way.
+                val replaced = original.videoId != song.videoId || choice != null
+                if (replaced) {
+                    val originalFrom = when {
+                        WebDavConfig.isWebDavId(original.videoId) -> "pCloud"
+                        com.music.bitchord.data.LocalLikes.isYouTubeId(original.videoId) -> "YouTube"
+                        else -> NerdStats.sourceFor(original.videoId) ?: "YouTube"
+                    }
+                    SourceRow(
+                        label = stringResource(R.string.source_restore),
+                        detail = stringResource(R.string.source_restore_detail, original.title, originalFrom),
+                        selected = false,
+                    ) {
+                        when {
+                            WebDavConfig.isWebDavId(original.videoId) -> PreferredSource.chooseFile(original, original, song)
+                            com.music.bitchord.data.LocalLikes.isYouTubeId(original.videoId) ->
+                                PreferredSource.chooseYouTube(original, original.videoId, song)
+                            else -> PreferredSource.chooseSong(original, original, song)
+                        }
+                        if (original.videoId != song.videoId) {
+                            controller?.swapToVersion(original.carryingQueueOf(song))
+                        } else {
+                            controller?.revertToOriginal()
+                        }
+                        onDismiss()
+                    }
+                }
                 SourceRow(
                     label = stringResource(R.string.source_auto),
                     detail = stringResource(R.string.source_auto_detail),
                     selected = choice == null,
                 ) {
-                    PreferredSource.clear(song)
+                    // Under every name it was filed, the original's too.
+                    PreferredSource.clear(song, original)
                     onDismiss()
                 }
                 when (val list = files) {
@@ -348,6 +397,8 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
 /** [this] in [other]'s place in the queue. */
 internal fun Song.carryingQueueOf(other: Song): Song = also {
     com.music.bitchord.data.LocalLikes.link(it, other)
+    // BitChord Audio: remembered, so the original can be restored later.
+    com.music.bitchord.data.sources.SongOrigins.record(it, other)
 }.copy(
     queueTier = other.queueTier,
     queueEntryId = other.queueEntryId,

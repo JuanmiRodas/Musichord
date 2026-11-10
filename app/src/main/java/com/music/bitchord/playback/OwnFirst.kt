@@ -92,6 +92,7 @@ internal class OwnFirst(
     private fun asStandIn(copy: Song, song: Song): Song? {
         if (copy.videoId == song.videoId) return null
         com.music.bitchord.data.LocalLikes.link(copy, song)
+        com.music.bitchord.data.sources.SongOrigins.record(copy, song)
         return copy.copy(
             queueTier = song.queueTier,
             queueEntryId = song.queueEntryId,

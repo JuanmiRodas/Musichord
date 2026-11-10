@@ -1610,4 +1610,6 @@
     <string name="wave_widget_preview_artist">BitChord Audio</string>
     <string name="desc_previous">Previous</string>
     <string name="desc_next">Next</string>
+    <string name="source_restore">Restore original source</string>
+    <string name="source_restore_detail">Play %1$s from %2$s again, as it was queued, and keep it that way</string>
 </resources>

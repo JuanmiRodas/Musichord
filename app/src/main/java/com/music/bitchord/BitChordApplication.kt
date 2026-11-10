@@ -176,6 +176,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         AppSettings.init(this, authStore)
         com.music.bitchord.data.LikedMusicCache.init(this)
         com.music.bitchord.data.NoRecommend.init(filesDir)
+        com.music.bitchord.data.sources.SongOrigins.init(this)
         // Lets the lyrics sources match a romaji name against a Japanese one.
         com.music.bitchord.data.lyrics.CrossScript.romanize = { com.music.bitchord.data.sources.JapaneseReading.romaji(it) }
         com.music.bitchord.data.autoeq.AutoEq.init(this)

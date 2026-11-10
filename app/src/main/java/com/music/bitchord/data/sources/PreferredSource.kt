@@ -61,24 +61,42 @@ object PreferredSource {
 
     fun prefersYouTube(title: String, artist: String): Boolean = get(title, artist) == YouTube
 
-    /** Plays [file] for [song] from now on. */
-    fun chooseFile(song: Song, file: Song) {
+    /**
+     * BitChord Audio: the keys a choice for [songs] is filed under — each one's
+     * own, and every other key holding the same choice as any of them. A pick
+     * is filed under two names (the song's and the copy's, which often differ:
+     * a romaji title, "(Remastered)"), so changing or clearing it under one
+     * name only used to leave the old choice standing under the other — and
+     * picking YouTube for a song playing from JioSaavn flipped straight back.
+     */
+    private fun familyKeys(vararg songs: Song): Set<String> {
+        val p = prefs ?: return emptySet()
+        val own = songs.mapNotNull { keyOf(it.title, it.artist) }.toSet()
+        // "youtube" is the same value for every song set to YouTube: never a family.
+        val values = own.mapNotNull { p.getString(it, null) }.filter { it != YOUTUBE }.toSet()
+        if (values.isEmpty()) return own
+        val siblings = p.all.entries.filter { (_, v) -> v is String && v in values }.map { it.key }
+        return own + siblings
+    }
+
+    /** Plays [file] for [song] (and the [also] copies of it) from now on. */
+    fun chooseFile(song: Song, file: Song, vararg also: Song) {
+        val keys = familyKeys(song, file, *also)
         val edit = prefs?.edit() ?: return
-        listOfNotNull(keyOf(song.title, song.artist), keyOf(file.title, file.artist)).distinct()
-            .forEach { edit.putString(it, file.videoId) }
+        keys.forEach { edit.putString(it, file.videoId) }
         edit.apply()
         if (!WebDavConfig.isWebDavId(song.videoId) && song.localUri == null) OriginalVersion.unpin(song.videoId)
     }
 
     private const val SONG = "song:"
 
-    /** Plays [picked] — from any source — for [song] from now on. */
-    fun chooseSong(song: Song, picked: Song) {
-        if (WebDavConfig.isWebDavId(picked.videoId)) return chooseFile(song, picked)
+    /** Plays [picked] — from any source — for [song] (and the [also] copies) from now on. */
+    fun chooseSong(song: Song, picked: Song, vararg also: Song) {
+        if (WebDavConfig.isWebDavId(picked.videoId)) return chooseFile(song, picked, *also)
+        val keys = familyKeys(song, picked, *also)
         val edit = prefs?.edit() ?: return
         val value = SONG + songJson(picked)
-        listOfNotNull(keyOf(song.title, song.artist), keyOf(picked.title, picked.artist)).distinct()
-            .forEach { edit.putString(it, value) }
+        keys.forEach { edit.putString(it, value) }
         edit.apply()
         if (!WebDavConfig.isWebDavId(song.videoId) && song.localUri == null) OriginalVersion.unpin(song.videoId)
     }
@@ -107,18 +125,20 @@ object PreferredSource {
         )
     }.getOrNull()
 
-    /** Plays YouTube's own copy of [song] from now on. */
-    fun chooseYouTube(song: Song, youtubeId: String?) {
+    /** Plays YouTube's own copy of [song] (and of the [also] copies) from now on. */
+    fun chooseYouTube(song: Song, youtubeId: String?, vararg also: Song) {
+        val keys = familyKeys(song, *also)
         val edit = prefs?.edit() ?: return
-        keyOf(song.title, song.artist)?.let { edit.putString(it, YOUTUBE) }
+        keys.forEach { edit.putString(it, YOUTUBE) }
         edit.apply()
         youtubeId?.let(OriginalVersion::pin)
     }
 
-    /** Back to the rule in Settings. */
-    fun clear(song: Song) {
+    /** Back to the rule in Settings — under every name the choice was filed. */
+    fun clear(song: Song, vararg also: Song) {
+        val keys = familyKeys(song, *also)
         val edit = prefs?.edit() ?: return
-        keyOf(song.title, song.artist)?.let(edit::remove)
+        keys.forEach(edit::remove)
         edit.apply()
         if (!WebDavConfig.isWebDavId(song.videoId) && song.localUri == null) OriginalVersion.unpin(song.videoId)
     }

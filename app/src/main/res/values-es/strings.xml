@@ -1698,4 +1698,6 @@
     <string name="wave_widget_shuffle_on">Quitar aleatorio</string>
     <string name="desc_previous">Anterior</string>
     <string name="desc_next">Siguiente</string>
+    <string name="source_restore">Restaurar la fuente original</string>
+    <string name="source_restore_detail">Volver a poner %1$s desde %2$s, como estaba en la cola, y mantenerlo así</string>
 </resources>
