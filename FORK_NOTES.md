@@ -202,3 +202,12 @@ Not a BitChord fork; features re-implemented/ported:
 - HomeSections (data/HomeSections.kt): hide/order YouTube shelves by title; Content preferences row.
 - Wave widgets (widget/wave/*): strip, glass, circle; WaveWidgetUpdater.publish from publishWidgetState. Library variant not ported (needs LastWave's playlist/stats layers).
 Skipped on purpose: LastWave's Widevine "module" streams.
+
+## Lyrics quality system (v1.9.117+)
+- `LyricsRepository.best(spellings…)` + `LyricsQuality.score`: all timed sources × up to 4 spellings at once; word > line > untimed (3000/2000/1000), Japanese song: own romaji paired +400, romaji-only +300; timing past end −1500; <6 lines −500. `onBetter` shows/upgrades live. Used by MainViewModel and LyricsKeeper.lookUp.
+- Kept lyrics: `LyricsKeeper.isAutoKept` (prefs `auto:<id>`, EditedLyrics.savedAt) → auto-kept ones get upgraded (`keep(upgrade=true)`); picked/edited never.
+- `CrossScript` (shared): romaji↔Japanese by consonant skeleton; `romanize` hook set in BitChordApplication. Used in JapaneseMatch.sameTitle/sameArtist (NetEase, QQ, LyricFind).
+- JapaneseNames: iTunes JP paired entry → `title(paired=true)` kept as-is (loanword read-back used to reject it); `LyricNames.mostlyRomaji` lets "Mezameta Venus" in. LyricNames.suggest uses verified names; keyboard guess last, family-name first.
+- NetEase `yrc` (word sync) via /api/song/lyric/v1 (fallback legacy); KuGou KRC (krc1 + XOR key + zlib, `[language:]` romaji type 0).
+- LyricFind (untimed, unverified endpoints: /api/v1/search, /lyrics/<slug> __NEXT_DATA__). Check logs.
+- `LyricsHealth`: per-host last failure, appended to the "lyrics for …" log line.
