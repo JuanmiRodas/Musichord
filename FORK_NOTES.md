@@ -211,3 +211,9 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 - NetEase `yrc` (word sync) via /api/song/lyric/v1 (fallback legacy); KuGou KRC (krc1 + XOR key + zlib, `[language:]` romaji type 0).
 - LyricFind (untimed, unverified endpoints: /api/v1/search, /lyrics/<slug> __NEXT_DATA__). Check logs.
 - `LyricsHealth`: per-host last failure, appended to the "lyrics for …" log line.
+
+## Sources & lyrics matching (v1.9.118–v1.9.121)
+- Source sheet: YouTube choice no longer flips back to JioSaavn (choices written/cleared across all keys of a song family; revert no-op fixed). New "Restore original source" row (SongOrigins).
+- New built-in sources: NetEase Cloud Music (rank 2, 320kbps MP3, VIP/trial skipped) and SoundCloud (rank 4, after YouTube; hand picks only; client_id scraped and renewed). Conflicting-album guard covers all catalogue sources.
+- Lyrics: KuGou hits must match title + artist (or exact title at same length); Megalobiz checks [ti:]/address. Root cause of random Chinese lyrics on non-Chinese songs.
+- One-time recheck of kept lyrics (`kept_rechecked_v1`): auto-kept ones (and Chinese-only lyrics on non-CJK-named songs) are looked up again; replaced or dropped from app, lyrics folder and embedded tags.
