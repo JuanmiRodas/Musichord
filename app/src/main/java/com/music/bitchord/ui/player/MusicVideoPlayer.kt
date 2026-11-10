@@ -39,6 +39,7 @@ import com.music.bitchord.data.innertube.InnerTubeXResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.playback.ChunkedDataSource
+import com.music.bitchord.playback.MusicOnlyPlayback
 import com.music.bitchord.playback.toSong
 import com.music.bitchord.ui.rememberIsForeground
 import kotlinx.coroutines.CancellationException
@@ -148,6 +149,9 @@ object MusicVideoEngine {
         // off lets the current video's picture load.
         scope.launch {
             AppSettings.audioOnly.drop(1).collect { refresh() }
+        }
+        scope.launch {
+            AppSettings.preferMusicOnly.drop(1).collect { refresh() }
         }
     }
 
@@ -329,7 +333,9 @@ object MusicVideoEngine {
         // release, and not for one the listener switched to by hand.
         if (AppSettings.audioOnly.value) return null
         val song = controller?.currentMediaItem?.toSong() ?: return null
-        return song.takeIf { it.isVideo && it.videoId !in noPicture }
+        return song.takeIf {
+            it.isVideo && it.videoId !in noPicture && MusicOnlyPlayback.showsPicture(it.videoId)
+        }
     }
 
     private fun refresh() {
