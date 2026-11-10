@@ -3367,7 +3367,7 @@ private fun LyricLine.shiftedBy(ms: Long): LyricLine {
  */
 @Composable
 internal fun LyricsOffsetControl(offsetMs: Long, onNudge: (Long) -> Unit, modifier: Modifier = Modifier) {
-    val tint = LocalPlayerTint.current
+    val tint = chromeWhite(1f)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
