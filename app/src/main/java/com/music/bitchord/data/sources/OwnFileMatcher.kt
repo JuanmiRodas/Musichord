@@ -240,7 +240,10 @@ object OwnFileMatcher {
                     bothOnAlbum -> false
                     close && artists.any { nearSpelling(artist, it) } -> true
                     close && sameAlbum(album, file.albumName) -> {
-                        ArtistLinks.learn(artist, file.artist)
+                        // Not from a row that names nobody: "Unknown artist"
+                        // linked to one real artist would match every song
+                        // that lost its credit to that artist's files.
+                        if (!TrackMatcher.isPlaceholderArtist(artist)) ArtistLinks.learn(artist, file.artist)
                         true
                     }
                     close && artists.any { ArtistLinks.linked(artist, it) } -> true

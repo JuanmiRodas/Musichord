@@ -188,14 +188,31 @@ object SourceResolver {
      * loader thread with nothing but a DataSpec in hand — see
      * [toMediaItem][com.music.bitchord.playback.toMediaItem].
      */
-    fun targetIn(uri: Uri) = TrackMatcher.Target(
-        title = uri.getQueryParameter("n").orEmpty(),
-        artist = uri.getQueryParameter("a").orEmpty(),
-        durationSec = uri.getQueryParameter("d")?.toIntOrNull(),
-        album = uri.getQueryParameter("l"),
-        isExplicit = uri.getQueryParameter("e")?.let { it == "1" },
-        isVideo = uri.getQueryParameter("m") == "1",
-    )
+    fun targetIn(uri: Uri): TrackMatcher.Target {
+        val target = TrackMatcher.Target(
+            title = uri.getQueryParameter("n").orEmpty(),
+            artist = uri.getQueryParameter("a").orEmpty(),
+            durationSec = uri.getQueryParameter("d")?.toIntOrNull(),
+            album = uri.getQueryParameter("l"),
+            isExplicit = uri.getQueryParameter("e")?.let { it == "1" },
+            isVideo = uri.getQueryParameter("m") == "1",
+        )
+        if (!TrackMatcher.isPlaceholderArtist(target.artist)) return target
+        // BitChord Audio: a row that lost its credit ("Unknown artist") is
+        // matched on the artist you gave it in Edit details, if you did —
+        // else on no artist at all, which keeps it off the public catalogues
+        // (see [CATALOGUE_KINDS]) rather than matching anyone's cover.
+        val id = com.music.bitchord.playback.mediaIdIn(uri)
+        val edit = id?.let {
+            com.music.bitchord.data.edits.MetadataEdits.get(
+                com.music.bitchord.data.model.Song(videoId = it, title = target.title, artist = target.artist, thumbnailUrl = null),
+            )
+        }
+        val artist = edit?.artist?.takeUnless(TrackMatcher::isPlaceholderArtist)
+            ?: edit?.albumArtist?.takeUnless(TrackMatcher::isPlaceholderArtist)
+            ?: ""
+        return target.copy(artist = artist)
+    }
 
     /**
      * @param target is what a cross-source match is made on. Without it the
@@ -1376,6 +1393,12 @@ object SourceResolver {
             // duration is not enough when the wrong recording is only a
             // second away. Treat it as this source missing and retain the
             // known-correct fallback.
+            // BitChord Audio: with no artist to check, a public catalogue's
+            // same-titled row is as likely a cover as the song.
+            if (source.kind in CATALOGUE_KINDS && TrackMatcher.isPlaceholderArtist(matchOn.artist)) {
+                TrackLog.d(TAG, "${source.displayName} skipped for '${matchOn.title}': no artist to match on")
+                continue
+            }
             if (source.kind in CATALOGUE_KINDS &&
                 TrackMatcher.hasConflictingAlbums(matches, matchOn)
             ) {

@@ -14,6 +14,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Queue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,6 +76,8 @@ internal fun ReleaseSelectionBar(
     onPlayNext: ((List<Song>) -> Unit)?,
     onAddToQueue: ((List<Song>) -> Unit)?,
     modifier: Modifier = Modifier,
+    /** BitChord Audio: like the selection (all liked already: unlike). */
+    onLike: ((List<Song>) -> Unit)? = null,
 ) {
     val chosen = songs.filter { it.videoId in ReleaseSelection.selected }
     val count = chosen.size
@@ -106,6 +109,7 @@ internal fun ReleaseSelectionBar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        onLike?.let { like -> action(Icons.Rounded.Star, stringResource(R.string.like)) { like(chosen); ReleaseSelection.end() } }
         action(Icons.Rounded.Image, stringResource(R.string.selection_cover)) { CoverPicker.open(chosen); ReleaseSelection.end() }
         action(Icons.Rounded.Edit, stringResource(R.string.selection_edit)) { MetadataEditor.open(chosen); ReleaseSelection.end() }
         onPlayNext?.let { play -> action(Icons.AutoMirrored.Rounded.PlaylistPlay, stringResource(R.string.play_next)) { play(chosen); ReleaseSelection.end() } }

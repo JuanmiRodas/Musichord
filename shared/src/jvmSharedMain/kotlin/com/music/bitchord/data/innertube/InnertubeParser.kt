@@ -1743,7 +1743,15 @@ object InnertubeParser {
         RegexOption.IGNORE_CASE,
     )
     /** Header words that mark a page as a release, whose rows share its credit. */
-    private val RELEASE_WORDS = setOf("album", "single", "ep")
+    // BitChord Audio: in every language the app asks YouTube in — the header
+    // reads "Álbum • ZARD" in Spanish, and an English-only list made every
+    // album's tracks "Unknown artist" there.
+    private val RELEASE_WORDS = setOf(
+        "album", "single", "ep", "álbum", "sencillo", "albumi", "singolo", "singiel",
+        "albüm", "альбом", "сингл", "アルバム", "シングル", "앨범", "싱글",
+        "专辑", "專輯", "单曲", "單曲", "อัลบั้ม", "ซิงเกิล", "đĩa đơn", "אלבום", "סינגל",
+        "एल्बम", "सिंगल",
+    )
     private val HEADER_RENDERERS = listOf(
         "musicResponsiveHeaderRenderer",
         "musicDetailHeaderRenderer",
@@ -1753,7 +1761,7 @@ object InnertubeParser {
     private val TYPE_WORDS = setOf(
         "song", "video", "album", "single", "ep", "artist",
         "playlist", "podcast", "episode",
-    )
+    ) + RELEASE_WORDS + setOf("canción", "vídeo", "artista", "lista", "lista de reproducción")
     /**
      * Flags a browse card as video content: "50 videos" in a subtitle
      * (instead of "50 songs"), or the word right in a title like

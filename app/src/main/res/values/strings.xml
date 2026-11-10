@@ -1621,4 +1621,11 @@
     <string name="video_mode_search_go">Search</string>
     <string name="video_mode_search_bilibili">Also search bilibili</string>
     <string name="video_mode_search_empty">No videos found</string>
+    <string name="liked_songs">Liked songs</string>
+    <string name="liked_by_artist_empty">No liked songs by this artist yet</string>
+    <string name="liked_by_artist_title">Liked songs · %1$s</string>
+    <plurals name="liked_by_artist_count">
+        <item quantity="one">You\'ve liked %1$d song by %2$s</item>
+        <item quantity="other">You\'ve liked %1$d songs by %2$s</item>
+    </plurals>
 </resources>

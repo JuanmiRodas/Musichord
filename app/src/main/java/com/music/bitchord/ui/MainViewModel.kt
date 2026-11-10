@@ -3378,6 +3378,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         fun nonEmpty(songs: List<Song>, empty: () -> String): UiState<List<Song>> =
             if (songs.isEmpty()) UiState.Error(empty()) else UiState.Success(songs)
 
+        // BitChord Audio: an artist page's "Liked songs".
+        com.music.bitchord.data.LikedByArtist.parse(browseId)?.let { (artistId, name) ->
+            return nonEmpty(com.music.bitchord.data.LikedByArtist.songs(name, artistId)) { text(R.string.liked_by_artist_empty) }
+        }
         if (OfflinePlaylists.isOfflinePlaylist(browseId)) {
             // A playlist deleted while its page was still reachable — from
             // "Playing from", say — is an empty page, not a YouTube lookup.

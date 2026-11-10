@@ -1709,4 +1709,11 @@
     <string name="video_mode_search_go">Buscar</string>
     <string name="video_mode_search_bilibili">Buscar también en bilibili</string>
     <string name="video_mode_search_empty">No se encontraron vídeos</string>
+    <string name="liked_songs">Canciones que te gustan</string>
+    <string name="liked_by_artist_empty">Aún no te gusta ninguna canción de este artista</string>
+    <string name="liked_by_artist_title">Te gustan · %1$s</string>
+    <plurals name="liked_by_artist_count">
+        <item quantity="one">Te gusta %1$d canción de %2$s</item>
+        <item quantity="other">Te gustan %1$d canciones de %2$s</item>
+    </plurals>
 </resources>

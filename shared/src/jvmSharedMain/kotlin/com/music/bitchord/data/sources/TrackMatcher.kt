@@ -800,7 +800,24 @@ object TrackMatcher {
         "instrumental", "インストゥルメンタル",
     )
 
+    /**
+     * BitChord Audio: an artist field that names nobody — what a row reads when
+     * its credit was lost ("Unknown artist") or is a compilation's.
+     */
+    fun isPlaceholderArtist(artist: String?): Boolean {
+        val k = artist.orEmpty().lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+        return k.isEmpty() || k in PLACEHOLDER_ARTISTS
+    }
+
+    private val PLACEHOLDER_ARTISTS = setOf(
+        "unknownartist", "unknown", "artistadesconocido", "desconocido", "variousartists",
+        "variosartistas", "va", "untitledartist", "noartist",
+    )
+
     private val KARAOKE_PATTERNS = listOf(
+        // Covers, credited as such: "(cover：ZARD)", "（翻自 ZARD）", "Song (Cover)".
+        Regex("""[(（\[【]\s*cover\b|\bcover(ed)?\s*(by\b|[:：)）\]】])"""),
+        Regex("""翻自|翻唱|歌ってみた|弾いてみた|カバー"""),
         // Key-shifted karaoke: "+2Key", "-5 key", "原キー".
         Regex("""[+\-－＋]\s*\d+\s*key\b"""),
         Regex("""原キー|キー変更"""),

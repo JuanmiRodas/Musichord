@@ -370,6 +370,10 @@ fun DetailScreen(
     /** BitChord Audio: for a selection of the page's songs (see [ReleaseSelection]). */
     onPlayNextSongs: ((List<Song>) -> Unit)? = null,
     onAddToQueueSongs: ((List<Song>) -> Unit)? = null,
+    /** BitChord Audio: like (or, all liked already, unlike) a selection's songs. */
+    onLikeSongs: ((List<Song>) -> Unit)? = null,
+    /** BitChord Audio: an artist page's "Liked songs" row — opens them. */
+    onOpenLikedByArtist: ((name: String, artistBrowseId: String, count: Int) -> Unit)? = null,
 ) {
     val rawSongs = (page.songs as? UiState.Success)?.data.orEmpty()
     // A folder keeps its own sort — the one its top bar menu sets — rather
@@ -636,6 +640,59 @@ fun DetailScreen(
                         bottomSpace = 22.dp,
                         playColor = appleArt?.keyColor?.let { Color(it) },
                     )
+                }
+            }
+
+            // BitChord Audio: your liked songs by this artist, as Spotify has it.
+            if (isArtist && onOpenLikedByArtist != null) {
+                item(key = "liked-by-artist") {
+                    val likedBy by androidx.compose.runtime.produceState(emptyList<Song>(), page.browseId, page.title) {
+                        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching { com.music.bitchord.data.LikedByArtist.songs(page.title, page.browseId) }.getOrDefault(emptyList())
+                        }
+                    }
+                    if (likedBy.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenLikedByArtist(page.title, page.browseId, likedBy.size) }
+                                .padding(horizontal = ARTIST_CONTENT_GUTTER, vertical = 8.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.BottomEnd) {
+                                AsyncImage(
+                                    model = page.thumbnailUrl ?: likedBy.firstOrNull()?.thumbnailUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(56.dp).clip(CircleShape),
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .clip(CircleShape)
+                                        .background(palette.accent),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Rounded.Star, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.liked_songs),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = palette.onBackground,
+                                )
+                                Text(
+                                    androidx.compose.ui.res.pluralStringResource(R.plurals.liked_by_artist_count, likedBy.size, likedBy.size, page.title),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = palette.onBackgroundVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -921,6 +978,7 @@ fun DetailScreen(
                         songs = songs,
                         onPlayNext = onPlayNextSongs,
                         onAddToQueue = onAddToQueueSongs,
+                        onLike = onLikeSongs,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .padding(top = topBarContentPadding(), start = PAGE_GUTTER, end = PAGE_GUTTER),

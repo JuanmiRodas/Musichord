@@ -2077,6 +2077,19 @@ private fun BitChordApp(
     }
     val addSongsToQueue: (List<Song>) -> Unit = { songs -> queueSongs(songs, false) }
     val playSongsNext: (List<Song>) -> Unit = { songs -> queueSongs(songs, true) }
+    // BitChord Audio: a selection liked at once — or, when every one of them
+    // is liked already, unliked. Spaced out, so YouTube takes them all.
+    val likeSongs: (List<Song>) -> Unit = { picked ->
+        val unlike = picked.isNotEmpty() && picked.all { likeStatusOf(it) == LikeStatus.LIKE }
+        scope.launch {
+            for (song in picked) {
+                val liked = likeStatusOf(song) == LikeStatus.LIKE
+                if (liked != unlike) continue
+                toggleLikeOf(song)
+                kotlinx.coroutines.delay(350)
+            }
+        }
+    }
 
     // ---- Links from outside the app ----
 
@@ -3446,6 +3459,16 @@ private fun BitChordApp(
                                 folder = folder,
                                 onPlayNextSongs = playSongsNext,
                                 onAddToQueueSongs = addSongsToQueue,
+                                onLikeSongs = likeSongs,
+                                onOpenLikedByArtist = { name, artistId, count ->
+                                    viewModel.openDetail(
+                                        com.music.bitchord.data.LikedByArtist.browseIdFor(name, artistId),
+                                        versionContext.getString(R.string.liked_by_artist_title, name),
+                                        versionContext.resources.getQuantityString(R.plurals.liked_by_artist_count, count, count, name),
+                                        page.thumbnailUrl,
+                                        BrowseType.PLAYLIST,
+                                    )
+                                },
                                 contentPadding = listPadding,
                                 reorder = if (reordering != null) {
                                     { palette ->
