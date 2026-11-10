@@ -7483,6 +7483,13 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             AppSettings.skipSilence.collect { on -> eachPlayer { it.skipSilenceEnabled = on } }
         }
+        // BitChord Audio: the AutoEQ headphone correction for the output playing now.
+        scope.launch {
+            com.music.bitchord.data.autoeq.AutoEq.active.collect { choice ->
+                equalizerProcessorA.setCorrection(choice?.settings)
+                equalizerProcessorB.setCorrection(choice?.settings)
+            }
+        }
         scope.launch {
             // The queue as it stands is re-judged at once, rather than at the
             // next track, and read-ahead may have been warming a video.

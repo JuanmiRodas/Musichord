@@ -175,6 +175,8 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         }
         AppSettings.init(this, authStore)
         com.music.bitchord.data.LikedMusicCache.init(this)
+        com.music.bitchord.data.NoRecommend.init(filesDir)
+        com.music.bitchord.data.autoeq.AutoEq.init(this)
         com.music.bitchord.data.webdav.WebDavRepository.init(this)
         com.music.bitchord.data.MergedLibrary.init(this)
         com.music.bitchord.data.lyrics.LyricAliases.init(this)

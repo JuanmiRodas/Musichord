@@ -317,6 +317,14 @@ fun SettingsScreen(
         com.music.bitchord.ui.components.ConnectAppDialog(onDismiss = { showConnect = false })
     }
     var showLogUpload by remember { mutableStateOf(false) }
+    var showNoRecommend by remember { mutableStateOf(false) }
+    var showAutoEq by remember { mutableStateOf(false) }
+    if (showAutoEq) {
+        com.music.bitchord.ui.components.AutoEqDialog(onDismiss = { showAutoEq = false })
+    }
+    if (showNoRecommend) {
+        com.music.bitchord.ui.components.NoRecommendDialog(onDismiss = { showNoRecommend = false })
+    }
     if (showLogUpload) {
         com.music.bitchord.ui.components.LogUploadDialog(onDismiss = { showLogUpload = false })
     }
@@ -1018,6 +1026,20 @@ fun SettingsScreen(
                         title = equalizerTitle,
                         subtitle = stringResource(R.string.equalizer_subtitle),
                         onClick = onEqualizer,
+                    )
+                }
+            }
+            // BitChord Audio: headphone correction (AutoEQ), per output.
+            val autoEqTitle = stringResource(R.string.autoeq_title)
+            row(autoEqTitle, "autoeq", "headphones", "auriculares", "eq", "correction") {
+                val autoEqOut by com.music.bitchord.data.autoeq.AutoEq.output.collectAsStateWithLifecycle()
+                val autoEqOn by com.music.bitchord.data.autoeq.AutoEq.active.collectAsStateWithLifecycle()
+                BypassedByBitPerfect(bitPerfectReady) {
+                    SettingsRow(
+                        icon = SfIcons.Tune,
+                        title = autoEqTitle,
+                        subtitle = autoEqOut.name + " · " + (autoEqOn?.entry?.name ?: stringResource(R.string.autoeq_none_short)),
+                        onClick = { showAutoEq = true },
                     )
                 }
             }
@@ -2064,6 +2086,16 @@ fun SettingsScreen(
                     subtitle = if (logRepo.isBlank()) stringResource(R.string.log_upload_off)
                     else logRepo + (logStatus?.let { " · $it" } ?: ""),
                     onClick = { showLogUpload = true },
+                )
+            }
+            val noRecTitle = stringResource(R.string.no_recommend_title)
+            row(noRecTitle, "recommend", "recomendar", "radio", "autoplay", "exclude", "excluir") {
+                val noRec by com.music.bitchord.data.NoRecommend.entries.collectAsStateWithLifecycle()
+                SettingsRow(
+                    icon = SfIcons.VisibilityOff,
+                    title = noRecTitle,
+                    subtitle = stringResource(R.string.no_recommend_subtitle, noRec.size),
+                    onClick = { showNoRecommend = true },
                 )
             }
             val cleanerTitle = stringResource(R.string.cleaner_title)

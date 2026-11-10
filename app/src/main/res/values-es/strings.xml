@@ -1645,4 +1645,19 @@
     <string name="phone_dolby_title">Dolby Atmos del teléfono</string>
     <string name="phone_dolby_subtitle">El efecto de sonido Dolby del propio teléfono, en cualquier canción. No es el interruptor de arriba. Toca para abrirlo y actívalo mientras suena música. En OnePlus solo funciona en la edición BitChord Dolby</string>
     <string name="phone_dolby_subtitle_edition">Edición BitChord Dolby: el teléfono aplica Dolby a esta app. Toca para abrir Dolby Atmos y actívalo mientras suena música</string>
+    <string name="no_recommend">No recomendar esta canción</string>
+    <string name="no_recommend_undo">Volver a recomendar esta canción</string>
+    <string name="no_recommend_added">No se sugerirá en radios, reproducción automática ni mezclas</string>
+    <string name="no_recommend_removed">Se puede volver a sugerir</string>
+    <string name="no_recommend_title">Canciones que no recomendar</string>
+    <string name="no_recommend_subtitle">%1$d canciones que radios, reproducción automática y mezclas omiten</string>
+    <string name="no_recommend_empty">Ninguna todavía. Usa No recomendar esta canción en el menú de una canción.</string>
+    <string name="no_recommend_allow">Permitir</string>
+    <string name="autoeq_title">Corrección de auriculares (AutoEQ)</string>
+    <string name="autoeq_for_output">Salida actual: %1$s. Los auriculares que elijas se recuerdan para esta salida.</string>
+    <string name="autoeq_active">Corrigiendo como %1$s (%2$d filtros)</string>
+    <string name="autoeq_none">Sin corrección en esta salida</string>
+    <string name="autoeq_none_short">desactivada</string>
+    <string name="autoeq_search">Busca tus auriculares (p. ej. Galaxy Buds, HD 600)</string>
+    <string name="autoeq_off">Quitar en esta salida</string>
 </resources>

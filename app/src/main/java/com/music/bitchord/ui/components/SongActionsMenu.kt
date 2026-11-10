@@ -407,6 +407,24 @@ fun SongActionsMenu(
         ActionRow(SfIcons.Pencil, stringResource(R.string.edit_info), accent = palette.accent) {
             MetadataEditor.open(listOf(song))
         }
+        // BitChord Audio: never suggest this song (radios, AutoPlay, mixes).
+        run {
+            val nrContext = androidx.compose.ui.platform.LocalContext.current
+            val excluded = remember(song.videoId) { com.music.bitchord.data.NoRecommend.isExcluded(song) }
+            ActionRow(
+                SfIcons.VisibilityOff,
+                stringResource(if (excluded) R.string.no_recommend_undo else R.string.no_recommend),
+                accent = palette.accent,
+            ) {
+                if (excluded) com.music.bitchord.data.NoRecommend.remove(song.videoId)
+                else com.music.bitchord.data.NoRecommend.add(song)
+                android.widget.Toast.makeText(
+                    nrContext,
+                    nrContext.getString(if (excluded) R.string.no_recommend_removed else R.string.no_recommend_added),
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
         // BitChord Audio: every other song this one is tied to — the file or
         // JioSaavn copy it plays as, or (playing now) the song it stands in
         // for — each to say "not the same song".

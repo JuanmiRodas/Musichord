@@ -1548,4 +1548,19 @@
     <string name="phone_dolby_title">Phone\'s Dolby Atmos sound</string>
     <string name="phone_dolby_subtitle">Dolby\'s sound effect from the phone itself, on any song. Not the switch above. Tap to open it and turn it on while music plays. On OnePlus it only works in the BitChord Dolby edition</string>
     <string name="phone_dolby_subtitle_edition">BitChord Dolby edition: the phone applies Dolby to this app. Tap to open Dolby Atmos and turn it on while music plays</string>
+    <string name="no_recommend">Don\'t recommend this song</string>
+    <string name="no_recommend_undo">Recommend this song again</string>
+    <string name="no_recommend_added">Won\'t be suggested in radios, AutoPlay or mixes</string>
+    <string name="no_recommend_removed">Can be suggested again</string>
+    <string name="no_recommend_title">Songs not to recommend</string>
+    <string name="no_recommend_subtitle">%1$d songs radios, AutoPlay and mixes leave out</string>
+    <string name="no_recommend_empty">None yet. Use Don\'t recommend this song in a song\'s menu.</string>
+    <string name="no_recommend_allow">Allow</string>
+    <string name="autoeq_title">Headphone correction (AutoEQ)</string>
+    <string name="autoeq_for_output">Output now: %1$s. The headphones you pick are remembered for this output.</string>
+    <string name="autoeq_active">Correcting as %1$s (%2$d filters)</string>
+    <string name="autoeq_none">No correction on this output</string>
+    <string name="autoeq_none_short">off</string>
+    <string name="autoeq_search">Search your headphones (e.g. Galaxy Buds, HD 600)</string>
+    <string name="autoeq_off">Off for this output</string>
 </resources>

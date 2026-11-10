@@ -648,7 +648,7 @@ object YtMusicRepository {
     suspend fun radio(videoId: String, preferVideo: Boolean = false): Result<List<Song>> =
         call("radio:$videoId:$preferVideo") {
             InnertubeParser.parseWatchQueue(Innertube.next(videoId), preferVideo = preferVideo)
-        }
+        }.map(NoRecommend::filter) // BitChord Audio: songs you said never to suggest
 
     /**
      * The page of the artist called exactly [name], or null when there is none.
@@ -1175,6 +1175,9 @@ object YtMusicRepository {
         InnertubeParser.parseWatchQueue(
             Innertube.nextPlaylist(target.playlistId, target.videoId, target.params),
         ).filterNot { it.isVideo }
+            // BitChord Audio: a radio or mix ("RD…") is a suggestion, so songs you
+            // said never to suggest are left out; a playlist you open is yours.
+            .let { if (target.playlistId.startsWith("RD")) NoRecommend.filter(it) else it }
     }
 
     /**

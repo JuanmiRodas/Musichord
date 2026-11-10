@@ -119,6 +119,58 @@ class EqualizerProcessor : BaseAudioProcessor() {
         target = if (enabled) Tuning(curve, balance.coerceIn(-1f, 1f)) else Tuning.OFF
     }
 
+    // ---- BitChord Audio: headphone correction (AutoEQ) ------------------------
+    // A cascade of up to 16 biquads at any frequency, after the equaliser and
+    // whether or not it is on — see [com.music.bitchord.data.autoeq.AutoEq].
+
+    @Volatile
+    private var correction: com.music.bitchord.data.autoeq.PeqSettings? = null
+    private var correctionBuiltFor: com.music.bitchord.data.autoeq.PeqSettings? = null
+    private var correctionRate = 0
+    private var correctionChannels = 0
+    private var correctionCoeffs: Array<DoubleArray> = emptyArray()
+    /** Two transposed-direct-form states per filter, per channel. */
+    private var correctionState = DoubleArray(0)
+    private var correctionGain = 1.0
+
+    /** The correction to run, or null for none. Any thread. */
+    fun setCorrection(settings: com.music.bitchord.data.autoeq.PeqSettings?) {
+        correction = settings
+    }
+
+    /** Whether a correction runs this block; (re)builds its filters when needed. */
+    private fun prepareCorrection(): Boolean {
+        val c = correction
+        if (c == null || sampleRate <= 0 || channelCount < 1) {
+            correctionBuiltFor = null
+            return false
+        }
+        if (c !== correctionBuiltFor || correctionRate != sampleRate || correctionChannels != channelCount) {
+            correctionCoeffs = c.coefficients(sampleRate)
+            correctionState = DoubleArray(correctionCoeffs.size * channelCount * 2)
+            correctionGain = 10.0.pow(c.preampDb / 20.0)
+            correctionBuiltFor = c
+            correctionRate = sampleRate
+            correctionChannels = channelCount
+        }
+        return true
+    }
+
+    private fun correct(channel: Int, input: Float): Float {
+        var x = input * correctionGain
+        val coeffs = correctionCoeffs
+        val st = correctionState
+        for (i in coeffs.indices) {
+            val k = coeffs[i]
+            val at = (i * channelCount + channel) * 2
+            val y = k[0] * x + st[at]
+            st[at] = k[1] * x - k[3] * y + st[at + 1]
+            st[at + 1] = k[2] * x - k[4] * y
+            x = y
+        }
+        return x.toFloat()
+    }
+
     val isEnabled: Boolean
         get() = target !== Tuning.OFF
 
@@ -152,7 +204,8 @@ class EqualizerProcessor : BaseAudioProcessor() {
         if (frameCount == 0 || channelCount < 1 || sampleRate <= 0) return
 
         val tuning = target
-        if (isFlat(tuning) && isSettled(tuning)) {
+        val correcting = prepareCorrection()
+        if (!correcting && isFlat(tuning) && isSettled(tuning)) {
             isShaping = false
             return
         }
@@ -173,8 +226,10 @@ class EqualizerProcessor : BaseAudioProcessor() {
                     for (index in 0 until active) {
                         sample = section(activeSlots[index], channel, sample)
                     }
+                    sample *= channelGain[channel]
+                    if (correcting) sample = correct(channel, sample)
                     // Headroom is preserved: sample is stored directly as Float
-                    block.samples[baseIdx + channel] = sample * channelGain[channel]
+                    block.samples[baseIdx + channel] = sample
                 }
             }
             flushDenormals(active)
@@ -201,6 +256,7 @@ class EqualizerProcessor : BaseAudioProcessor() {
 
     override fun onFlush() {
         state.fill(0f)
+        correctionState.fill(0.0)
         running.fill(false)
         limiter.reset()
         snapToTarget()
@@ -225,7 +281,8 @@ class EqualizerProcessor : BaseAudioProcessor() {
         val outputBuffer = replaceOutputBuffer(frameCount * bytesPerFrame)
 
         val tuning = target
-        if (isFlat(tuning) && isSettled(tuning)) {
+        val correcting = prepareCorrection()
+        if (!correcting && isFlat(tuning) && isSettled(tuning)) {
             limiter.reset()
             outputBuffer.put(inputBuffer)
             outputBuffer.flip()
@@ -251,6 +308,7 @@ class EqualizerProcessor : BaseAudioProcessor() {
                         sample = section(activeSlots[index], channel, sample)
                     }
                     sample *= channelGain[channel]
+                    if (correcting) sample = correct(channel, sample)
                     frame[channel] = sample
                     if (abs(sample) > peak) peak = abs(sample)
                 }
