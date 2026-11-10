@@ -156,6 +156,21 @@ enum class SourceKind(
     ),
 
     /**
+     * NetEase Cloud Music: MP3 up to 320 kbps, strongest on Japanese, Chinese
+     * and Korean releases. Only tracks free to play in full are offered.
+     */
+    NETEASE(
+        label = "NetEase Cloud Music",
+        detail = "MP3 up to 320kbps, strongest on Japanese, Chinese and Korean music. " +
+            "VIP-only tracks are skipped. Catalogue matching can select the wrong song.",
+        labels = listOf("High Quality", "320kbps", "J-pop / C-pop"),
+        needsServer = false,
+        canServeLossless = false,
+        worthPrefetching = true,
+        rank = 2,
+    ),
+
+    /**
      * The source the app was built on, listed here so it always has a fixed
      * place: second, behind the module source. It cannot be removed — see
      * [SourceRegistry]. Nothing else in the app can supply a home feed, a
@@ -169,6 +184,21 @@ enum class SourceKind(
         needsServer = false,
         canServeLossless = false,
         rank = 3,
+    ),
+
+    /**
+     * SoundCloud: remixes, edits and self-released tracks nobody else has, at
+     * 128 kbps — below YouTube, so it ranks after it and is never used to
+     * upgrade a track; it serves hand picks from the player's source sheet.
+     */
+    SOUNDCLOUD(
+        label = "SoundCloud",
+        detail = "Remixes, DJ edits and independent releases, at 128kbps MP3. Below " +
+            "YouTube's quality, so it is used only when you pick it for a song.",
+        labels = listOf("Remixes", "Independent", "128kbps"),
+        needsServer = false,
+        canServeLossless = false,
+        rank = 4,
     ),
     ;
 

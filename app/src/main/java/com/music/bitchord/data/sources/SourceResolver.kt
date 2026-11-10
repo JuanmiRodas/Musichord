@@ -41,6 +41,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  * terms, whichever of them a track was queued from.
  */
 object SourceResolver {
+    /**
+     * Public catalogues that file the same title and artist under several
+     * releases with different audio — JioSaavn, NetEase, SoundCloud. With no
+     * album to tell them apart, a match there is refused rather than guessed.
+     */
+    private val CATALOGUE_KINDS = setOf(SourceKind.JIOSAAVN, SourceKind.NETEASE, SourceKind.SOUNDCLOUD)
+
 
     private const val TAG = "BitChord"
 
@@ -1369,7 +1376,7 @@ object SourceResolver {
             // duration is not enough when the wrong recording is only a
             // second away. Treat it as this source missing and retain the
             // known-correct fallback.
-            if (source.kind == SourceKind.JIOSAAVN &&
+            if (source.kind in CATALOGUE_KINDS &&
                 TrackMatcher.hasConflictingAlbums(matches, matchOn)
             ) {
                 val canonical = TrackMatcher.uniquelyMostCreditedCloseMatch(matches, matchOn)
