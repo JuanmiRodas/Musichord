@@ -77,14 +77,34 @@ object LyricsKeeper {
      * Keeps [lines] as [song]'s lyrics. [picked]: you chose them, so they
      * replace what was kept; otherwise lyrics already kept stay.
      */
-    fun keep(song: Song, lines: List<LyricLine>, picked: Boolean = false) {
+    fun keep(song: Song, lines: List<LyricLine>, picked: Boolean = false, upgrade: Boolean = false) {
         if (lines.none { it.timeMs > 0 } || lines.count { it.text.isNotBlank() } < 2) return
-        if (!picked && EditedLyrics.has(song.videoId)) return
+        if (!picked && !upgrade && EditedLyrics.has(song.videoId)) return
+        if (upgrade && !isAutoKept(song.videoId)) return
         EditedLyrics.save(song, lines, besideFile = false, quiet = !picked)
-        prefs?.edit()?.remove(song.videoId)?.apply()
+        // BitChord Audio: remembered as chosen by the app (may be upgraded later)
+        // or by you (never replaced) — see [isAutoKept].
+        prefs?.edit()?.remove(song.videoId)?.apply {
+            if (picked) remove(AUTO + song.videoId) else putLong(AUTO + song.videoId, System.currentTimeMillis())
+        }?.apply()
+        if (upgrade) forgetEmbedded(song)
         scope.launch { runCatching { writeToFolder(song, lines) } }
         if (picked) forgetEmbedded(song)
         scope.launch { runCatching { embedInFiles(song, lines) } }
+    }
+
+    private const val AUTO = "auto:"
+
+    /**
+     * Whether the lyrics kept for [videoId] were chosen by the app (the best
+     * found then), not picked or timed by you — and so may be replaced when a
+     * better version turns up. A save in the editor afterwards makes them yours.
+     */
+    fun isAutoKept(videoId: String): Boolean {
+        val at = prefs?.getLong(AUTO + videoId, 0L) ?: 0L
+        if (at <= 0L) return false
+        val saved = EditedLyrics.savedAt(videoId)
+        return saved == 0L || saved <= at + 5_000
     }
 
     private fun forgetEmbedded(song: Song) {
@@ -218,14 +238,16 @@ object LyricsKeeper {
         val flagged = BadLyrics.flagged(s.videoId)
         val sources = AppSettings.lyricsSources.value.filterTo(LinkedHashSet()) { it.name !in flagged && !it.untimed }
         if (sources.isEmpty()) return null
-        val spellings = runCatching { LyricNames.variants(s.title, s.artist) }.getOrDefault(emptyList())
-        for (q in LyricAliases.queries(s.videoId, s.title, s.artist, spellings).take(3)) {
-            val r = LyricsRepository.lyrics(
-                s.videoId, q.title, q.artist, seconds * 1000L, s.albumName, sources,
-                AppSettings.lyricsSourceOrder.value, false,
-            ) ?: continue
-            if (r.lines.any { it.timeMs > 0 }) return r.lines
-        }
-        return null
+        val spellings = runCatching { LyricNames.variants(s.title, s.artist, seconds * 1000L) }.getOrDefault(emptyList())
+        // BitChord Audio: the best version under any name (see LyricsRepository.best).
+        val best = LyricsRepository.best(
+            videoId = s.videoId,
+            spellings = LyricAliases.queries(s.videoId, s.title, s.artist, spellings).map { LyricsRepository.Spelling(it.title, it.artist) },
+            durationMs = seconds * 1000L,
+            album = s.albumName,
+            sources = sources,
+            order = AppSettings.lyricsSourceOrder.value,
+        )
+        return best?.result?.lines?.takeIf { l -> l.any { it.timeMs > 0 } }
     }
 }

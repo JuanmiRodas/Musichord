@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
@@ -219,6 +220,7 @@ object LyricsRepository {
             LyricsSource.KUGOU -> KuGou.lyrics(title, artist, durationMs, album)
             LyricsSource.NETEASE -> NetEase.lyrics(title, artist, durationMs)
             LyricsSource.QQ_MUSIC -> QqMusic.lyrics(title, artist, durationMs)
+            LyricsSource.LYRICFIND -> LyricFind.lyrics(title, artist, durationMs)
             LyricsSource.UTATEN -> UtaTen.lyrics(title, artist)
             LyricsSource.UTA_NET -> UtaNet.lyrics(title, artist)
             LyricsSource.J_LYRIC -> JLyric.lyrics(title, artist)
@@ -338,6 +340,122 @@ object LyricsRepository {
             documents.cancel()
         }
     }
+
+    /** BitChord Audio: one way to name the song to the sources. */
+    data class Spelling(val title: String, val artist: String)
+
+    /** BitChord Audio: the winner of [best], and the spelling that found it. */
+    data class Best(val result: Result, val spelling: Spelling, val score: Int)
+
+    /**
+     * BitChord Audio: the best lyrics any enabled source has under any of
+     * [spellings] (the song's own names first, then e.g. its Japanese ones),
+     * ranked by [LyricsQuality] — word-synced over line-synced over untimed,
+     * a Japanese song's own romaji over Japanese alone — with the Settings
+     * order breaking ties, then the order of [spellings].
+     *
+     * Every timed source is asked for every spelling (at most [MAX_SPELLINGS])
+     * at once, each given [perSourceTimeoutMs]; [onBetter] hears each new
+     * leader as it arrives, so the player can show something at once and
+     * upgrade it. Untimed sources only run when nothing timed exists. Per
+     * source, [onSourceResult] reports its best answer over all spellings once
+     * all of them are in (null: a miss under every spelling).
+     */
+    suspend fun best(
+        videoId: String,
+        spellings: List<Spelling>,
+        durationMs: Long,
+        album: String? = null,
+        sources: Set<LyricsSource> = LyricsSource.entries.toSet(),
+        order: List<LyricsSource> = LyricsSource.entries,
+        isrc: String? = null,
+        perSourceTimeoutMs: Long = 12_000,
+        onSourceStarted: ((LyricsSource) -> Unit)? = null,
+        onSourceResult: ((LyricsSource, Result?) -> Unit)? = null,
+        onBetter: ((Best) -> Unit)? = null,
+    ): Best? = coroutineScope {
+        val names = spellings.filter { it.title.isNotBlank() }.distinct().take(MAX_SPELLINGS)
+        if (names.isEmpty()) return@coroutineScope null
+        val sequence = (order + LyricsSource.offered).distinct().filter { it in sources && !it.hidden }
+        val rank = sequence.withIndex().associate { (i, src) -> src to i }
+        val japaneseNamed = names.any { CrossScript.hasJapanese(it.title) || CrossScript.hasJapanese(it.artist) }
+        val documents = SharedDocuments(this)
+        val lock = kotlinx.coroutines.sync.Mutex()
+        val found = ArrayList<Triple<Result, Int, LyricsSource>>() // result, spelling index, source
+        var leader: Best? = null
+
+        fun japaneseSong() = japaneseNamed || found.any { LyricsQuality.looksJapanese(it.first.lines) }
+        fun keyOf(r: Result, qi: Int) = Triple(
+            -LyricsQuality.score(r.lines, japaneseSong(), durationMs),
+            rank[r.source] ?: Int.MAX_VALUE,
+            qi,
+        )
+        fun leaderNow(): Best? = found.minWithOrNull(compareBy({ keyOf(it.first, it.second).first }, { keyOf(it.first, it.second).second }, { it.second }))
+            ?.let { (r, qi, _) -> Best(r, names[qi], LyricsQuality.score(r.lines, japaneseSong(), durationMs)) }
+
+        // The recording, once, from the first spelling — as [lyrics] does.
+        val searchFirst = names.first()
+        val known = isrc?.takeIf { it.isNotBlank() } ?: isrcs[videoId]
+        val hit = if (known == null) {
+            identify(videoId, searchFirst.title.forLyricsSearch(), searchFirst.artist.artistForLyricsSearch(), durationMs, album, sequence)
+        } else null
+        val recording = known ?: hit?.isrc?.takeIf { it.isNotBlank() }
+
+        suspend fun round(round: List<LyricsSource>) {
+            val pending = java.util.concurrent.ConcurrentHashMap<LyricsSource, Int>()
+            val perSource = java.util.concurrent.ConcurrentHashMap<LyricsSource, Result>()
+            // Sources that look a song up by its video, not its name, are asked once.
+            fun spellingsFor(source: LyricsSource) = if (source in BY_VIDEO) listOf(0) else names.indices.toList()
+            round.forEach { pending[it] = spellingsFor(it).size; onSourceStarted?.invoke(it) }
+            round.flatMap { source ->
+                spellingsFor(source).map { qi ->
+                    val name = names[qi]
+                    async(Dispatchers.IO) {
+                        val lines = withTimeoutOrNull(perSourceTimeoutMs) {
+                            runCatching {
+                                fetch(
+                                    source, videoId, name.title.forLyricsSearch(), name.artist.artistForLyricsSearch(),
+                                    durationMs, album, if (qi == 0) recording else null, if (qi == 0) hit else null, documents::get,
+                                )
+                            }.getOrNull()
+                        }?.takeIf { l -> l.any { it.text.isNotBlank() } }
+                        lock.withLock {
+                            if (lines != null) {
+                                val r = result(source, lines)
+                                found += Triple(r, qi, source)
+                                val mine = perSource[source]
+                                if (mine == null || LyricsQuality.score(r.lines, japaneseSong(), durationMs) >
+                                    LyricsQuality.score(mine.lines, japaneseSong(), durationMs)
+                                ) perSource[source] = r
+                                val now = leaderNow()
+                                if (now != null && now.result !== leader?.result) {
+                                    leader = now
+                                    onBetter?.invoke(now)
+                                }
+                            }
+                            val left = (pending[source] ?: 1) - 1
+                            pending[source] = left
+                            if (left == 0) onSourceResult?.invoke(source, perSource[source])
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+
+        try {
+            round(sequence.filterNot { it.untimed })
+            val timedFound = found.any { (r, _, _) -> r.lines.any { it.timeMs > 0 } }
+            if (!timedFound) round(sequence.filter { it.untimed })
+            lock.withLock { leaderNow() }
+        } finally {
+            documents.cancel()
+        }
+    }
+
+    /** BitChord Audio: spellings asked at most per lookup in [best]. */
+    private const val MAX_SPELLINGS = 4
+
+    private val BY_VIDEO = setOf(LyricsSource.SIMP_MUSIC, LyricsSource.YOUTUBE_TRANSCRIPT, LyricsSource.YOUTUBE_MUSIC)
 
     private class SharedDocuments(private val scope: CoroutineScope) {
         private val inFlight = ConcurrentHashMap<String, Deferred<String?>>()

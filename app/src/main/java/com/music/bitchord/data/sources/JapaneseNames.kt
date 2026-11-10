@@ -187,7 +187,10 @@ object JapaneseNames {
     suspend fun of(song: Song, online: Boolean = true): Names = withContext(Dispatchers.IO) {
         val title = song.title
         val artist = song.artist
-        val wantTitle = mayHaveJapanese(title) || JapaneseReading.isJapanese(title)
+        // BitChord Audio: a romaji title with an English loanword in it ("Mezameta
+        // Venus") counts too, when the artist's name is romaji.
+        val wantTitle = mayHaveJapanese(title) || JapaneseReading.isJapanese(title) ||
+            (LyricNames.mostlyRomaji(bare(title)) && mayHaveJapaneseArtist(artist))
         // An artist's Japanese name only for a Japanese song: "Kesha" singing
         // "Backstabber" isn't asked for as ケシャ.
         val wantArtist = wantTitle && mayHaveJapaneseArtist(artist)
@@ -197,14 +200,14 @@ object JapaneseNames {
         val tKey = sound?.let { "$it|${artistKey(artist)}" }
         val aKey = artistKey(artist)
         val known = cached(title, artist)
-        val titleDone = !mayHaveJapanese(title) || (tKey != null && titles.containsKey(tKey))
+        val titleDone = !wantTitle || JapaneseReading.isJapanese(title) || (tKey != null && titles.containsKey(tKey))
         val artistDone = !wantArtist || artists.containsKey(aKey)
         if (titleDone && artistDone) return@withContext known ?: Names.NONE
         val missKey = "${tKey ?: title}|$aKey|$online"
         if (missKey in missed) return@withContext known ?: Names.NONE
 
         songLocks.getOrPut(missKey) { Mutex() }.withLock {
-            val found = Found(sound, artist, song.durationText?.let(::seconds))
+            val found = Found(sound, artist, song.durationText?.let(::seconds), romajiTitle = title.takeUnless { JapaneseReading.isJapanese(it) })
             // Inside a Japanese-titled song's own title: "Title (日本語)".
             found.fromText(title, trusted = true)
             runCatching { fromOwnCopies(song, found) }
@@ -304,20 +307,44 @@ object JapaneseNames {
      * Spellings gathered for one song, each with how far it is trusted;
      * [result] keeps the confirmed ones, best first.
      */
-    private class Found(val sound: String?, val romajiArtist: String, val seconds: Int?) {
+    private class Found(
+        val sound: String?,
+        val romajiArtist: String,
+        val seconds: Int?,
+        /** BitChord Audio: the romaji title itself, for the loanword-tolerant check. */
+        val romajiTitle: String? = null,
+    ) {
         val titles = LinkedHashMap<String, Int>()
         val artists = LinkedHashMap<String, Int>()
 
-        /** [trusted]: a copy of this very song, or a catalogue entry paired with the romaji. */
-        fun title(candidate: String?, trusted: Boolean) {
+        /**
+         * [trusted]: a copy of this very song, or a catalogue entry paired with the romaji.
+         * [paired]: the official entry itself — the same catalogue track found by the
+         * romaji name, artist and length, read back in Japanese. Kept as it is: that
+         * pairing *is* the cross-check, and a title with a katakana loanword
+         * (目覚めたヴィーナス, read "mezameta biinasu") never reads back as its romaji
+         * ("Mezameta Venus") letter for letter.
+         */
+        fun title(candidate: String?, trusted: Boolean, paired: Boolean = false) {
             val t = candidate?.let(::bare)?.trim()?.takeIf { it.length >= 2 && JapaneseReading.isJapanese(it) } ?: return
+            if (paired) {
+                titles[t] = maxOf(titles[t] ?: 0, 4)
+                return
+            }
             val s = sound ?: return
-            val got = JapaneseReading.romaji(t)?.let(JapaneseReading::soundKey) ?: return
+            val romaji = JapaneseReading.romaji(t) ?: return
+            val got = JapaneseReading.soundKey(romaji)
+            val skeletonSame = romajiTitle != null &&
+                com.music.bitchord.data.lyrics.CrossScript.skeleton(romaji).let { k ->
+                    k.length >= 3 && k == com.music.bitchord.data.lyrics.CrossScript.skeleton(bare(romajiTitle))
+                }
             val score = when {
                 got == s -> if (trusted) 3 else 2
                 // The dictionary reads a kanji another way now and then (明日:
                 // asu/ashita); a copy of the song itself may be a sound or two off.
                 trusted && near(got, s) -> 1
+                // Loanwords in katakana: same consonants, other vowels (Venus/biinasu).
+                skeletonSame -> if (trusted) 2 else 1
                 else -> return
             }
             titles[t] = maxOf(titles[t] ?: 0, score)
@@ -326,7 +353,8 @@ object JapaneseNames {
         fun artist(candidate: String?, trusted: Boolean) {
             val a = candidate?.split(ARTIST_SPLIT)?.firstOrNull()?.trim()
                 ?.takeIf { it.isNotEmpty() && JapaneseReading.isJapanese(it) } ?: return
-            val same = OwnFileMatcher.sameArtist(romajiArtist, a)
+            val same = OwnFileMatcher.sameArtist(romajiArtist, a) ||
+                com.music.bitchord.data.lyrics.CrossScript.sameArtist(romajiArtist, a)
             val score = when {
                 same -> if (trusted) 3 else 2
                 trusted -> 1
@@ -438,7 +466,7 @@ object JapaneseNames {
         jobs.forEach { it.await() }
         if (found.artists.isEmpty()) artistFromCatalogues(artist, found)
         // Last: the keyboard's conversion, kept only if it reads back the same.
-        if (found.titles.isEmpty() && mayHaveJapanese(title)) {
+        if (found.titles.isEmpty() && (mayHaveJapanese(title) || LyricNames.mostlyRomaji(bare(title)))) {
             withTimeoutOrNull(4_000) { runCatching { LyricNames.japanese(plainTitle) }.getOrNull() }
                 .orEmpty().forEach { found.title(it, trusted = false) }
         }
@@ -488,7 +516,9 @@ object JapaneseNames {
             val r = rows.getJSONObject(i)
             val name = r.optString("trackName")
             val sameSound = JapaneseReading.soundKey(bare(name)) == wanted ||
-                JapaneseReading.romaji(bare(name))?.let(JapaneseReading::soundKey) == wanted
+                JapaneseReading.romaji(bare(name))?.let(JapaneseReading::soundKey) == wanted ||
+                // BitChord Audio: "Mezameta Venus" / "Mezameta Venus (Remastered)" / spelling variants.
+                com.music.bitchord.data.lyrics.CrossScript.skeleton(bare(name)) == com.music.bitchord.data.lyrics.CrossScript.skeleton(bare(title))
             val secs = r.optLong("trackTimeMillis") / 1000
             val lengthOk = found.seconds == null || secs == 0L || kotlin.math.abs(secs - found.seconds) <= 4
             if (sameSound && lengthOk && OwnFileMatcher.sameArtist(artist, r.optString("artistName"))) {
@@ -504,7 +534,8 @@ object JapaneseNames {
         val back = JSONObject(ja).optJSONArray("results") ?: return
         for (i in 0 until back.length()) {
             val r = back.getJSONObject(i)
-            found.title(r.optString("trackName"), trusted = true)
+            // The same track id, in Japanese: the official spelling — see [Found.title].
+            found.title(r.optString("trackName"), trusted = true, paired = true)
             found.artist(r.optString("artistName"), trusted = true)
         }
     }
@@ -530,8 +561,9 @@ object JapaneseNames {
             val lengthOk = found.seconds == null || r.seconds == 0L || kotlin.math.abs(r.seconds - found.seconds) <= 4
             if (!lengthOk) continue
             val got = JapaneseReading.romaji(bare(r.name))?.let(JapaneseReading::soundKey) ?: continue
-            if (got != wanted) continue
-            found.title(r.name, trusted = false)
+            val loan = r.seconds > 0 && found.seconds != null && com.music.bitchord.data.lyrics.CrossScript.sameTitle(title, r.name)
+            if (got != wanted && !loan) continue
+            found.title(r.name, trusted = loan && r.artists.any { com.music.bitchord.data.lyrics.CrossScript.sameArtist(artist, it) || OwnFileMatcher.sameArtist(artist, it) })
             r.artists.forEach { found.artist(it, trusted = false) }
         }
     }

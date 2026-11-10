@@ -40,19 +40,46 @@ private val authenticatedClient by lazy {
         .build()
 }
 
+/**
+ * BitChord Audio: how each lyrics host last answered — an HTTP error or a
+ * failure to connect — so a lookup's log line can say which sources are
+ * broken rather than just "not found". Kept per host, newest wins.
+ */
+object LyricsHealth {
+    private val last = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    fun note(url: String, outcome: String) {
+        val host = runCatching { java.net.URI(url).host }.getOrNull() ?: return
+        last[host] = outcome
+    }
+
+    /** Hosts whose last answer was a failure, as "host: outcome". */
+    fun failures(): List<String> = last.entries.filter { it.value != "ok" }.map { "${it.key}: ${it.value}" }.sorted()
+}
+
+private inline fun <T> noting(url: String, block: () -> T?): T? = try {
+    block()
+} catch (e: Exception) {
+    LyricsHealth.note(url, e.javaClass.simpleName)
+    null
+}
+
+private fun okhttp3.Response.bodyNoting(url: String): String? {
+    LyricsHealth.note(url, if (isSuccessful) "ok" else "HTTP $code")
+    return if (isSuccessful) body?.string() else null
+}
+
 /** Body of a successful GET, or null for any failure at all. */
-internal fun lyricsGet(url: String): String? = runCatching {
+internal fun lyricsGet(url: String): String? = noting(url) {
     val request = Request.Builder().url(url)
         .header("User-Agent", LYRICS_AGENT)
         .header("Accept", "application/json")
         .build()
-    client.newCall(request).execute().use { response ->
-        if (response.isSuccessful) response.body?.string() else null
-    }
-}.getOrNull()
+    client.newCall(request).execute().use { response -> response.bodyNoting(url) }
+}
 
 /** Body of an authenticated provider GET without service-specific browser headers. */
-internal fun lyricsGetBearer(url: String, bearer: String): String? = runCatching {
+internal fun lyricsGetBearer(url: String, bearer: String): String? = noting(url) {
     if (bearer.isBlank()) return null
     val request = Request.Builder().url(url)
         .header("User-Agent", LYRICS_AGENT)
@@ -60,16 +87,16 @@ internal fun lyricsGetBearer(url: String, bearer: String): String? = runCatching
         .header("Authorization", "Bearer $bearer")
         .build()
     authenticatedClient.newCall(request).execute().use { response ->
-        if (response.isSuccessful) response.body?.string() else null
+        response.bodyNoting(url)
     }
-}.getOrNull()
+}
 
 /**
  * [lyricsGet], with a bearer token and the headers Apple's own web player
  * sends alongside one — `amp-api.music.apple.com` answers a token with no
  * `Origin` at all the same way it answers a wrong one, with a 403.
  */
-internal fun lyricsGetAuthorized(url: String, bearer: String): String? = runCatching {
+internal fun lyricsGetAuthorized(url: String, bearer: String): String? = noting(url) {
     val request = Request.Builder().url(url)
         .header("User-Agent", LYRICS_AGENT)
         .header("Accept", "application/json")
@@ -78,9 +105,9 @@ internal fun lyricsGetAuthorized(url: String, bearer: String): String? = runCatc
         .header("Referer", "https://music.apple.com/")
         .build()
     client.newCall(request).execute().use { response ->
-        if (response.isSuccessful) response.body?.string() else null
+        response.bodyNoting(url)
     }
-}.getOrNull()
+}
 
 
 /** A browser's agent, for the Japanese lyrics sites that serve one their pages. */
@@ -88,10 +115,10 @@ internal const val BROWSER_AGENT =
     "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
 
 /** BitChord Audio: [lyricsGet] with headers of the caller's (a Referer, an agent). */
-internal fun lyricsGetWith(url: String, headers: Map<String, String>): String? = runCatching {
+internal fun lyricsGetWith(url: String, headers: Map<String, String>): String? = noting(url) {
     val builder = Request.Builder().url(url).header("User-Agent", LYRICS_AGENT)
     headers.forEach { (k, v) -> builder.header(k, v) }
     client.newCall(builder.build()).execute().use { response ->
-        if (response.isSuccessful) response.body?.string() else null
+        response.bodyNoting(url)
     }
-}.getOrNull()
+}

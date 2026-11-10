@@ -72,7 +72,9 @@ internal object JapaneseMatch {
         val a = norm(want)
         val b = norm(got)
         if (a.isEmpty() || b.isEmpty()) return false
-        return a == b || (minOf(a.length, b.length) >= 2 && (a.startsWith(b) || b.startsWith(a)))
+        return a == b || (minOf(a.length, b.length) >= 2 && (a.startsWith(b) || b.startsWith(a))) ||
+            // BitChord Audio: a romaji title against the catalogue's Japanese one.
+            CrossScript.sameTitle(want, got)
     }
 
     fun sameArtist(want: String, got: String): Boolean {
@@ -84,7 +86,9 @@ internal object JapaneseMatch {
         // "Hamasaki Ayumi" / "Ayumi Hamasaki"
         val wa = want.lowercase(Locale.ROOT).split(Regex("[\\s,&、・]+")).filter { it.length > 1 }.toSet()
         val wb = got.lowercase(Locale.ROOT).split(Regex("[\\s,&、・]+")).filter { it.length > 1 }.toSet()
-        return wa.isNotEmpty() && wa == wb
+        return (wa.isNotEmpty() && wa == wb) ||
+            // BitChord Audio: "Miho Morikawa" against 森川美穂.
+            CrossScript.sameArtist(want, got)
     }
 
     fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
@@ -171,17 +175,51 @@ object NetEase {
                 (seconds <= 0 || dur <= 0 || abs(dur - seconds) <= 6)
         }.sortedBy { abs(it.third - seconds) }
         for ((id, _, _) in candidates.take(3)) {
-            val lyric = lyricsGetWith("https://music.163.com/api/song/lyric?id=$id&lv=-1&kv=-1&tv=-1&rv=-1", headers) ?: continue
-            val root = runCatching { JapaneseMatch.obj(lyricsJson.parseToJsonElement(lyric)) }.getOrNull() ?: continue
+            // BitChord Audio: yv=-1 also asks for "yrc", NetEase's per-word timing.
+            fun rootOf(url: String) = lyricsGetWith(url, headers)
+                ?.let { runCatching { JapaneseMatch.obj(lyricsJson.parseToJsonElement(it)) }.getOrNull() }
+                ?.takeIf { r -> JapaneseMatch.str(JapaneseMatch.obj(r["lrc"])?.get("lyric")).isNullOrBlank().not() }
+            val root = rootOf("https://music.163.com/api/song/lyric/v1?id=$id&lv=-1&kv=-1&tv=-1&rv=-1&yv=-1&ytv=-1&yrv=-1")
+                ?: rootOf("https://music.163.com/api/song/lyric?id=$id&lv=-1&kv=-1&tv=-1&rv=-1&yv=-1")
+                ?: continue
             fun part(k: String) = JapaneseMatch.str(JapaneseMatch.obj(root[k])?.get("lyric"))?.takeIf { it.isNotBlank() }
             val lrc = part("lrc") ?: continue
             val cleaned = with(KuGou) { lrc.stripCredits() }.takeUnless { with(KuGou) { it.isInstrumentalNotice() } } ?: continue
             val lines = LrcLib.parseLrc(cleaned).takeIf { l -> l.count { it.text.isNotBlank() } >= 2 } ?: continue
+            // Romaji pairs by line text, so it serves the per-word lines as well.
             part("romalrc")?.let { ProvidedRomaji.pairTimed(lines, LrcLib.parseLrc(it)) }
+            part("yrc")?.let(::parseYrc)?.let { words ->
+                // Only when it is the same lyrics (credits aside): most of the timed lines found again.
+                val texts = lines.map { it.text.trim() }.toSet()
+                if (words.count { it.text.trim() in texts } >= texts.size / 2) return@withContext words
+            }
             return@withContext lines
         }
         null
     }
+}
+
+/**
+ * BitChord Audio: NetEase's "yrc" — a line `[start,duration]`, then each word
+ * as `(start,duration,0)word`, times in milliseconds. Credit lines (JSON
+ * objects) are skipped.
+ */
+internal fun parseYrc(text: String): List<LyricLine>? {
+    val line = Regex("""^\[(\d+),(\d+)](.*)$""")
+    val word = Regex("""\((\d+),(\d+),-?\d+\)([^(]*)""")
+    val out = text.lineSequence().mapNotNull { raw ->
+        val m = line.find(raw.trim()) ?: return@mapNotNull null
+        val start = m.groupValues[1].toLong()
+        val words = word.findAll(m.groupValues[3]).mapNotNull { w ->
+            val t = w.groupValues[3]
+            if (t.isEmpty()) return@mapNotNull null
+            val ws = w.groupValues[1].toLong()
+            LyricWord(ws, ws + w.groupValues[2].toLong(), t)
+        }.toList()
+        if (words.isEmpty()) return@mapNotNull null
+        LyricLine(timeMs = start, text = words.joinToString("") { it.text }.trimEnd(), words = words)
+    }.toList()
+    return out.takeIf { l -> l.count { it.text.isNotBlank() } >= 2 }
 }
 
 /** QQ Music: timed lyrics from the other big Chinese catalogue. */

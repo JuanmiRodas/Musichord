@@ -463,18 +463,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _lyricsChecked.value = false
         lyricsJob = viewModelScope.launch {
             // BitChord Audio: lyrics you timed yourself come before everything.
+            // BitChord Audio: lyrics the app kept earlier (not ones you picked or
+            // timed) are shown at once, but a better version is still looked for.
+            var keptAuto: List<com.music.bitchord.data.lyrics.LyricLine>? = null
             com.music.bitchord.data.lyrics.EditedLyrics.get(videoId)?.let { mine ->
                 _lyrics.value = mine
                 _lyricsSource.value = null
                 _lyricsChecked.value = true
-                return@launch
+                val japanese = com.music.bitchord.data.lyrics.LyricsQuality.looksJapanese(mine)
+                val already = com.music.bitchord.data.lyrics.LyricsQuality.score(mine, japanese, durationMs) >=
+                    com.music.bitchord.data.lyrics.LyricsQuality.WORD + (if (japanese) 300 else 0)
+                if (!com.music.bitchord.data.lyrics.LyricsKeeper.isAutoKept(videoId) || already || durationMs <= 0L) return@launch
+                keptAuto = mine
             }
+            val keptScore = keptAuto?.let {
+                com.music.bitchord.data.lyrics.LyricsQuality.score(it, com.music.bitchord.data.lyrics.LyricsQuality.looksJapanese(it), durationMs)
+            } ?: -1
             // BitChord Audio: your own lyrics files — beside the track, or in a
             // lyrics folder, found by any of the song's names (see
             // [SidecarLyrics]). First unless Settings says online goes first.
             // BitChord Audio: also by the romaji / Japanese spelling of the names.
             val spellings = runCatching {
-                com.music.bitchord.data.lyrics.LyricNames.variants(title, artist)
+                com.music.bitchord.data.lyrics.LyricNames.variants(title, artist, durationMs)
             }.getOrDefault(emptyList())
             val nameQueries = com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, artist, spellings)
             suspend fun ownLyrics() = if (com.music.bitchord.data.lyrics.BadLyrics.OWN in flaggedLyrics) null else com.music.bitchord.data.lyrics.SidecarLyrics.forSong(
@@ -482,7 +492,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 titles = nameQueries.map { it.title }.distinct(),
                 artists = nameQueries.map { it.artist }.distinct(),
             )
-            val ownFirst = AppSettings.ownLyricsFirst.value
+            val ownFirst = AppSettings.ownLyricsFirst.value && keptAuto == null
             if (ownFirst) {
                 ownLyrics()?.let { own ->
                     _lyrics.value = own
@@ -495,7 +505,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // only needed to *match* a track against a stranger's database, and
             // nothing is being matched here — these lyrics were written into
             // this exact file, for this exact recording.
-            if (localUri != null && com.music.bitchord.data.lyrics.BadLyrics.OWN !in flaggedLyrics) {
+            if (keptAuto == null && localUri != null && com.music.bitchord.data.lyrics.BadLyrics.OWN !in flaggedLyrics) {
                 EmbeddedLyrics.forUri(getApplication(), localUri)?.let { embedded ->
                     _lyrics.value = embedded
                     // No source to name: what the file records is the lyrics,
@@ -513,33 +523,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // BitChord Audio: the names the listener gave the song come first,
             // then the shown one, then the file's own alternatives — see
             // [com.music.bitchord.data.lyrics.LyricAliases].
-            var found: LyricsRepository.Result? = null
-            var untimed: Pair<LyricsRepository.Result, com.music.bitchord.data.lyrics.LyricAliases.Query>? = null
-            for (query in nameQueries) {
-                found = LyricsRepository.lyrics(
-                    videoId, query.title, query.artist, durationMs, album, sources,
-                    AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
-                    onSourceStarted = { source -> providerStarted(generation, source) },
-                    onSourceResult = { source, result ->
-                        providerFinished(generation, source, result)
-                    },
-                    onSourceCancelled = { source -> providerCancelled(generation, source) },
-                )
-                // Untimed words are a last resort: another spelling may find timed ones.
-                if (found != null && found.lines.none { it.timeMs > 0 }) {
-                    if (untimed == null) untimed = found to query
-                    found = null
-                    continue
+            // BitChord Audio: the best lyrics under any of the names — by quality
+            // (word sync > line sync > none; a Japanese song's own romaji first),
+            // not merely the first to answer. Shown as soon as something is found
+            // and upgraded when something better comes in. See LyricsRepository.best.
+            val best = LyricsRepository.best(
+                videoId = videoId,
+                spellings = nameQueries.map { LyricsRepository.Spelling(it.title, it.artist) },
+                durationMs = durationMs,
+                album = album,
+                sources = sources,
+                order = AppSettings.lyricsSourceOrder.value,
+                onSourceStarted = { source -> providerStarted(generation, source) },
+                onSourceResult = { source, result -> providerFinished(generation, source, result) },
+                onBetter = { leader ->
+                    viewModelScope.launch {
+                        if (generation != lyricsGeneration || selectedLyricsSource != null) return@launch
+                        if (leader.score <= keptScore) return@launch
+                        _lyrics.value = leader.result.lines
+                        _lyricsSource.value = leader.result.source
+                        _lyricsChecked.value = true
+                    }
+                },
+            )
+            val found: LyricsRepository.Result? = best?.result
+            best?.let { currentLyricsRequest = LyricsRequest(videoId, it.spelling.title, it.spelling.artist, durationMs, album) }
+            com.music.bitchord.data.TrackLog.d(
+                "BitChord",
+                "lyrics for '$title': " + (best?.let { "${it.result.source.label} under '${it.spelling.title}' · '${it.spelling.artist}' (score ${it.score})" } ?: "none") +
+                    " · asked as ${nameQueries.take(4).joinToString { "'${it.title}' · '${it.artist}'" }}" +
+                    com.music.bitchord.data.lyrics.LyricsHealth.failures().takeIf { it.isNotEmpty() }?.let { " · failing: ${it.joinToString()}" }.orEmpty(),
+            )
+            if (keptAuto != null) {
+                // Only a strictly better version replaces what was kept.
+                if (best != null && best.score > keptScore && selectedLyricsSource == null) {
+                    _lyrics.value = best.result.lines
+                    _lyricsSource.value = best.result.source
+                    com.music.bitchord.data.lyrics.LyricsKeeper.keep(
+                        Song(videoId = videoId, title = title, artist = artist, thumbnailUrl = null, albumName = album),
+                        best.result.lines,
+                        upgrade = true,
+                    )
+                    com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title' upgraded (score $keptScore → ${best.score})")
+                } else if (selectedLyricsSource == null) {
+                    _lyrics.value = keptAuto
+                    _lyricsSource.value = null
                 }
-                if (found != null) {
-                    currentLyricsRequest = LyricsRequest(videoId, query.title, query.artist, durationMs, album)
-                    break
-                }
-            }
-            val fallback = untimed
-            if (found == null && fallback != null) {
-                found = fallback.first
-                currentLyricsRequest = LyricsRequest(videoId, fallback.second.title, fallback.second.artist, durationMs, album)
+                _lyricsChecked.value = true
+                return@launch
             }
             val selected = selectedLyricsSource?.let(lyricsProviderResults::get) ?: found
             if (selected == null && !ownFirst) {

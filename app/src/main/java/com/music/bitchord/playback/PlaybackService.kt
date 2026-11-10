@@ -8216,7 +8216,9 @@ class PlaybackService : MediaLibraryService() {
         serviceLyricsJob = scope.launch(Dispatchers.IO) {
             val localUri = currentSong.localUri
             var lines: List<LyricLine>? = null
-            if (localUri != null) {
+            // BitChord Audio: the lyrics the player chose and kept come first, so both agree.
+            lines = runCatching { com.music.bitchord.data.lyrics.EditedLyrics.get(currentSong.videoId) }.getOrNull()
+            if (lines == null && localUri != null) {
                 lines = EmbeddedLyrics.forUri(this@PlaybackService, localUri)
             }
             if (lines == null) {

@@ -70,6 +70,9 @@ object EditedLyrics {
     /** Whether lyrics were timed or picked for [videoId] on this phone. */
     fun has(videoId: String): Boolean = dir?.let { File(it, name(videoId)).isFile } == true
 
+    /** BitChord Audio: when the lyrics for [videoId] were last saved on this phone (0: unknown). */
+    fun savedAt(videoId: String): Long = dir?.let { File(it, name(videoId)) }?.takeIf { it.isFile }?.lastModified() ?: 0L
+
     /** Back to the automatic lookup for [videoId] (here and in pCloud). */
     fun clear(videoId: String) {
         dir?.let { File(it, name(videoId)).delete() }

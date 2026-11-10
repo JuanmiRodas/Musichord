@@ -34,11 +34,18 @@ object LyricNames {
         }
         add(song.title, song.artist)
         others(song).forEach { add(it.title, it.artist) }
+        // BitChord Audio: the official Japanese names, cross-checked against the
+        // catalogues (see JapaneseNames) — before any keyboard guess below.
+        val verified = runCatching { com.music.bitchord.data.sources.JapaneseNames.of(song) }.getOrNull()
+        verified?.titles?.forEach { titles += it }
+        verified?.artists?.forEach { artists += it }
 
+        val hasJapaneseTitle = titles.any { JapaneseReading.isJapanese(it) }
+        val hasJapaneseArtist = artists.any { JapaneseReading.isJapanese(it) }
         for (t in titles.toList()) {
             if (JapaneseReading.isJapanese(t)) {
                 runCatching { JapaneseReading.romaji(t) }.getOrNull()?.let { titles += it }
-            } else {
+            } else if (!hasJapaneseTitle) {
                 kana(t)?.let { k ->
                     runCatching { japanese(t) }.getOrNull().orEmpty().take(2).forEach { titles += it }
                     titles += k
@@ -48,8 +55,12 @@ object LyricNames {
         for (a in artists.toList()) {
             if (JapaneseReading.isJapanese(a)) {
                 runCatching { JapaneseReading.romaji(a) }.getOrNull()?.let { artists += it }
-            } else if (kana(a) != null) {
-                runCatching { japanese(a) }.getOrNull()?.firstOrNull()?.let { artists += it }
+            } else if (!hasJapaneseArtist && kana(a) != null) {
+                // A guess: a person's name the Japanese way round, family name first
+                // ("Miho Morikawa" → morikawa miho → 森川美穂), then as given.
+                val words = a.split(' ').filter { it.isNotBlank() }
+                val orders = if (words.size == 2) listOf("${words[1]}${words[0]}", "${words[0]}${words[1]}") else listOf(a.replace(" ", ""))
+                orders.firstNotNullOfOrNull { o -> runCatching { japanese(o) }.getOrNull()?.firstOrNull() }?.let { artists += it }
             }
         }
         Suggested(titles.toList().take(6), artists.toList().take(4))
@@ -65,12 +76,29 @@ object LyricNames {
      * lookup gets both. Cached per song; the kanji guess waits at most a few
      * seconds for the network and is skipped offline.
      */
-    suspend fun variants(title: String, artist: String): List<LyricAliases.Query> {
+    suspend fun variants(title: String, artist: String, durationMs: Long = 0L): List<LyricAliases.Query> {
         val key = "$title\u0000$artist"
         variantCache[key]?.let { return it }
         val out = withContext(Dispatchers.IO) {
-            val titles = otherSpellings(title)
-            val artists = otherSpellings(artist)
+            // BitChord Audio: the official Japanese names first (cross-checked
+            // against Apple's catalogue and others, by name, artist and length).
+            val verified = if (!JapaneseReading.isJapanese(title) && (kana(title) != null || (mostlyRomaji(title) && kana(artist.substringBefore(',').trim()) != null))) {
+                kotlinx.coroutines.withTimeoutOrNull(7_000) {
+                    runCatching {
+                        com.music.bitchord.data.sources.JapaneseNames.of(
+                            Song(
+                                videoId = "",
+                                title = title,
+                                artist = artist,
+                                thumbnailUrl = null,
+                                durationText = durationMs.takeIf { it > 0 }?.let { "${it / 60_000}:${"%02d".format((it / 1000) % 60)}" },
+                            ),
+                        )
+                    }.getOrNull()
+                }
+            } else null
+            val titles = (verified?.titles.orEmpty() + otherSpellings(title)).distinct().take(3)
+            val artists = (verified?.artists.orEmpty() + otherSpellings(artist)).distinct().take(2)
             buildList {
                 for (t in titles) for (a in artists) add(LyricAliases.Query(t, a))
                 for (t in titles) add(LyricAliases.Query(t, artist))
@@ -137,6 +165,18 @@ object LyricNames {
      * [text] in hiragana when it reads as romaji throughout ("Kimi no Na wa" →
      * きみのなは), else null — so English titles are left alone.
      */
+    /**
+     * BitChord Audio: a title that is romaji with an English word or two in it
+     * ("Mezameta Venus", "Koi no Feeling") — at least half its words romaji.
+     */
+    fun mostlyRomaji(text: String): Boolean {
+        val words = text.lowercase().replace(Regex("[^a-zâêîôûāēīōū' -]"), " ")
+            .split(' ', '-').filter { it.length >= 2 }
+        if (words.isEmpty() || text.any { it.isDigit() }) return false
+        val romaji = words.count { word(it) != null }
+        return romaji >= 1 && romaji * 2 >= words.size
+    }
+
     fun kana(text: String): String? {
         val words = text.lowercase().replace(Regex("[^a-zâêîôûāēīōū' -]"), " ")
             .split(' ', '-').filter { it.isNotEmpty() }

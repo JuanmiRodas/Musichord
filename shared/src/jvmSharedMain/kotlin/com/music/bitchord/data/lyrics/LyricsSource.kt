@@ -140,6 +140,12 @@ enum class LyricsSource(
         wordSynced = false,
         untimed = true,
     ),
+    LYRICFIND(
+        label = "LyricFind",
+        detail = "The licensed catalogue behind Google's lyrics; untimed, strong on Japanese releases",
+        wordSynced = false,
+        untimed = true,
+    ),
     UTATEN(
         label = "UtaTen",
         detail = "Untimed Japanese lyrics, with the kanji readings and romaji",

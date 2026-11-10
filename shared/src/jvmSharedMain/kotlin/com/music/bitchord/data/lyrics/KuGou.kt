@@ -3,6 +3,10 @@ package com.music.bitchord.data.lyrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.SerialName
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.util.Base64
@@ -37,9 +41,85 @@ object KuGou {
         } ?: searchLyrics(keyword = keyword, seconds = seconds)?.firstOrNull()
             ?: return@withContext null
 
+        // BitChord Audio: the KRC (per-word timing, often romaji) first, the LRC if not.
+        runCatching { downloadKrc(candidate.id, candidate.accesskey) }.getOrNull()?.let { return@withContext it }
         val lrc = download(candidate.id, candidate.accesskey) ?: return@withContext null
         LrcLib.parseLrc(lrc).takeIf { it.isNotEmpty() }
     }
+
+    /** The fixed key KRC files are XOR-ed with (after a "krc1" header), then zlib. */
+    private val KRC_KEY = intArrayOf(64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105)
+
+    /**
+     * BitChord Audio: KuGou's karaoke format. Lines `[start,duration]`, each
+     * word `<offset,duration,0>word` (offset from the line's start); a
+     * `[language:…]` tag may carry the romaji word by word (type 0) and a
+     * translation (type 1). The romaji goes to [ProvidedRomaji].
+     */
+    private fun downloadKrc(id: String, accessKey: String): List<LyricLine>? {
+        val url = "https://lyrics.kugou.com/download".toHttpUrl().newBuilder()
+            .addQueryParameter("fmt", "krc")
+            .addQueryParameter("charset", "utf8")
+            .addQueryParameter("client", "pc")
+            .addQueryParameter("ver", "1")
+            .addQueryParameter("id", id)
+            .addQueryParameter("accesskey", accessKey)
+            .build()
+        val body = lyricsGet(url.toString()) ?: return null
+        val content = runCatching { lyricsJson.decodeFromString<DownloadResponse>(body) }.getOrNull()?.content
+            ?.takeIf { it.isNotBlank() } ?: return null
+        val raw = Base64.getDecoder().decode(content)
+        if (raw.size <= 4 || String(raw, 0, 4, Charsets.US_ASCII) != "krc1") return null
+        val xored = ByteArray(raw.size - 4) { i -> (raw[i + 4].toInt() xor KRC_KEY[i % KRC_KEY.size]).toByte() }
+        val inflater = java.util.zip.Inflater()
+        val text = try {
+            inflater.setInput(xored)
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(8192)
+            while (!inflater.finished()) {
+                val n = inflater.inflate(buf)
+                if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
+                out.write(buf, 0, n)
+            }
+            out.toString("UTF-8").removePrefix("\uFEFF")
+        } finally {
+            inflater.end()
+        }
+        val line = Regex("""^\[(\d+),(\d+)](.*)$""")
+        val word = Regex("""<(\d+),(\d+),-?\d+>([^<]*)""")
+        val parsed = text.lineSequence().mapNotNull { rawLine ->
+            val m = line.find(rawLine.trim()) ?: return@mapNotNull null
+            val start = m.groupValues[1].toLong()
+            val words = word.findAll(m.groupValues[3]).mapNotNull { w ->
+                val t = w.groupValues[3]
+                if (t.isEmpty()) return@mapNotNull null
+                val ws = start + w.groupValues[1].toLong()
+                LyricWord(ws, ws + w.groupValues[2].toLong(), t)
+            }.toList()
+            if (words.isEmpty()) return@mapNotNull null
+            LyricLine(timeMs = start, text = words.joinToString("") { it.text }.trimEnd(), words = words)
+        }.toList()
+        // Credits ("作词：…") sit at the head as ordinary lines.
+        val lines = parsed.dropWhile { CREDIT_TEXT.containsMatchIn(it.text) }
+            .takeIf { l -> l.count { it.text.isNotBlank() } >= 2 } ?: return null
+        // Romaji, word by word, one entry per lyric line (credits included, so aligned from the end).
+        Regex("""\[language:([^\]]+)]""").find(text)?.groupValues?.get(1)?.let { b64 ->
+            runCatching {
+                val json = lyricsJson.parseToJsonElement(String(Base64.getDecoder().decode(b64), Charsets.UTF_8)).jsonObject
+                val romaji = json["content"]?.jsonArray?.map { it.jsonObject }
+                    ?.firstOrNull { it["type"]?.jsonPrimitive?.intOrNull == 0 }
+                    ?.get("lyricContent")?.jsonArray
+                    ?.map { row -> row.jsonArray.joinToString("") { it.jsonPrimitive.content }.trim() }
+                if (romaji != null && romaji.size >= parsed.size) {
+                    val offset = romaji.size - parsed.size
+                    parsed.forEachIndexed { i, l -> ProvidedRomaji.put(l.text, romaji[i + offset]) }
+                }
+            }
+        }
+        return lines
+    }
+
+    private val CREDIT_TEXT = Regex("""^.{0,16}[:：]""")
 
     /**
      * Song hashes worth trying, restricted to cuts within
