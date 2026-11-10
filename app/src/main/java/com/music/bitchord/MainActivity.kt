@@ -5785,109 +5785,9 @@ private fun BitChordApp(
             )
         }
 
-        // BitChord Audio: where the playing song comes from, raised from the player.
-        val sourceSong by com.music.bitchord.ui.components.NowPlayingSource.song.collectAsStateWithLifecycle()
-        sourceSong?.let { song ->
-            com.music.bitchord.ui.components.NowPlayingSourceDialog(
-                song = song,
-                controller = controller,
-                onBrowse = {
-                    com.music.bitchord.ui.components.NowPlayingSource.close()
-                    com.music.bitchord.ui.components.PcloudBrowser.pickFor(song)
-                },
-                onDismiss = { com.music.bitchord.ui.components.NowPlayingSource.close() },
-            )
-        }
-        // BitChord Audio: the same song liked more than once, offered for merging.
-        val mergeProposal by com.music.bitchord.ui.components.MergeProposal.state.collectAsStateWithLifecycle()
-        mergeProposal?.let { proposal ->
-            val mergeScope = rememberCoroutineScope()
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { com.music.bitchord.ui.components.MergeProposal.dismiss() },
-                title = { Text(stringResource(R.string.merge_title)) },
-                text = {
-                    Text(
-                        stringResource(
-                            R.string.merge_text,
-                            proposal.keep.title,
-                            proposal.others.joinToString("\n") { "• ${it.title} · ${it.artist}" },
-                            proposal.keep.title + (proposal.keep.albumName?.let { " · $it" } ?: ""),
-                        ),
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        com.music.bitchord.ui.components.MergeProposal.dismiss()
-                        com.music.bitchord.ui.components.MergeProposal.carryChoice(proposal)
-                        mergeScope.launch { viewModel.unlikeExactly(proposal.others.map { it.videoId }) }
-                    }) { Text(stringResource(R.string.merge_yes)) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { com.music.bitchord.ui.components.MergeProposal.dismiss() }) {
-                        Text(stringResource(R.string.merge_no))
-                    }
-                },
-            )
-        }
-        // BitChord Audio: the Liked Music cleaner, from Settings.
-        val cleanerOpen by com.music.bitchord.ui.components.LikedCleanerUi.open.collectAsStateWithLifecycle()
-        if (cleanerOpen) {
-            com.music.bitchord.ui.components.LikedCleanerDialog(
-                unlike = { ids, onProgress -> viewModel.unlikeExactly(ids, onProgress) },
-                onDismiss = { com.music.bitchord.ui.components.LikedCleanerUi.close() },
-            )
-        }
-        // BitChord Audio: sending the log to GitHub, offered once.
-        var logSetup by remember { mutableStateOf(!com.music.bitchord.data.LogUpload.configured && !com.music.bitchord.data.LogUpload.asked()) }
-        if (logSetup) {
-            com.music.bitchord.ui.components.LogUploadDialog(onDismiss = {
-                com.music.bitchord.data.LogUpload.markAsked()
-                logSetup = false
-            })
-        }
-        // BitChord Audio: the details editor.
-        val editSongs by com.music.bitchord.ui.components.MetadataEditor.songs.collectAsStateWithLifecycle()
-        if (editSongs.isNotEmpty()) {
-            com.music.bitchord.ui.components.MetadataEditorDialog(
-                songs = editSongs,
-                onDismiss = { com.music.bitchord.ui.components.MetadataEditor.close() },
-            )
-        }
-        // BitChord Audio: the cover picker, raised from the player.
-        val coverSong by com.music.bitchord.ui.components.CoverPicker.song.collectAsStateWithLifecycle()
-        coverSong?.let { song ->
-            com.music.bitchord.ui.components.CoverPickerDialog(
-                song = song,
-                onDismiss = { com.music.bitchord.ui.components.CoverPicker.close() },
-            )
-        }
-        // BitChord Audio: pCloud by folder — to play, or to pick a song's file.
-        val browserRequest by com.music.bitchord.ui.components.PcloudBrowser.request.collectAsStateWithLifecycle()
-        browserRequest?.let { req ->
-            com.music.bitchord.ui.components.PcloudBrowserDialog(
-                request = req,
-                controller = controller,
-                onPicked = { file ->
-                    req.pickFor?.let { song ->
-                        com.music.bitchord.data.sources.PreferredSource.chooseFile(song, file)
-                        if (controller?.currentMediaItem?.mediaId == song.videoId && file.videoId != song.videoId) {
-                            controller?.swapToVersion(file.carryingQueueOf(song))
-                        }
-                    }
-                    com.music.bitchord.ui.components.PcloudBrowser.close()
-                },
-                onDismiss = { com.music.bitchord.ui.components.PcloudBrowser.close() },
-            )
-        }
-
-        // BitChord Audio: other names for a song's lyrics, raised from the player.
-        val aliasSong by com.music.bitchord.ui.components.LyricAliasEditor.song.collectAsStateWithLifecycle()
-        aliasSong?.let { song ->
-            com.music.bitchord.ui.components.LyricAliasDialog(
-                song = song,
-                onDismiss = com.music.bitchord.ui.components.LyricAliasEditor::close,
-            )
-        }
+        // BitChord Audio: our dialogs, in a function of their own (the app
+        // composable would otherwise outgrow the JVM's 64 KB method limit).
+        BitChordAudioDialogs(viewModel = viewModel, controller = controller)
 
         // BitChord Audio: pCloud sign-in. It writes the WebDAV settings for
         // pCloud's server; the region is found by trying EU, then US.
@@ -6275,6 +6175,114 @@ private val OnboardingDismissEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
 
 private fun tween(durationMillis: Int) =
     androidx.compose.animation.core.tween<Float>(durationMillis)
+
+/** BitChord Audio: the dialogs our own features raise from anywhere in the app. */
+@Composable
+private fun BitChordAudioDialogs(viewModel: MainViewModel, controller: MediaController?) {
+    // BitChord Audio: where the playing song comes from, raised from the player.
+    val sourceSong by com.music.bitchord.ui.components.NowPlayingSource.song.collectAsStateWithLifecycle()
+    sourceSong?.let { song ->
+        com.music.bitchord.ui.components.NowPlayingSourceDialog(
+            song = song,
+            controller = controller,
+            onBrowse = {
+                com.music.bitchord.ui.components.NowPlayingSource.close()
+                com.music.bitchord.ui.components.PcloudBrowser.pickFor(song)
+            },
+            onDismiss = { com.music.bitchord.ui.components.NowPlayingSource.close() },
+        )
+    }
+    // BitChord Audio: the same song liked more than once, offered for merging.
+    val mergeProposal by com.music.bitchord.ui.components.MergeProposal.state.collectAsStateWithLifecycle()
+    mergeProposal?.let { proposal ->
+        val mergeScope = rememberCoroutineScope()
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { com.music.bitchord.ui.components.MergeProposal.dismiss() },
+            title = { Text(stringResource(R.string.merge_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.merge_text,
+                        proposal.keep.title,
+                        proposal.others.joinToString("\n") { "• ${it.title} · ${it.artist}" },
+                        proposal.keep.title + (proposal.keep.albumName?.let { " · $it" } ?: ""),
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    com.music.bitchord.ui.components.MergeProposal.dismiss()
+                    com.music.bitchord.ui.components.MergeProposal.carryChoice(proposal)
+                    mergeScope.launch { viewModel.unlikeExactly(proposal.others.map { it.videoId }) }
+                }) { Text(stringResource(R.string.merge_yes)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { com.music.bitchord.ui.components.MergeProposal.dismiss() }) {
+                    Text(stringResource(R.string.merge_no))
+                }
+            },
+        )
+    }
+    // BitChord Audio: the Liked Music cleaner, from Settings.
+    val cleanerOpen by com.music.bitchord.ui.components.LikedCleanerUi.open.collectAsStateWithLifecycle()
+    if (cleanerOpen) {
+        com.music.bitchord.ui.components.LikedCleanerDialog(
+            unlike = { ids, onProgress -> viewModel.unlikeExactly(ids, onProgress) },
+            onDismiss = { com.music.bitchord.ui.components.LikedCleanerUi.close() },
+        )
+    }
+    // BitChord Audio: sending the log to GitHub, offered once.
+    var logSetup by remember { mutableStateOf(!com.music.bitchord.data.LogUpload.configured && !com.music.bitchord.data.LogUpload.asked()) }
+    if (logSetup) {
+        com.music.bitchord.ui.components.LogUploadDialog(onDismiss = {
+            com.music.bitchord.data.LogUpload.markAsked()
+            logSetup = false
+        })
+    }
+    // BitChord Audio: the details editor.
+    val editSongs by com.music.bitchord.ui.components.MetadataEditor.songs.collectAsStateWithLifecycle()
+    if (editSongs.isNotEmpty()) {
+        com.music.bitchord.ui.components.MetadataEditorDialog(
+            songs = editSongs,
+            onDismiss = { com.music.bitchord.ui.components.MetadataEditor.close() },
+        )
+    }
+    // BitChord Audio: the cover picker, raised from the player.
+    val coverSong by com.music.bitchord.ui.components.CoverPicker.song.collectAsStateWithLifecycle()
+    coverSong?.let { song ->
+        com.music.bitchord.ui.components.CoverPickerDialog(
+            song = song,
+            onDismiss = { com.music.bitchord.ui.components.CoverPicker.close() },
+        )
+    }
+    // BitChord Audio: pCloud by folder — to play, or to pick a song's file.
+    val browserRequest by com.music.bitchord.ui.components.PcloudBrowser.request.collectAsStateWithLifecycle()
+    browserRequest?.let { req ->
+        com.music.bitchord.ui.components.PcloudBrowserDialog(
+            request = req,
+            controller = controller,
+            onPicked = { file ->
+                req.pickFor?.let { song ->
+                    com.music.bitchord.data.sources.PreferredSource.chooseFile(song, file)
+                    if (controller?.currentMediaItem?.mediaId == song.videoId && file.videoId != song.videoId) {
+                        controller?.swapToVersion(file.carryingQueueOf(song))
+                    }
+                }
+                com.music.bitchord.ui.components.PcloudBrowser.close()
+            },
+            onDismiss = { com.music.bitchord.ui.components.PcloudBrowser.close() },
+        )
+    }
+
+    // BitChord Audio: other names for a song's lyrics, raised from the player.
+    val aliasSong by com.music.bitchord.ui.components.LyricAliasEditor.song.collectAsStateWithLifecycle()
+    aliasSong?.let { song ->
+        com.music.bitchord.ui.components.LyricAliasDialog(
+            song = song,
+            onDismiss = com.music.bitchord.ui.components.LyricAliasEditor::close,
+        )
+    }
+}
 
 @Composable
 private fun LibrarySort.localizedLabel(): String = when (this) {
