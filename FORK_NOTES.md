@@ -184,3 +184,6 @@ From SamuelAdmand/MusicBeat, chosen by the owner:
 - **Lyrics in files**: `LyricsKeeper` writes kept lyrics into the LYRICS tag (download at once, pCloud on Wi-Fi; backfills liked songs; prefs `embedded:d:/p:`), setting "Write lyrics into my files". `EmbeddedLyrics` reads via TagLib as last fallback.
 - **Apple lyrics**: PaxSenix token now expiry-aware, tries music.apple.com + beta.music.apple.com pages, retries once on refusal. MusicBeat's hard-coded token expired 2026-10-19 — not copied.
 - **Fast scroller**: `ui/components/FastScroller.kt` + `fastscroll/*` on DetailScreen (non-artist, ≥40 songs, not searching/selecting); bubble = letter when sorted by title, else song number.
+
+## Queue loop fix (v1.9.109)
+Symptom: the same 4–5 songs repeat (local and cast). Cause: in-place queue swaps (OwnFirst/AudioFirst/version swap/upgrades/stand-ins) rebuilt items from `Song`, which has no canonical index/cycle, so the bounded QueueWindow cursor stopped advancing; top-ups and restore-after-process-death re-queued from the stale cursor. Fix: **always use `Player.replaceInQueue` / `withQueueIdentityOf`** (QueueReplace.kt) — never raw `replaceMediaItem`. Safety nets: top-up skipped when the playing CONTEXT item has no canonical index; restore falls back to LastPlayed when the saved current entry lost it. Log: `track selected ... list=i/N cursor=c` (should match).
