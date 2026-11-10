@@ -187,3 +187,8 @@ From SamuelAdmand/MusicBeat, chosen by the owner:
 
 ## Queue loop fix (v1.9.109)
 Symptom: the same 4–5 songs repeat (local and cast). Cause: in-place queue swaps (OwnFirst/AudioFirst/version swap/upgrades/stand-ins) rebuilt items from `Song`, which has no canonical index/cycle, so the bounded QueueWindow cursor stopped advancing; top-ups and restore-after-process-death re-queued from the stale cursor. Fix: **always use `Player.replaceInQueue` / `withQueueIdentityOf`** (QueueReplace.kt) — never raw `replaceMediaItem`. Safety nets: top-up skipped when the playing CONTEXT item has no canonical index; restore falls back to LastPlayed when the saved current entry lost it. Log: `track selected ... list=i/N cursor=c` (should match).
+
+## Upstream merge: BitChord v1.9.1 (v1.9.112)
+Base was upstream b690dc14 (v1.8.2, 30 Oct). Merged tag v1.9.1 (7f45c768) with a real git merge (tag `up-v1.9.1` locally; upstream clone at /home/claude/kushagrasinghx/bitchord). Next time: `git fetch <upstream> <tag>` and `git merge` — history now shares the base.
+Kept ours where they collided: versioning, Advanced settings group (upstream folded it into Misc and removed the enum, icon and string — re-added), audio-only beside upstream's "Prefer music-only", JapaneseNames queries in SourceResolver (with upstream's lengthLater), shownSong title + source line under the transport (inside upstream's new `transport` lambda), LyricsOffsetControl now `chromeWhite(1f)` (LocalPlayerTint removed upstream). BitChordAudioDialogs() split out of BitChordApp (JVM 64 KB method limit).
+Upstream AddonAuth: addons may require proof of the official signed app (hardware attestation). Opt-in per addon; a fork cannot pass it. Do not try to spoof it.
