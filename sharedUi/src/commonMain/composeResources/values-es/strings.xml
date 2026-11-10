@@ -217,4 +217,5 @@
     <string name="lyrics_flag_title">Esta letra está mal</string>
     <string name="lyrics_flag_hint">No volver a usar esta fuente para esta canción y buscar otra letra</string>
     <string name="lyrics_oled">Letra OLED</string>
+    <string name="video_mode">Modo vídeo</string>
 </resources>

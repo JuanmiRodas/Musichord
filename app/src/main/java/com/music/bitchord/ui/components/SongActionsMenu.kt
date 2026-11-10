@@ -276,16 +276,22 @@ fun SongActionsMenu(
             onToggleAudioVersion?.let {
                 ActionRow(
                     icon = if (isAudioVersion) SfIcons.Video else SfIcons.MusicNote,
+                    // BitChord Audio: for a song, this is video mode (the player's
+                    // video button); for a video, back to its song as before.
                     label = stringResource(
                         when {
-                            audioVersionMissing && isAudioVersion -> R.string.no_video_version
+                            isAudioVersion -> R.string.video_mode
                             audioVersionMissing -> R.string.no_audio_version
-                            isAudioVersion -> R.string.convert_to_video
                             else -> R.string.convert_to_audio
                         },
                     ),
+                    value = if (isAudioVersion) {
+                        stringResource(if (com.music.bitchord.data.video.VideoMode.on.value) R.string.video_mode_on else R.string.video_mode_off)
+                    } else {
+                        null
+                    },
                     accent = palette.accent,
-                    enabled = !audioVersionMissing,
+                    enabled = isAudioVersion || !audioVersionMissing,
                     onClick = it,
                 )
             }

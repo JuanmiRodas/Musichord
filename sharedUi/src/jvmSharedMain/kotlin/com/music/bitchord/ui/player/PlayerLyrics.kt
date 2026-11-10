@@ -3405,3 +3405,102 @@ private fun List<LyricLine>.hasNonLatinScript(): Boolean = any { line ->
         Character.isLetter(ch) && Character.UnicodeScript.of(ch.code) != Character.UnicodeScript.LATIN
     }
 }
+
+/**
+ * BitChord Audio: video mode's lyrics — two lines at a time, karaoke style, in
+ * the lyrics view's own type: under the video, or over the bottom of it
+ * fullscreen ([overlay]). A page turns once both its lines are sung. Lines
+ * with only line timing are swept evenly across their time, so every song
+ * fills in as it is sung.
+ */
+@Composable
+internal fun VideoKaraokeLyrics(
+    lines: List<LyricLine>,
+    trackKey: String,
+    playhead: LyricPlayhead,
+    isPlaying: Boolean,
+    durationMs: Long,
+    overlay: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val sung = remember(lines, durationMs) { karaokeLines(lines, durationMs) }
+    if (sung.isEmpty()) return
+    val clock = rememberLyricClock(trackKey, playhead, isPlaying)
+    val index by remember(sung) {
+        derivedStateOf { sung.indexOfLast { it.timeMs <= clock.longValue } }
+    }
+    val page = (index.coerceAtLeast(0) / 2) * 2
+    val base = MaterialTheme.typography.headlineLarge.copy(
+        fontSize = if (overlay) 28.sp else 23.sp,
+        lineHeight = if (overlay) 34.sp else 29.sp,
+        fontWeight = FontWeight.ExtraBold,
+        shadow = if (overlay) androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.8f), blurRadius = 10f) else null,
+    )
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (slot in 0..1) {
+            val line = sung.getOrNull(page + slot)
+            if (line == null) {
+                Spacer(Modifier.height(base.lineHeight.value.dp))
+                continue
+            }
+            val end = slot == 1
+            androidx.compose.runtime.key(page + slot) {
+                SweptLyricLine(
+                    line = line,
+                    clock = clock,
+                    style = voiceStyle(
+                        base.copy(textAlign = if (end) TextAlign.End else TextAlign.Start),
+                        line.text,
+                        alignEnd = end,
+                        laneLocked = true,
+                    ),
+                    dimAlpha = if (overlay) 0.6f else UNSUNG_ALPHA,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    rise = false,
+                    alignEnd = end,
+                    laneLocked = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/** The sung lines, each with word timing — its own, or spread evenly over the line. */
+private fun karaokeLines(lines: List<LyricLine>, durationMs: Long): List<LyricLine> {
+    if (lines.none { it.timeMs > 0L }) return emptyList()
+    val sung = lines.withIndex().filter { (_, l) -> !l.isGap && l.text.isNotBlank() }
+    return sung.map { (i, line) ->
+        if (line.isWordSynced) return@map line
+        val next = lines.drop(i + 1).firstOrNull()?.timeMs
+            ?: durationMs.takeIf { it > line.timeMs }
+            ?: (line.timeMs + 4_000L)
+        val span = ((next - line.timeMs) * 0.9).toLong().coerceIn(400L, 12_000L)
+        val parts = karaokeParts(line.text)
+        val weight = parts.sumOf { it.length }.coerceAtLeast(1)
+        var at = line.timeMs
+        val words = parts.map { part ->
+            val len = span * part.length / weight
+            com.music.bitchord.data.lyrics.LyricWord(at, at + len, part).also { at += len }
+        }
+        line.copy(words = words)
+    }
+}
+
+/** A line cut where it is sung word by word: at spaces, or character by character in CJK. */
+private fun karaokeParts(text: String): List<String> {
+    val spaced = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    return spaced.flatMap { word ->
+        if (word.any { Character.UnicodeScript.of(it.code) in KARAOKE_CHAR_SCRIPTS }) word.map { it.toString() }
+        else listOf(word)
+    }
+}
+
+private val KARAOKE_CHAR_SCRIPTS = setOf(
+    Character.UnicodeScript.HAN,
+    Character.UnicodeScript.HIRAGANA,
+    Character.UnicodeScript.KATAKANA,
+    Character.UnicodeScript.HANGUL,
+    Character.UnicodeScript.THAI,
+)

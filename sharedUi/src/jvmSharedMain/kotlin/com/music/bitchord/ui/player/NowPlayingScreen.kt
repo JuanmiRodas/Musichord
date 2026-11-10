@@ -69,6 +69,7 @@ import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -941,7 +942,12 @@ fun NowPlayingScreen(
     val mixing by PlayerSettings.smartMixInProgress.collectAsStateWithLifecycle()
     // A music video plays its own picture where the sleeve is — see
     // [MusicVideoSurface] — and takes the place of any animated cover.
-    val videoMode = showsMusicVideo(song)
+    // BitChord Audio: video mode — the video button's picture, for any song.
+    val videoModeOn by PlayerPlatform.host.videoModeOn.collectAsStateWithLifecycle()
+    val videoModeReady by PlayerPlatform.host.videoModeReady.collectAsStateWithLifecycle()
+    val videoModeLooking by PlayerPlatform.host.videoModeLooking.collectAsStateWithLifecycle()
+    val videoOverlay = videoModeOn && song.videoId in videoModeReady
+    val videoMode = showsMusicVideo(song) || videoOverlay
     // Square video thumbnails: the picture takes the sleeve's own slot, cropped
     // to it, in place of the full-width box at the video's shape.
     val squareVideo = videoMode && VideoThumbnails.square
@@ -2031,6 +2037,21 @@ fun NowPlayingScreen(
                     onRenderedChanged = { videoRendered = it },
                     onExitFullscreen = exitFullscreen,
                     onOpenQuality = { showVideoQuality = true },
+                    lyrics = if (videoOverlay && syncedLyricsEnabled) {
+                        { m ->
+                            VideoKaraokeLyrics(
+                                lines = lyricsTranslation.displayedLyrics,
+                                trackKey = song.videoId,
+                                playhead = lyricsPlayhead,
+                                isPlaying = isPlaying && position.advancing,
+                                durationMs = durationMs,
+                                overlay = true,
+                                modifier = m,
+                            )
+                        }
+                    } else {
+                        null
+                    },
                     scrubber = {
                         PlayerScrubber(
                             shown = shown,
@@ -3608,6 +3629,9 @@ fun NowPlayingScreen(
                                                 )
                                             }
                                             val height = (boxWidthPx / aspect).roundToInt()
+                                            // BitChord Audio: in video mode the picture sits at the
+                                            // top of the sleeve, the lyrics in the room under it.
+                                            if (videoOverlay) return@offset IntOffset(0, artTop().roundToPx())
                                             val centre = (artTop() + artSize() / 2).roundToPx()
                                             IntOffset(0, centre - height / 2)
                                         }
@@ -3650,6 +3674,40 @@ fun NowPlayingScreen(
                                             .align(Alignment.TopEnd)
                                             .padding(8.dp),
                                     )
+                                }
+                                // BitChord Audio: video mode's lyrics, two lines, under the picture.
+                                if (videoOverlay && !squareVideo && syncedLyricsEnabled) {
+                                    Box(
+                                        modifier = Modifier
+                                            .offset {
+                                                val height = (boxWidthPx / aspect).roundToInt()
+                                                IntOffset(0, artTop().roundToPx() + height + 14.dp.roundToPx())
+                                            }
+                                            .layout { measurable, _ ->
+                                                val height = (boxWidthPx / aspect).roundToInt()
+                                                val top = artTop().roundToPx() + height + 14.dp.roundToPx()
+                                                val room = ((artTop() + artSize()).roundToPx() - top)
+                                                    .coerceAtLeast(64.dp.roundToPx())
+                                                val placeable = measurable.measure(Constraints.fixed(boxWidthPx, room))
+                                                layout(boxWidthPx, room) { placeable.placeRelative(0, 0) }
+                                            }
+                                            .graphicsLayer {
+                                                alpha = (1f - p() * 2f).coerceIn(0f, 1f)
+                                                translationX = swipeSettle.value * (1f - p())
+                                            }
+                                            .padding(horizontal = 22.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        VideoKaraokeLyrics(
+                                            lines = lyricsTranslation.displayedLyrics,
+                                            trackKey = song.videoId,
+                                            playhead = lyricsPlayhead,
+                                            isPlaying = isPlaying && position.advancing,
+                                            durationMs = durationMs,
+                                            overlay = false,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -3832,6 +3890,19 @@ fun NowPlayingScreen(
                             // there's no account to record it against — except on a
                             // local file or a finished download, whose star is the
                             // device's own Liked playlist and needs no account.
+                            // BitChord Audio: video mode, next to the star. A tap turns it
+                            // on or off; held, the search for this song's video.
+                            if (PlayerPlatform.host.videoModeSupported) {
+                                CircleGlyph(
+                                    icon = Icons.Rounded.SmartDisplay,
+                                    contentDescription = stringResource(Res.string.video_mode),
+                                    onClick = { PlayerPlatform.host.toggleVideoMode(song) },
+                                    onLongClick = { PlayerPlatform.host.openVideoSearch(song) },
+                                    active = videoModeOn,
+                                    busy = videoModeOn && videoModeLooking == song.videoId,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
                             if (signedIn || song.localUri != null) {
                                 val liked = likeStatus == LikeStatus.LIKE
                                 CircleGlyph(
@@ -4126,7 +4197,7 @@ fun NowPlayingScreen(
                             .height(lyricSlotHeight),
                         contentAlignment = Alignment.CenterStart,
                     ) {
-                    if (!lyricsOpen && syncedLyricsEnabled) {
+                    if (!lyricsOpen && syncedLyricsEnabled && !videoOverlay) {
                         CurrentLyricStrip(
                             lines = lyricsTranslation.displayedLyrics,
                             trackKey = song.videoId,

@@ -1700,4 +1700,13 @@
     <string name="desc_next">Siguiente</string>
     <string name="source_restore">Restaurar la fuente original</string>
     <string name="source_restore_detail">Volver a poner %1$s desde %2$s, como estaba en la cola, y mantenerlo así</string>
+    <string name="video_mode">Modo vídeo</string>
+    <string name="video_mode_on">Activado</string>
+    <string name="video_mode_off">Desactivado</string>
+    <string name="video_mode_none">No se encontró vídeo para esta canción</string>
+    <string name="video_mode_search_title">Vídeo de esta canción</string>
+    <string name="video_mode_search_hint">Buscar</string>
+    <string name="video_mode_search_go">Buscar</string>
+    <string name="video_mode_search_bilibili">Buscar también en bilibili</string>
+    <string name="video_mode_search_empty">No se encontraron vídeos</string>
 </resources>

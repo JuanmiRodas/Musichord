@@ -61,6 +61,24 @@ interface PlayerHost {
     /** Whether [videoId] shows its picture, rather than playing as audio by the listener's choice. */
     fun showsMusicVideoPicture(videoId: String): Boolean = true
 
+    /** BitChord Audio: whether this platform has video mode (the player's video button). */
+    val videoModeSupported: Boolean get() = false
+
+    /** BitChord Audio: video mode — whether it is on. */
+    val videoModeOn: StateFlow<Boolean> get() = NoVideoMode
+
+    /** BitChord Audio: the tracks video mode has a video ready for. */
+    val videoModeReady: StateFlow<Set<String>> get() = NoVideoReady
+
+    /** BitChord Audio: the track whose video is being looked up. */
+    val videoModeLooking: StateFlow<String?> get() = NoVideoLooking
+
+    /** BitChord Audio: the video button — video mode on or off, looking up [song]'s video. */
+    fun toggleVideoMode(song: Song) = Unit
+
+    /** BitChord Audio: the video button held — the search for [song]'s video. */
+    fun openVideoSearch(song: Song) = Unit
+
     /** The playing music video's width over its height. */
     val musicVideoAspect: StateFlow<Float> get() = DefaultVideoAspect
 
@@ -234,6 +252,10 @@ internal fun MusicVideoSurface(
     fit: Boolean = true,
     onRenderedChanged: (Boolean) -> Unit = {},
 ) = PlayerPlatform.host.MusicVideo(videoId, fit, onRenderedChanged, modifier)
+
+private val NoVideoMode = MutableStateFlow(false)
+private val NoVideoReady = MutableStateFlow<Set<String>>(emptySet())
+private val NoVideoLooking = MutableStateFlow<String?>(null)
 
 private val NoWatch = MutableStateFlow(WatchOutputUi())
 

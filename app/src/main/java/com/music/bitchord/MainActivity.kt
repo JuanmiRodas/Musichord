@@ -4507,22 +4507,15 @@ private fun BitChordApp(
                             }
                             scope.launch { switchToMusicOnly(song, pauseWhileResolving = false) }
                         }
+                        // BitChord Audio: a song turns video mode on or off — the
+                        // picture over the song's own audio — rather than swapping
+                        // the song for its video's audio.
                         else -> {
-                            val cached = YtMusicRepository.cachedVideoVersion(song.videoId)
-                                ?: YtMusicRepository.cachedVideoVersion(versionEffectiveSong.videoId)
-                            if (cached != null && cached.videoId != song.videoId &&
-                                !versionAlignmentPending(cached.videoId)
-                            ) {
-                                optimisticVersionSong = cached.copy(
-                                    queueTier = song.queueTier,
-                                    queueEntryId = song.queueEntryId,
-                                    radioName = song.radioName,
-                                    playbackSource = song.playbackSource,
-                                    playbackSourceType = song.playbackSourceType,
-                                    playbackSourceId = song.playbackSourceId,
-                                )
+                            val vm = com.music.bitchord.data.video.VideoMode
+                            if (vm.on.value) vm.setOn(false) else {
+                                vm.setOn(true)
+                                vm.request(song, sayIfMissing = true)
                             }
-                            scope.launch { switchToVideo(song, pauseWhileResolving = false) }
                         }
                     }
                 }
@@ -6227,6 +6220,14 @@ private fun BitChordAudioDialogs(viewModel: MainViewModel, controller: MediaCont
                 }
             },
             onDismiss = close,
+        )
+    }
+    // BitChord Audio: the video button held — which video the song shows.
+    val videoSearchSong by com.music.bitchord.data.video.VideoMode.searchFor.collectAsStateWithLifecycle()
+    videoSearchSong?.let { song ->
+        com.music.bitchord.ui.components.VideoSearchDialog(
+            song = song,
+            onDismiss = { com.music.bitchord.data.video.VideoMode.closeSearch() },
         )
     }
     // BitChord Audio: where the playing song comes from, raised from the player.

@@ -107,6 +107,13 @@ object MusicVideoEngine {
 
     /** The video loaded (or loading) into [player]. */
     private var loadedId: String? = null
+
+    /** BitChord Audio: the video [loadedId] names, and the track it is shown for. */
+    private var loadedRef: com.music.bitchord.data.video.VideoRef? = null
+    private var loadedFor: String? = null
+
+    /** BitChord Audio: what to show for the playing track — its own video, or video mode's. */
+    private data class Want(val mediaId: String, val ref: com.music.bitchord.data.video.VideoRef)
     private var loadJob: Job? = null
     private var syncJob: Job? = null
     private var releaseJob: Job? = null
@@ -153,6 +160,16 @@ object MusicVideoEngine {
         scope.launch {
             AppSettings.preferMusicOnly.drop(1).collect { refresh() }
         }
+        // BitChord Audio: video mode turned on or off, or a video found for a track.
+        scope.launch {
+            com.music.bitchord.data.video.VideoMode.on.drop(1).collect {
+                askVideoMode()
+                refresh()
+            }
+        }
+        scope.launch {
+            com.music.bitchord.data.video.VideoMode.ready.drop(1).collect { refresh() }
+        }
     }
 
     private val _shownVideoId = MutableStateFlow<String?>(null)
@@ -189,7 +206,10 @@ object MusicVideoEngine {
     val aspect: StateFlow<Float> = _aspect.asStateFlow()
 
     private val controllerListener = object : Player.Listener {
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = refresh()
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            askVideoMode()
+            refresh()
+        }
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _playing.value = isPlaying
             sync()
@@ -209,7 +229,7 @@ object MusicVideoEngine {
     private val playerListener = object : Player.Listener {
         override fun onRenderedFirstFrame() {
             _frameOn.value = top()
-            _shownVideoId.value = loadedId
+            _shownVideoId.value = loadedFor
         }
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -240,14 +260,14 @@ object MusicVideoEngine {
                 if (skip.add(profile) && skip.size <= MAX_REFUSED_CLIENTS) {
                     TrackLog.w(TAG, "video: $profile refused; asking the next client", about = id)
                     InnerTubeXResolver.onVideoRefused()
-                    load(id)
+                    reload()
                     return
                 }
             }
             // Above 1080p YouTube serves VP9 and AV1, which not every phone
             // decodes: one more try on the H.264 ladder before giving up.
             if (loadedCap > AUTO_HEIGHT && stepDown.add(id)) {
-                load(id)
+                reload()
                 return
             }
             noPicture += id
@@ -262,6 +282,7 @@ object MusicVideoEngine {
         this.controller = controller
         controller?.addListener(controllerListener)
         _playing.value = controller?.isPlaying == true
+        askVideoMode()
         refresh()
     }
 
@@ -327,30 +348,65 @@ object MusicVideoEngine {
     }
 
     /** The track the picture should be of: the controller's, when it is a music video. */
-    private fun wanted(): Song? {
+    private fun wanted(): Want? {
+        val song = controller?.currentMediaItem?.toSong() ?: return null
+        // BitChord Audio: video mode — your choice, so neither audio only nor
+        // music-only playback keeps the picture away.
+        if (com.music.bitchord.data.video.VideoMode.on.value) {
+            com.music.bitchord.data.video.VideoMode.cached(song.videoId)
+                ?.takeIf { it.key !in noPicture }
+                ?.let { return Want(song.videoId, it) }
+        }
         // BitChord Audio: with audio only on, no picture is ever fetched or
         // decoded — not for a video still waiting to be swapped for its
         // release, and not for one the listener switched to by hand.
         if (AppSettings.audioOnly.value) return null
-        val song = controller?.currentMediaItem?.toSong() ?: return null
         return song.takeIf {
             it.isVideo && it.videoId !in noPicture && MusicOnlyPlayback.showsPicture(it.videoId)
-        }
+        }?.let { Want(it.videoId, com.music.bitchord.data.video.VideoRef(com.music.bitchord.data.video.VideoRef.Site.YOUTUBE, it.videoId)) }
+    }
+
+    /** BitChord Audio: in video mode, the playing track's video is looked up as it starts. */
+    private fun askVideoMode() {
+        if (!com.music.bitchord.data.video.VideoMode.on.value) return
+        val song = controller?.currentMediaItem?.toSong() ?: return
+        com.music.bitchord.data.video.VideoMode.request(song)
     }
 
     private fun refresh() {
-        val song = if (surfaces.isEmpty()) null else wanted()
-        if (song == null) {
+        val want = if (surfaces.isEmpty()) null else wanted()
+        if (want == null) {
             // The picture is kept through the grace period after its last
             // surface goes; a track change to one with none drops it now.
-            if (surfaces.isNotEmpty() || wanted()?.videoId != loadedId) unload()
+            if (surfaces.isNotEmpty() || wanted()?.ref?.key != loadedId) unload()
             return
         }
-        if (song.videoId == loadedId) {
+        if (want.ref.key == loadedId) {
+            if (loadedFor != want.mediaId) {
+                loadedFor = want.mediaId
+                if (_shownVideoId.value != null) _shownVideoId.value = want.mediaId
+            }
             startSync()
             return
         }
-        load(song.videoId)
+        load(want.ref, want.mediaId)
+    }
+
+    private fun reload() {
+        val ref = loadedRef ?: return
+        val forId = loadedFor ?: return
+        load(ref, forId)
+    }
+
+    /**
+     * BitChord Audio: where the picture should be for the audio at [audioMs]:
+     * through YouTube's own song→video time map when video mode has one.
+     */
+    private fun videoPosition(audioMs: Long): Long {
+        val ref = loadedRef ?: return audioMs
+        val forId = loadedFor ?: return audioMs
+        if (ref.key == forId) return audioMs
+        return com.music.bitchord.data.video.VideoMode.timeMap(forId, ref)?.map(audioMs) ?: audioMs
     }
 
     /**
@@ -366,7 +422,7 @@ object MusicVideoEngine {
         val id = loadedId ?: return
         streams.remove(id)
         stepDown.remove(id)
-        load(id)
+        reload()
     }
 
     /** The height asked for: the held one, else what Auto opens at for this connection. */
@@ -406,11 +462,18 @@ object MusicVideoEngine {
         }?.also { ageGated += videoId }
     }
 
-    private fun load(videoId: String) {
+    private fun load(ref: com.music.bitchord.data.video.VideoRef, forId: String) {
         unload()
+        val videoId = ref.key
         loadedId = videoId
+        loadedRef = ref
+        loadedFor = forId
         val cap = capFor(videoId)
         loadedCap = cap
+        if (ref.site == com.music.bitchord.data.video.VideoRef.Site.BILIBILI) {
+            loadJob = scope.launch { loadBilibili(ref.id, videoId) }
+            return
+        }
         loadJob = scope.launch {
             val stream = try {
                 cachedStream(videoId, cap)
@@ -448,7 +511,7 @@ object MusicVideoEngine {
             if (stream.aspect > 0f) _aspect.value = stream.aspect
             _quality.value = _quality.value.copy(heights = stream.heights, activeHeight = stream.height)
             loadedProfile = stream.profileId
-            val start = controller?.currentPosition?.coerceAtLeast(0L) ?: 0L
+            val start = videoPosition(controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
             exo.setMediaSource(source, start + seekLeadMs)
             exo.playWhenReady = controller?.isPlaying == true
             exo.prepare()
@@ -456,6 +519,32 @@ object MusicVideoEngine {
             seekStartedAt = lastSeekAt
             startSync()
         }
+    }
+
+    /** BitChord Audio: a bilibili video's MP4, the same way. */
+    private suspend fun loadBilibili(bvid: String, key: String) {
+        val stream = runCatching { com.music.bitchord.data.video.Bilibili.stream(bvid) }.getOrNull()
+        if (loadedId != key) return
+        if (stream == null) {
+            TrackLog.w(TAG, "video: no bilibili stream", about = key)
+            noPicture += key
+            loadedId = null
+            return
+        }
+        val exo = player ?: return
+        val upstream = OkHttpDataSource.Factory(Http.client).setDefaultRequestProperties(stream.headers)
+        val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
+            .createMediaSource(MediaItem.fromUri(stream.url))
+        if (stream.height > 0) _aspect.value = stream.width.toFloat() / stream.height
+        _quality.value = _quality.value.copy(heights = emptyList(), activeHeight = stream.height)
+        loadedProfile = null
+        val start = videoPosition(controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
+        exo.setMediaSource(source, start + seekLeadMs)
+        exo.playWhenReady = controller?.isPlaying == true
+        exo.prepare()
+        lastSeekAt = System.currentTimeMillis()
+        seekStartedAt = lastSeekAt
+        startSync()
     }
 
     private fun cachedStream(videoId: String, cap: Int): InnerTubeXResolver.VideoStream? {
@@ -473,6 +562,8 @@ object MusicVideoEngine {
         syncJob?.cancel()
         syncJob = null
         loadedId = null
+        loadedRef = null
+        loadedFor = null
         loadedProfile = null
         _shownVideoId.value = null
         _frameOn.value = null
@@ -500,7 +591,7 @@ object MusicVideoEngine {
         val exo = player ?: return
         if (loadedId == null || exo.playbackState == Player.STATE_IDLE || exo.playbackState == Player.STATE_ENDED) return
         val speed = audio.playbackParameters.speed
-        val audioPos = audio.currentPosition
+        val audioPos = videoPosition(audio.currentPosition)
         val now = System.currentTimeMillis()
         if (!audio.isPlaying) {
             exo.playWhenReady = false

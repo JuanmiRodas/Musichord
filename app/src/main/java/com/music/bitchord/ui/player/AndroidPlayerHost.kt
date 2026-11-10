@@ -124,6 +124,32 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     override fun showsMusicVideoPicture(videoId: String): Boolean = MusicOnlyPlayback.showsPicture(videoId)
 
+    override val videoModeSupported: Boolean get() = true
+
+    override val videoModeOn: StateFlow<Boolean> get() = com.music.bitchord.data.video.VideoMode.on
+
+    private val videoReadyIds: StateFlow<Set<String>> by lazy {
+        com.music.bitchord.data.video.VideoMode.ready
+            .map { it.keys }
+            .stateIn(kotlinx.coroutines.MainScope(), kotlinx.coroutines.flow.SharingStarted.Eagerly, emptySet())
+    }
+
+    override val videoModeReady: StateFlow<Set<String>> get() = videoReadyIds
+
+    override val videoModeLooking: StateFlow<String?> get() = com.music.bitchord.data.video.VideoMode.looking
+
+    override fun toggleVideoMode(song: Song) {
+        val vm = com.music.bitchord.data.video.VideoMode
+        if (vm.on.value) {
+            vm.setOn(false)
+        } else {
+            vm.setOn(true)
+            vm.request(song, sayIfMissing = true)
+        }
+    }
+
+    override fun openVideoSearch(song: Song) = com.music.bitchord.data.video.VideoMode.openSearch(song)
+
     override val musicVideoAspect: StateFlow<Float> get() = MusicVideoEngine.aspect
 
     override val musicVideoQuality: StateFlow<MusicVideoQualityUi> get() = MusicVideoEngine.quality

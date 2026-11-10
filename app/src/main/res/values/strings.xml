@@ -1612,4 +1612,13 @@
     <string name="desc_next">Next</string>
     <string name="source_restore">Restore original source</string>
     <string name="source_restore_detail">Play %1$s from %2$s again, as it was queued, and keep it that way</string>
+    <string name="video_mode">Video mode</string>
+    <string name="video_mode_on">On</string>
+    <string name="video_mode_off">Off</string>
+    <string name="video_mode_none">No video found for this song</string>
+    <string name="video_mode_search_title">Video for this song</string>
+    <string name="video_mode_search_hint">Search</string>
+    <string name="video_mode_search_go">Search</string>
+    <string name="video_mode_search_bilibili">Also search bilibili</string>
+    <string name="video_mode_search_empty">No videos found</string>
 </resources>

@@ -34,6 +34,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -741,6 +742,10 @@ internal fun CircleGlyph(
     active: Boolean = false,
     haptic: Haptic = Haptic.Tap,
     modifier: Modifier = Modifier,
+    /** BitChord Audio: what holding the glyph does, if anything. */
+    onLongClick: (() -> Unit)? = null,
+    /** BitChord Audio: a ring round the glyph while what it started is working. */
+    busy: Boolean = false,
 ) {
     val haptics = rememberHaptics()
     val discAlpha by animateFloatAsState(
@@ -752,9 +757,15 @@ internal fun CircleGlyph(
         modifier = modifier
             .size(34.dp)
             .clip(CircleShape)
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                onLongClick = onLongClick?.let { long ->
+                    {
+                        haptics.play(Haptic.Tap)
+                        long()
+                    }
+                },
             ) {
                 haptics.play(haptic)
                 onClick()
@@ -786,6 +797,13 @@ internal fun CircleGlyph(
                 contentDescription = contentDescription,
                 tint = Color.White,
                 modifier = Modifier.size(19.dp),
+            )
+        }
+        if (busy) {
+            CircularProgressIndicator(
+                color = Color.White,
+                strokeWidth = 1.5.dp,
+                modifier = Modifier.matchParentSize(),
             )
         }
     }

@@ -297,4 +297,5 @@
     <string name="lyrics_flag_hint">Never use this source for this song again, and look for other lyrics</string>
     <string name="lyrics_oled">OLED lyrics</string>
     <string name="automix_overview_unavailable">No Automix transition coming up</string>
+    <string name="video_mode">Video mode</string>
 </resources>

@@ -86,6 +86,8 @@ internal fun FullscreenVideoPlayer(
     scrubber: @Composable () -> Unit,
     transport: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    /** BitChord Audio: video mode's karaoke lyrics, over the bottom of the picture. */
+    lyrics: (@Composable (Modifier) -> Unit)? = null,
 ) {
     HideSystemBars(true)
     var controlsShown by remember { mutableStateOf(true) }
@@ -115,6 +117,20 @@ internal fun FullscreenVideoPlayer(
             onRenderedChanged = onRenderedChanged,
             modifier = Modifier.fillMaxSize(),
         )
+        lyrics?.let { content ->
+            // Lifted clear of the scrubber while the controls are up.
+            val lift by androidx.compose.animation.core.animateDpAsState(
+                targetValue = if (controlsShown) 84.dp else 24.dp,
+                label = "videoLyricsLift",
+            )
+            content(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.displayCutout)
+                    .padding(start = 56.dp, end = 56.dp, bottom = lift),
+            )
+        }
 
         AnimatedVisibility(
             visible = controlsShown,
