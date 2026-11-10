@@ -494,7 +494,11 @@ private suspend fun searchEverywhere(
             }
         }.flatMap { it.await() }.distinctBy { it.videoId }.let(::ranked).take(6).map { "YouTube" to it }
     }
-    pcloud.await() + others.flatMap { it.await() } + youtube.await()
+    // BitChord Audio: karaoke, off-vocal and "originally sung by" rows are
+    // never offered — unless that's what was searched for.
+    val wantsKaraoke = TrackMatcher.isKaraokeLike(q)
+    (pcloud.await() + others.flatMap { it.await() } + youtube.await())
+        .filter { (_, s) -> wantsKaraoke || !TrackMatcher.isKaraokeLike(s.title, s.albumName) }
 }
 
 private fun norm(s: String): String =
@@ -515,7 +519,8 @@ private suspend fun youTubeCopyOf(song: Song): Song? {
         }
         .filterNot { it.isVideo }
     val target = TrackMatcher.Target(title = song.title, artist = song.artist, album = song.albumName)
-    return TrackMatcher.ranked(results, target).firstOrNull() ?: results.firstOrNull()
+    return TrackMatcher.ranked(results, target).firstOrNull()
+        ?: results.firstOrNull { TrackMatcher.isKaraokeLike(it.title, it.albumName) == TrackMatcher.isKaraokeLike(song.title, song.albumName) }
 }
 
 /** "MP3 320 kbps", "FLAC 16/44.1" — from the tags as last read. */

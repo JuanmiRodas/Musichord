@@ -242,6 +242,13 @@ object TrackMatcher {
         val effectiveVersions = got.versions + (albumMarks intersect NOVOCAL_TAKES) +
             (albumMarks intersect wanted.versions)
         if (wanted.versions != effectiveVersions) return null
+        // A karaoke / off-vocal / "originally sung by" row is never the song,
+        // nor the song it — checked on the raw title and album, since the
+        // catalogues spell it inside compounds the word split can't see
+        // ("ガイド無しカラオケ", "(原曲歌手:相川七瀬)", "+2Key").
+        if (isKaraokeLike(candidate.title, candidate.albumName) !=
+            isKaraokeLike(target.title, target.album)
+        ) return null
 
         val creditedArtist = artistScore(target.artist, candidate.artist)
         val duration = durationScore(
@@ -770,6 +777,38 @@ object TrackMatcher {
      * (Remix)" as the album of a plain-titled "KALYANI"). Read with the same
      * parser, so the same version vocabulary applies on both sides.
      */
+    /**
+     * Whether a title or release is a karaoke, off-vocal, backing-track or
+     * "in the style of" product rather than a recording of the song by its
+     * artist. Substring matching, because karaoke catalogues write these into
+     * compounds and brackets that word splitting doesn't separate.
+     */
+    fun isKaraokeLike(title: String?, album: String? = null): Boolean =
+        listOfNotNull(title, album).any { raw ->
+            val text = Normalizer.normalize(raw, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
+            KARAOKE_PHRASES.any { it in text } || KARAOKE_PATTERNS.any { it.containsMatchIn(text) }
+        }
+
+    private val KARAOKE_PHRASES = listOf(
+        "karaoke", "カラオケ", "卡拉ok", "ktv", "노래방",
+        "off vocal", "off-vocal", "offvocal", "オフボーカル", "オフ・ボーカル",
+        "no vocal", "without vocal", "vocalless", "vocal less", "ボーカルなし", "ボーカル無し",
+        "ガイドなし", "ガイド無し", "ガイドメロディ", "guide melody",
+        "伴奏", "纯音乐", "純音樂", "반주", "backing track", "minus one", "minus-one",
+        "原曲歌手", "原唱", "originally performed by", "originally by", "in the style of",
+        "made famous by", "as made famous", "performed by the hit crew",
+        "instrumental", "インストゥルメンタル",
+    )
+
+    private val KARAOKE_PATTERNS = listOf(
+        // Key-shifted karaoke: "+2Key", "-5 key", "原キー".
+        Regex("""[+\-－＋]\s*\d+\s*key\b"""),
+        Regex("""原キー|キー変更"""),
+        // "Inst." / "(Inst)" / "-inst-", and the katakana short form, as a word.
+        Regex("""(^|[^a-z])inst\.?($|[^a-z])"""),
+        Regex("""インスト(?!ール)"""),
+    )
+
     internal fun albumVersionMarkers(album: String?): Set<String> =
         if (album.isNullOrBlank()) emptySet() else parseTitle(album).versions
 
