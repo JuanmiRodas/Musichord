@@ -331,11 +331,12 @@ object LyricsKeeper {
         val flagged = BadLyrics.flagged(s.videoId)
         val sources = AppSettings.lyricsSources.value.filterTo(LinkedHashSet()) { it.name !in flagged && !it.untimed }
         if (sources.isEmpty()) return null
-        val spellings = runCatching { LyricNames.variants(s.title, s.artist, seconds * 1000L) }.getOrDefault(emptyList())
+        val artist = LyricNames.lookupArtist(s.videoId, s.title, s.artist)
+        val spellings = runCatching { LyricNames.variants(s.title, artist, seconds * 1000L) }.getOrDefault(emptyList())
         // BitChord Audio: the best version under any name (see LyricsRepository.best).
         val best = LyricsRepository.best(
             videoId = s.videoId,
-            spellings = LyricAliases.queries(s.videoId, s.title, s.artist, spellings).map { LyricsRepository.Spelling(it.title, it.artist) },
+            spellings = LyricAliases.queries(s.videoId, s.title, artist, spellings).map { LyricsRepository.Spelling(it.title, it.artist) },
             durationMs = seconds * 1000L,
             album = s.albumName,
             sources = sources,

@@ -66,6 +66,49 @@ object LyricNames {
         Suggested(titles.toList().take(6), artists.toList().take(4))
     }
 
+    /**
+     * BitChord Audio: the artist to look lyrics up by. A row that lost its
+     * credit says "Unknown artist", and every lyrics service searched for
+     * that — while the file it plays from, or your own edit, names the
+     * artist. Those first; else nothing, which a title search can still find.
+     */
+    fun lookupArtist(videoId: String, title: String, artist: String): String {
+        if (!com.music.bitchord.data.sources.TrackMatcher.isPlaceholderArtist(artist)) return artist
+        val song = Song(videoId = videoId, title = title, artist = artist, thumbnailUrl = null)
+        val placeholder = com.music.bitchord.data.sources.TrackMatcher::isPlaceholderArtist
+        com.music.bitchord.data.edits.MetadataEdits.get(song)?.let { e ->
+            (e.artist?.takeUnless(placeholder) ?: e.albumArtist?.takeUnless(placeholder))?.let { return it }
+        }
+        others(song).firstNotNullOfOrNull { it.artist.takeUnless(placeholder) }?.let { return it }
+        return ""
+    }
+
+    private val FEATURING = Regex("""\s*[(（\[]?\s*\b(?:featuring|feat\.?|ft\.)\s+[^()（）\[\]]*[)）\]]?""", RegexOption.IGNORE_CASE)
+    private val BRACKETED = Regex("""[(（\[【「]([^)）\]】」]+)[)）\]】」]?""")
+
+    /**
+     * BitChord Audio: the title as the lyrics services file it. Files and
+     * uploads carry extras those don't — "featuring Aya Kamiki", the original
+     * name in brackets ("Ai wa Kurayami no Naka de (愛は暗闇の中で)") — and an
+     * exact search for the whole string finds nothing. The title without
+     * them, and a bracketed name in another script on its own.
+     */
+    fun cleanTitles(title: String): List<String> {
+        val out = LinkedHashSet<String>()
+        fun tidy(t: String) = t.replace(FEATURING, " ").replace(Regex("\\s+"), " ").trim(' ', '-', '~', '～', '「', '」')
+        val outer = tidy(BRACKETED.replace(title, " "))
+        val outerJapanese = JapaneseReading.isJapanese(outer)
+        for (m in BRACKETED.findAll(title)) {
+            val inner = tidy(m.groupValues[1])
+            if (inner.length >= 2 && JapaneseReading.isJapanese(inner) != outerJapanese &&
+                !com.music.bitchord.data.sources.TrackMatcher.isKaraokeLike(inner)
+            ) out += inner
+        }
+        if (outer.length >= 2) out += outer
+        tidy(title).takeIf { it.length >= 2 }?.let { out += it }
+        return out.filter { it != title }
+    }
+
     private val variantCache = java.util.concurrent.ConcurrentHashMap<String, List<LyricAliases.Query>>()
 
     /**
@@ -97,7 +140,11 @@ object LyricNames {
                     }.getOrNull()
                 }
             } else null
-            val titles = (verified?.titles.orEmpty() + otherSpellings(title)).distinct().take(3)
+            // BitChord Audio: the title as catalogues file it (no "featuring",
+            // no bracketed alias) first — and its own other spellings.
+            val clean = cleanTitles(title)
+            val titles = (clean.take(2) + verified?.titles.orEmpty() + otherSpellings(clean.firstOrNull() ?: title))
+                .distinct().take(4)
             val artists = (verified?.artists.orEmpty() + otherSpellings(artist)).distinct().take(2)
             buildList {
                 for (t in titles) for (a in artists) add(LyricAliases.Query(t, a))

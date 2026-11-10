@@ -483,10 +483,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // lyrics folder, found by any of the song's names (see
             // [SidecarLyrics]). First unless Settings says online goes first.
             // BitChord Audio: also by the romaji / Japanese spelling of the names.
+            // BitChord Audio: "Unknown artist" is nobody's name — the file's, or yours.
+            val lookupArtist = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { com.music.bitchord.data.lyrics.LyricNames.lookupArtist(videoId, title, artist) }.getOrDefault(artist)
+            }
+            // What a single provider is asked with from the sheet, until a
+            // better spelling wins: the title as catalogues file it.
+            currentLyricsRequest = LyricsRequest(
+                videoId,
+                com.music.bitchord.data.lyrics.LyricNames.cleanTitles(title).firstOrNull() ?: title,
+                lookupArtist,
+                durationMs,
+                album,
+            )
             val spellings = runCatching {
-                com.music.bitchord.data.lyrics.LyricNames.variants(title, artist, durationMs)
+                com.music.bitchord.data.lyrics.LyricNames.variants(title, lookupArtist, durationMs)
             }.getOrDefault(emptyList())
-            val nameQueries = com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, artist, spellings)
+            val nameQueries = com.music.bitchord.data.lyrics.LyricAliases.queries(videoId, title, lookupArtist, spellings)
             suspend fun ownLyrics() = if (com.music.bitchord.data.lyrics.BadLyrics.OWN in flaggedLyrics) null else com.music.bitchord.data.lyrics.SidecarLyrics.forSong(
                 getApplication(), videoId, localUri, localPath,
                 titles = nameQueries.map { it.title }.distinct(),
