@@ -859,13 +859,17 @@ private fun BitChordApp(
     val hideTopPicks by AppSettings.hideTopPicks.collectAsStateWithLifecycle()
     val hideHomeMoods by AppSettings.hideHomeMoods.collectAsStateWithLifecycle()
     // Only what Home draws: Top Picks reads the unfiltered feed from the view model.
-    val visibleHomeState = remember(homeState, hideHomeVideos, hideRecents) {
+    // BitChord Audio: Home sections hidden and ordered as chosen (HomeSections).
+    val homeOrder by com.music.bitchord.data.HomeSections.order.collectAsStateWithLifecycle()
+    val homeHidden by com.music.bitchord.data.HomeSections.hidden.collectAsStateWithLifecycle()
+    val homeMixCard by com.music.bitchord.data.HomeSections.mixCard.collectAsStateWithLifecycle()
+    val visibleHomeState = remember(homeState, hideHomeVideos, hideRecents, homeOrder, homeHidden) {
         val loaded = homeState as? UiState.Success
-        if (loaded != null && (hideHomeVideos || hideRecents)) {
+        if (loaded != null) {
             var shelves = loaded.data
             if (hideRecents) shelves = shelves.filterNot { it.title == YtMusicRepository.RECENT_TITLE }
             if (hideHomeVideos) shelves = shelves.withoutVideos()
-            UiState.Success(shelves)
+            UiState.Success(com.music.bitchord.data.HomeSections.apply(shelves))
         } else {
             homeState
         }
@@ -3465,6 +3469,9 @@ private fun BitChordApp(
                                 isPlaying = player.isPlaying,
                                 title = stringResource(R.string.listen_now),
                                 festiveLogo = diwaliFestive,
+                                extraCard = if (homeMixCard) {
+                                    { com.music.bitchord.ui.components.MakeMixCard() }
+                                } else null,
                                 onFestiveLogoClick = { showDiwali = true },
                                 signedIn = signedIn,
                                 onSignIn = { webSession = WebSessionMode.SIGN_IN },
@@ -6179,6 +6186,33 @@ private fun tween(durationMillis: Int) =
 /** BitChord Audio: the dialogs our own features raise from anywhere in the app. */
 @Composable
 private fun BitChordAudioDialogs(viewModel: MainViewModel, controller: MediaController?) {
+    // BitChord Audio: the mix generator (from LastWave).
+    val mixOpen by com.music.bitchord.ui.components.MixGeneratorUi.open.collectAsStateWithLifecycle()
+    if (mixOpen) {
+        val mixScope = rememberCoroutineScope()
+        val mixContext = androidx.compose.ui.platform.LocalContext.current
+        val close = { com.music.bitchord.ui.components.MixGeneratorUi.open.value = false }
+        com.music.bitchord.ui.components.MixGeneratorDialog(
+            onPlay = { songs, shuffle ->
+                close()
+                mixScope.launch {
+                    if (shuffle) com.music.bitchord.playback.QueueShuffle.enableForNextQueue()
+                    controller?.playSongs(songs, if (shuffle) songs.indices.random() else 0)
+                }
+            },
+            onSave = { title, songs ->
+                viewModel.createPlaylistWithVideoIds(
+                    title = title,
+                    privacy = com.music.bitchord.data.model.PlaylistPrivacy.PRIVATE,
+                    videoIds = songs.map { it.videoId },
+                    songs = songs,
+                ) { _, name, _ ->
+                    android.widget.Toast.makeText(mixContext, mixContext.getString(R.string.mix_saved, name), android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = close,
+        )
+    }
     // BitChord Audio: where the playing song comes from, raised from the player.
     val sourceSong by com.music.bitchord.ui.components.NowPlayingSource.song.collectAsStateWithLifecycle()
     sourceSong?.let { song ->

@@ -6560,6 +6560,22 @@ class PlaybackService : MediaLibraryService() {
         )
         MediaWidgetSnapshot.save(this, snapshot)
         MediaWidget.refresh(this)
+        // BitChord Audio: LastWave's Wave widgets, from the same moment.
+        com.music.bitchord.widget.wave.WaveWidgetUpdater.publish(
+            this,
+            com.music.bitchord.widget.wave.WaveWidgetState(
+                trackId = song.videoId,
+                title = song.title,
+                artist = song.artist,
+                artworkUri = song.thumbnailUrl,
+                isPlaying = snapshot.isPlaying,
+                isLiked = liked,
+                positionMs = reported.currentPosition.coerceAtLeast(0L),
+                durationMs = reported.duration.takeIf { it > 0 } ?: 0L,
+                shuffleEnabled = snapshot.shuffleEnabled,
+                updatedAtEpochMs = System.currentTimeMillis(),
+            ),
+        )
         // The watch app follows the widget — same moments, same snapshot.
         WearBridge.publish(this, snapshot, reported, playing)
     }

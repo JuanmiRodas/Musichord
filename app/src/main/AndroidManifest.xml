@@ -793,6 +793,52 @@
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
             android:value="com.music.bitchord.playback.cast.CastOptionsProvider" />
+        <!-- BitChord Audio: LastWave's Wave widgets. -->
+        <receiver
+            android:name=".widget.wave.WaveStripWidgetProvider"
+            android:exported="false"
+            android:label="Wave strip">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/wave_strip_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.wave.WaveGlassWidgetProvider"
+            android:exported="false"
+            android:label="Wave glass">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/wave_glass_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.wave.WaveCircularWidgetProvider"
+            android:exported="false"
+            android:label="Wave circle">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/wave_circular_widget_info" />
+        </receiver>
+
+        <!-- BitChord Audio: scrobbling what other music apps play (OtherAppsScrobble). -->
+        <service
+            android:name=".data.scrobbling.OtherAppsListener"
+            android:exported="true"
+            android:label="@string/other_scrobble_title"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>

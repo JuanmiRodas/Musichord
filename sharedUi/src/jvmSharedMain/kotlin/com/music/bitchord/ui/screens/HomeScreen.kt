@@ -158,6 +158,8 @@ fun HomeScreen(
     onMoodsShowAll: () -> Unit = {},
     /** Whether the Top Picks and mood artwork may animate — see [LocalArtworkMotion]. */
     artworkMotion: Boolean = true,
+    /** BitChord Audio: a card of the app's own under Top Picks (the mix generator). */
+    extraCard: (@Composable () -> Unit)? = null,
 ) {
     // Top Picks' pictures and motion wait for the feed — see LocalArtworkImages.
     val feedReady = state !is UiState.Loading
@@ -216,6 +218,7 @@ fun HomeScreen(
                     topPicks == null && topPicksLoading -> topPicksSkeleton()
                 }
             }
+            extraCard?.let { card -> item(key = "bitchord-extra") { card() } }
             when (state) {
                 is UiState.Loading -> {
                     if (recentlyPlayedLoading) {

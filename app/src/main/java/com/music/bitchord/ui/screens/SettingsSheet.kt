@@ -319,6 +319,10 @@ fun SettingsScreen(
     var showLogUpload by remember { mutableStateOf(false) }
     var showNoRecommend by remember { mutableStateOf(false) }
     var showAutoEq by remember { mutableStateOf(false) }
+    var showHomeSections by remember { mutableStateOf(false) }
+    if (showHomeSections) {
+        com.music.bitchord.ui.components.HomeSectionsDialog(onDismiss = { showHomeSections = false })
+    }
     if (showAutoEq) {
         com.music.bitchord.ui.components.AutoEqDialog(onDismiss = { showAutoEq = false })
     }
@@ -1046,6 +1050,16 @@ fun SettingsScreen(
         }
 
         if (shows(SettingsCategory.CONTENT_PREFERENCES)) SearchableSettingsGroup(search, header = stringResource(R.string.content_preferences)) {
+            // BitChord Audio: which Home shelves show, and their order.
+            val homeSectionsTitle = stringResource(R.string.home_sections_title)
+            row(homeSectionsTitle, "home", "inicio", "shelves", "order", "orden", "sections", "secciones") {
+                SettingsRow(
+                    icon = SfIcons.Tune,
+                    title = homeSectionsTitle,
+                    subtitle = stringResource(R.string.home_sections_subtitle),
+                    onClick = { showHomeSections = true },
+                )
+            }
             val preferMusicOnlyTitle = stringResource(R.string.prefer_music_only)
             row(preferMusicOnlyTitle, "video", "audio", "music video", "convert", "song") {
                 SettingsRow(

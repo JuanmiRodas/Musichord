@@ -257,6 +257,25 @@ fun AccountAndScrobblingScreen(
                         },
                         onClick = { AppSettings.setLastfmNowPlaying(!lastfmNowPlayingEnabled) },
                     )
+                    // BitChord Audio: also what other music apps play (LastWave's idea).
+                    RowDivider()
+                    val otherContext = androidx.compose.ui.platform.LocalContext.current
+                    val otherOn by com.music.bitchord.data.scrobbling.OtherAppsScrobble.enabled.collectAsStateWithLifecycle()
+                    val otherSeen by com.music.bitchord.data.scrobbling.OtherAppsScrobble.lastSeen.collectAsStateWithLifecycle()
+                    val toggleOther = { on: Boolean ->
+                        com.music.bitchord.data.scrobbling.OtherAppsScrobble.setEnabled(on)
+                        if (on && !com.music.bitchord.data.scrobbling.OtherAppsScrobble.hasAccess(otherContext)) {
+                            com.music.bitchord.data.scrobbling.OtherAppsScrobble.openAccessSettings(otherContext)
+                        }
+                    }
+                    SettingsRow(
+                        icon = SfIcons.GraphicEq,
+                        title = stringResource(R.string.other_scrobble_title),
+                        subtitle = otherSeen?.let { stringResource(R.string.other_scrobble_last, it) }
+                            ?: stringResource(R.string.other_scrobble_subtitle),
+                        trailing = { IosSwitch(checked = otherOn, onCheckedChange = toggleOther) },
+                        onClick = { toggleOther(!otherOn) },
+                    )
                 }
             }
 
