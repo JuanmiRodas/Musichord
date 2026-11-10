@@ -48,7 +48,7 @@ class SoundCloudSource(
 
     override suspend fun health(): SourceHealth =
         if (ClientId.get() != null) SourceHealth.Ok()
-        else SourceHealth.Down("Couldn't reach SoundCloud")
+        else SourceHealth.Unreachable("Couldn't reach SoundCloud")
 
     override suspend fun search(
         query: String,
