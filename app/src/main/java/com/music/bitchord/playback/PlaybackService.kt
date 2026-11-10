@@ -8379,6 +8379,15 @@ class PlaybackService : MediaLibraryService() {
                 .setMaxVolume(100)
                 .build()
 
+            /** What the paused phone player says about itself that isn't true while casting. */
+            val LOCAL_PLAY_STATE_EVENTS = setOf(
+                Player.EVENT_PLAY_WHEN_READY_CHANGED,
+                Player.EVENT_PLAYBACK_STATE_CHANGED,
+                Player.EVENT_IS_PLAYING_CHANGED,
+                Player.EVENT_IS_LOADING_CHANGED,
+                Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED,
+            )
+
             val DEVICE_VOLUME_COMMANDS = intArrayOf(
                 Player.COMMAND_GET_DEVICE_VOLUME,
                 Player.COMMAND_SET_DEVICE_VOLUME,
@@ -8419,12 +8428,58 @@ class PlaybackService : MediaLibraryService() {
 
         override fun addListener(listener: Player.Listener) {
             listeners += listener
-            super.addListener(listener)
+            super.addListener(guarded.getOrPut(listener) { WhileCasting(listener) })
         }
 
         override fun removeListener(listener: Player.Listener) {
             listeners -= listener
-            super.removeListener(listener)
+            guarded.remove(listener)?.let { super.removeListener(it) }
+        }
+
+        private val guarded = java.util.concurrent.ConcurrentHashMap<Player.Listener, Player.Listener>()
+
+        /**
+         * BitChord Audio: the phone's own player, held paused (or idle) while a
+         * receiver plays, still announces *its* play state, and the session
+         * took those announcements at their word: it recorded "paused" or
+         * "idle" while the speakers played, and never heard otherwise, since
+         * [onRemotePlaybackChanged] only speaks when the receiver's state
+         * changes. An idle session has no notification, and a paused one loses
+         * it once the foreground timeout lapses — so casting showed nothing
+         * outside the app. While casting, those announcements are dropped
+         * here; the receiver's are the only ones that count.
+         */
+        private inner class WhileCasting(private val inner: Player.Listener) : Player.Listener by inner {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!cast.active) inner.onPlayWhenReadyChanged(playWhenReady, reason)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (!cast.active) inner.onPlaybackStateChanged(playbackState)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!cast.active) inner.onIsPlayingChanged(isPlaying)
+            }
+
+            override fun onIsLoadingChanged(isLoading: Boolean) {
+                if (!cast.active) inner.onIsLoadingChanged(isLoading)
+            }
+
+            override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+                if (!cast.active) inner.onPlaybackSuppressionReasonChanged(playbackSuppressionReason)
+            }
+
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (!cast.active) return inner.onEvents(player, events)
+                val kept = FlagSet.Builder()
+                for (i in 0 until events.size()) {
+                    val e = events.get(i)
+                    if (e !in LOCAL_PLAY_STATE_EVENTS) kept.add(e)
+                }
+                val left = kept.build()
+                if (left.size() > 0) inner.onEvents(player, Player.Events(left))
+            }
         }
 
         // While a receiver is the speaker the phone's player is paused and its
@@ -8616,6 +8671,12 @@ class PlaybackService : MediaLibraryService() {
             val events = Player.Events(FlagSet.Builder().add(Player.EVENT_DEVICE_INFO_CHANGED).build())
             listeners.forEach { it.onEvents(this, events) }
             onRemoteVolumeChanged()
+            // The speaker changed hands: whatever the session last heard about
+            // play state described the other one. Said again, in full.
+            reportedPlayWhenReady = !getPlayWhenReady()
+            reportedPlaybackState = -1
+            reportedIsPlaying = !isPlaying()
+            onRemotePlaybackChanged()
         }
 
         override fun onRemoteVolumeChanged() {
