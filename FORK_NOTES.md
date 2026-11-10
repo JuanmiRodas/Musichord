@@ -192,3 +192,13 @@ Symptom: the same 4–5 songs repeat (local and cast). Cause: in-place queue swa
 Base was upstream b690dc14 (v1.8.2, 30 Oct). Merged tag v1.9.1 (7f45c768) with a real git merge (tag `up-v1.9.1` locally; upstream clone at /home/claude/kushagrasinghx/bitchord). Next time: `git fetch <upstream> <tag>` and `git merge` — history now shares the base.
 Kept ours where they collided: versioning, Advanced settings group (upstream folded it into Misc and removed the enum, icon and string — re-added), audio-only beside upstream's "Prefer music-only", JapaneseNames queries in SourceResolver (with upstream's lengthLater), shownSong title + source line under the transport (inside upstream's new `transport` lambda), LyricsOffsetControl now `chromeWhite(1f)` (LocalPlayerTint removed upstream). BitChordAudioDialogs() split out of BitChordApp (JVM 64 KB method limit).
 Upstream AddonAuth: addons may require proof of the official signed app (hardware attestation). Opt-in per addon; a fork cannot pass it. Do not try to spoof it.
+
+## From LastWave (Clash-Projects/LastWave-Native, GPL-3.0) — v1.9.11x
+Not a BitChord fork; features re-implemented/ported:
+- NoRecommend (shared/data/NoRecommend.kt): song menu toggle; filtered in YtMusicRepository.radio and RD* watchQueue; Settings → Advanced list.
+- AutoEQ (data/autoeq/AutoEq.kt): jaakkopasanen/AutoEq INDEX.md + ParametricEQ.txt, per-output (AudioDeviceCallback) choice; runs as biquad cascade inside EqualizerProcessor.setCorrection (both players). Settings row under Equalizer.
+- OtherAppsScrobble (data/scrobbling/OtherAppsScrobbler.kt): NotificationListenerService → MediaSessionManager sessions → ScrobbleManager per session. Toggle in Account & scrobbling.
+- MixGenerator (data/MixGenerator.kt) + MixGeneratorDialog/MakeMixCard (Home `extraCard` param in sharedUi HomeScreen).
+- HomeSections (data/HomeSections.kt): hide/order YouTube shelves by title; Content preferences row.
+- Wave widgets (widget/wave/*): strip, glass, circle; WaveWidgetUpdater.publish from publishWidgetState. Library variant not ported (needs LastWave's playlist/stats layers).
+Skipped on purpose: LastWave's Widevine "module" streams.
