@@ -217,3 +217,9 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 - New built-in sources: NetEase Cloud Music (rank 2, 320kbps MP3, VIP/trial skipped) and SoundCloud (rank 4, after YouTube; hand picks only; client_id scraped and renewed). Conflicting-album guard covers all catalogue sources.
 - Lyrics: KuGou hits must match title + artist (or exact title at same length); Megalobiz checks [ti:]/address. Root cause of random Chinese lyrics on non-Chinese songs.
 - One-time recheck of kept lyrics (`kept_rechecked_v1`): auto-kept ones (and Chinese-only lyrics on non-CJK-named songs) are looked up again; replaced or dropped from app, lyrics folder and embedded tags.
+
+## Video mode, likes, artist credits (v1.9.124+)
+- Video mode (data/video/VideoMode.kt, Bilibili.kt): picture over the song's own audio via MusicVideoEngine (Want(mediaId, VideoRef)); time-mapped through YouTube's version pair when known. Button next to the star (tap toggle, hold = VideoSearchDialog: YouTube videos, bilibili on request; pick linked by id/origin/title|artist). Lyrics: VideoKaraokeLyrics (2 lines, swept; line-timed swept evenly) under the video / over it fullscreen. Menu "Convert to video" → Video mode.
+- InnertubeParser RELEASE_WORDS localized (Spanish "Álbum" made album tracks "Unknown artist"). Placeholder artists: targetIn uses MetadataEdits artist, catalogue sources skipped, no ArtistLinks learning.
+- isKaraokeLike also catches credited covers (翻自, 翻唱, (cover：…), 歌ってみた, カバー).
+- ReleaseSelectionBar: Like action. Artist page: "Liked songs" row → likedby:<id>|<name> local page (LikedByArtist).
