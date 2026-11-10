@@ -675,6 +675,33 @@ fun SettingsScreen(
                         )
                     }
                 }
+                // BitChord Audio: the phone's own Dolby Atmos (a sound effect on
+                // any song) is a different thing from the row above, and the one
+                // the Dolby edition is about — see [DolbyPanel].
+                val phoneDolbyTitle = stringResource(R.string.phone_dolby_title)
+                row(phoneDolbyTitle, "dolby", "atmos", "oneplus", "sonido", "sound") {
+                    val dolbyContext = androidx.compose.ui.platform.LocalContext.current
+                    SettingsRow(
+                        iconPainter = painterResource(R.drawable.ic_dolby_atmos),
+                        title = phoneDolbyTitle,
+                        subtitle = stringResource(
+                            if (com.music.bitchord.data.DolbyPanel.isDolbyEdition) {
+                                R.string.phone_dolby_subtitle_edition
+                            } else {
+                                R.string.phone_dolby_subtitle
+                            },
+                        ),
+                        onClick = {
+                            if (!com.music.bitchord.data.DolbyPanel.open(dolbyContext)) {
+                                android.widget.Toast.makeText(
+                                    dolbyContext,
+                                    dolbyContext.getString(R.string.dolby_atmos_open_failed),
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
+                    )
+                }
             }
 
             // The categories, each a page of its own — until there is a query,

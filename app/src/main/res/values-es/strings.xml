@@ -1642,4 +1642,7 @@
     <string name="embed_lyrics">Guardar letras en mis archivos</string>
     <string name="embed_lyrics_subtitle">Las letras guardadas se escriben también dentro del archivo (cualquier formato): descargas al momento, archivos de pCloud con Wi-Fi</string>
     <string name="advanced_options">Opciones avanzadas</string>
+    <string name="phone_dolby_title">Dolby Atmos del teléfono</string>
+    <string name="phone_dolby_subtitle">El efecto de sonido Dolby del propio teléfono, en cualquier canción. No es el interruptor de arriba. Toca para abrirlo y actívalo mientras suena música. En OnePlus solo funciona en la edición BitChord Dolby</string>
+    <string name="phone_dolby_subtitle_edition">Edición BitChord Dolby: el teléfono aplica Dolby a esta app. Toca para abrir Dolby Atmos y actívalo mientras suena música</string>
 </resources>

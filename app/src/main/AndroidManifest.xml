@@ -62,6 +62,16 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- BitChord Audio: the phone's Dolby Atmos settings apps (DolbyPanel). -->
+    <queries>
+        <package android:name="com.dolby.daxappui" />
+        <package android:name="com.dolby.daxappUI" />
+        <package android:name="com.dolby.ds1appUI" />
+        <package android:name="com.oplus.dolby" />
+        <package android:name="com.coloros.dolby" />
+        <package android:name="com.motorola.dolby.dolbyui" />
+    </queries>
+
     <application
         android:name=".BitChordApplication"
         android:allowBackup="true"

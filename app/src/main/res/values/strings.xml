@@ -1545,4 +1545,7 @@
     <string name="diwali_subtitle">May this festival of lights fill your home with joy and your days with music.</string>
     <string name="diwali_cta">Let\'s Celebrate</string>
     <string name="advanced_options">Advanced &amp; experimental options</string>
+    <string name="phone_dolby_title">Phone\'s Dolby Atmos sound</string>
+    <string name="phone_dolby_subtitle">Dolby\'s sound effect from the phone itself, on any song. Not the switch above. Tap to open it and turn it on while music plays. On OnePlus it only works in the BitChord Dolby edition</string>
+    <string name="phone_dolby_subtitle_edition">BitChord Dolby edition: the phone applies Dolby to this app. Tap to open Dolby Atmos and turn it on while music plays</string>
 </resources>
