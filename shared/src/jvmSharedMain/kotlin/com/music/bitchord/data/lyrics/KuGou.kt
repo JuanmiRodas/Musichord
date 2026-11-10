@@ -36,9 +36,16 @@ object KuGou {
         val keyword = keyword(title, artist, album)
         val seconds = (durationMs / 1000).toInt()
 
-        val candidate = searchSongs(keyword, seconds)?.firstNotNullOfOrNull { hash ->
-            searchLyrics(hash = hash)?.firstOrNull()
-        } ?: searchLyrics(keyword = keyword, seconds = seconds)?.firstOrNull()
+        // BitChord Audio: every hit must be *this* song — its title, and its
+        // artist (or, failing a shared artist, the exact title at the same
+        // length). KuGou's search is fuzzy and always answers: for a song it
+        // doesn't have, it hands back whatever Chinese track runs about as
+        // long, and those lyrics — word-synced, so top-scored — were winning.
+        val candidate = searchSongs(keyword, seconds)
+            ?.filter { isThisSong(title, artist, seconds, it.songname, it.singername, it.duration) }
+            ?.firstNotNullOfOrNull { info -> searchLyrics(hash = info.hash)?.firstOrNull() }
+            ?: searchLyrics(keyword = keyword, seconds = seconds)
+                ?.firstOrNull { isThisSong(title, artist, seconds, it.song, it.singer, (it.duration / 1000).toInt()) }
             ?: return@withContext null
 
         // BitChord Audio: the KRC (per-word timing, often romaji) first, the LRC if not.
@@ -127,7 +134,7 @@ object KuGou {
      * first result for a common title is as likely to be a cover or a remix
      * as the right recording — and ordered closest match first.
      */
-    private fun searchSongs(keyword: Keyword, seconds: Int): List<String>? {
+    private fun searchSongs(keyword: Keyword, seconds: Int): List<SearchSongResponse.Info>? {
         val url = "https://mobileservice.kugou.com/api/v3/search/song".toHttpUrl().newBuilder()
             .addQueryParameter("version", "9108")
             .addQueryParameter("plat", "0")
@@ -140,8 +147,52 @@ object KuGou {
         return response?.data?.info.orEmpty()
             .filter { seconds <= 0 || abs(it.duration - seconds) <= DURATION_TOLERANCE_SECONDS }
             .sortedBy { abs(it.duration - seconds) }
-            .map { it.hash }
+            .map { info ->
+                // Older replies carry only "Singer - Song" in `filename`.
+                if (info.songname.isNotBlank()) info
+                else info.copy(
+                    songname = info.filename.substringAfter(" - ", info.filename),
+                    singername = info.filename.substringBefore(" - ", ""),
+                )
+            }
     }
+
+    /**
+     * Whether a catalogue row is the song asked for: the same title (in any
+     * script — see [JapaneseMatch.sameTitle]) and one of the same artists, or
+     * the identical title at the same length when the artist is credited
+     * differently ("Haruhi Suzumiya (CV: Aya Hirano)" vs 平野綾).
+     */
+    internal fun isThisSong(
+        title: String,
+        artist: String,
+        seconds: Int,
+        gotTitle: String,
+        gotArtist: String,
+        gotSeconds: Int,
+    ): Boolean {
+        val t = gotTitle.replace(TAGS, "").trim()
+        val a = gotArtist.replace(TAGS, "").trim()
+        if (t.isEmpty()) return false
+        val wanted = listOf(title, title.stripParenthetical()).distinct()
+        if (wanted.none { JapaneseMatch.sameTitle(it, t) || JapaneseMatch.sameTitle(it, t.stripParenthetical()) }) return false
+        val theirs = a.split(ARTIST_SPLIT).map { it.trim() }.filter { it.isNotEmpty() } + a
+        if (artist.isBlank() || artistParts(artist).any { mine -> theirs.any { JapaneseMatch.sameArtist(mine, it) } }) return true
+        val exact = wanted.any { JapaneseMatch.norm(it) == JapaneseMatch.norm(t) }
+        return exact && seconds > 0 && gotSeconds > 0 && abs(gotSeconds - seconds) <= 3
+    }
+
+    /** The credit whole, each name in it, and what's in its brackets ("CV: Aya Hirano"). */
+    private fun artistParts(artist: String): List<String> {
+        val inside = Regex("""[(（\[【]([^)）\]】]*)[)）\]】]""").findAll(artist)
+            .map { it.groupValues[1].substringAfter(':').substringAfter('：').trim() }.toList()
+        val outside = artist.stripParenthetical()
+        return (listOf(artist, outside) + inside + (listOf(outside) + inside).flatMap { it.split(ARTIST_SPLIT) })
+            .map { it.trim() }.filter { it.length > 1 }.distinct()
+    }
+
+    private val TAGS = Regex("<[^>]+>")
+    private val ARTIST_SPLIT = Regex("""\s*(?:,|&|/|;|、|\bfeat\.?|\bft\.?|\bx\b)\s*""", RegexOption.IGNORE_CASE)
 
     private fun searchLyrics(hash: String? = null, keyword: Keyword? = null, seconds: Int = -1): List<Candidate>? {
         val builder = "https://lyrics.kugou.com/search".toHttpUrl().newBuilder()
@@ -237,14 +288,26 @@ object KuGou {
         data class Data(val info: List<Info> = emptyList())
 
         @Serializable
-        data class Info(val hash: String, val duration: Int = -1)
+        data class Info(
+            val hash: String,
+            val duration: Int = -1,
+            val songname: String = "",
+            val singername: String = "",
+            val filename: String = "",
+        )
     }
 
     @Serializable
     private data class SearchLyricsResponse(val candidates: List<Candidate> = emptyList())
 
     @Serializable
-    private data class Candidate(val id: String, val accesskey: String)
+    private data class Candidate(
+        val id: String,
+        val accesskey: String,
+        val song: String = "",
+        val singer: String = "",
+        val duration: Long = 0,
+    )
 
     @Serializable
     private data class DownloadResponse(val content: String = "")

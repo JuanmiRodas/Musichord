@@ -207,6 +207,9 @@ object LyricsKeeper {
                 !s.isVideo && !EditedLyrics.has(s.videoId) &&
                     (prefs?.getLong(s.videoId, 0L) ?: 0L).let { tried -> now - tried > RETRY_AFTER_MS }
             }
+            if (prefs?.getBoolean(KEY_RECHECKED, false) == false) {
+                if (recheckKept(songs)) prefs?.edit()?.putBoolean(KEY_RECHECKED, true)?.apply()
+            }
             if (todo.isEmpty()) {
                 embedKept(songs)
                 return
@@ -230,6 +233,96 @@ object LyricsKeeper {
             running = false
         }
     }
+
+    /**
+     * BitChord Audio: one pass over lyrics kept before the lyric sources
+     * checked that a hit was the right song (KuGou and Megalobiz answered any
+     * search with *something* — often a Chinese song of the same length). The
+     * app's own picks are looked up again: replaced when a different version
+     * is found now, dropped — here, from the lyrics folder and from the files
+     * they were written into — when nothing is. Lyrics you picked or timed are
+     * left alone, unless they are Chinese-script lyrics on a song whose names
+     * have none, which only the old matching could have produced.
+     *
+     * True once every song was seen (a mobile-data break leaves it for later).
+     */
+    private suspend fun recheckKept(songs: List<Song>): Boolean {
+        val suspects = songs.filter { s ->
+            !s.isVideo && EditedLyrics.has(s.videoId) &&
+                (isAutoKept(s.videoId) || (!namesHaveCjk(s) && EditedLyrics.get(s.videoId)?.let(::chineseOnly) == true))
+        }
+        if (suspects.isEmpty()) return true
+        TrackLog.d(TAG, "lyrics: checking ${suspects.size} kept lyrics against the stricter matching")
+        var replaced = 0
+        var dropped = 0
+        for (s in suspects) {
+            if (AppSettings.meteredConnection.value != false) return false
+            val kept = EditedLyrics.get(s.videoId) ?: continue
+            val auto = isAutoKept(s.videoId)
+            val now = withTimeoutOrNull(45_000) { runCatching { lookUp(s) }.getOrNull() }
+            when {
+                now != null && now.map { it.text } != kept.map { it.text } -> {
+                    if (!auto) prefs?.edit()?.putLong(AUTO + s.videoId, System.currentTimeMillis())?.apply()
+                    keep(s, now, upgrade = true)
+                    replaced++
+                    TrackLog.d(TAG, "lyrics: replaced the kept lyrics of '${s.title}'")
+                }
+                now == null && (auto || chineseOnly(kept)) -> {
+                    unkeep(s)
+                    dropped++
+                    TrackLog.d(TAG, "lyrics: dropped the kept lyrics of '${s.title}' (no matching lyrics found)")
+                }
+            }
+            delay(2_500)
+        }
+        TrackLog.d(TAG, "lyrics: kept-lyrics check done — $replaced replaced, $dropped dropped of ${suspects.size}")
+        return true
+    }
+
+    /** Kept lyrics undone everywhere they went: the app, the lyrics folder, the files. */
+    private suspend fun unkeep(song: Song) {
+        EditedLyrics.clear(song.videoId)
+        prefs?.edit()?.remove(AUTO + song.videoId)?.putLong(song.videoId, System.currentTimeMillis())?.apply()
+        runCatching {
+            val dir = folder() ?: return@runCatching
+            val artist = song.artist.split(',').first().trim()
+            val name = "$artist - ${song.title}".replace(UNSAFE, " ").replace(Regex("\\s+"), " ").trim().take(150) + ".lrc"
+            val url = dir + java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+            // Emptied rather than deleted: an empty file reads as none.
+            WebDavClient.putFile(url, ByteArray(0).inputStream(), 0L, "text/plain",
+                AppSettings.webdavUsername.value, AppSettings.webdavPassword.value, overwrite = true)
+        }
+        val ctx = app ?: return
+        val p = prefs ?: return
+        embedLock.withLock {
+            val download = song.localUri ?: Downloads.verifiedSavedUri(song.videoId)
+            if (download != null && p.contains(EMBEDDED + "d:" + song.videoId)) {
+                runCatching { TagWriter.intoDownload(ctx, download, TagWriter.Change(lyrics = "")) }
+                p.edit().remove(EMBEDDED + "d:" + song.videoId).apply()
+            }
+            CoverSources.filesOf(song).take(1).forEach { f ->
+                if (!p.contains(EMBEDDED + "p:" + f.videoId)) return@forEach
+                val o = runCatching { TagWriter.intoPcloud(ctx, f.videoId, TagWriter.Change(lyrics = "")) }.getOrNull()
+                if (o != null && o !is CoverWriter.Outcome.Failed) p.edit().remove(EMBEDDED + "p:" + f.videoId).apply()
+            }
+        }
+    }
+
+    private val CJK = Regex("[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsHangul}]")
+    private val KANA_OR_HANGUL = Regex("[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHangul}]")
+    private val HAN = Regex("\\p{IsHan}")
+
+    private fun namesHaveCjk(s: Song) = CJK.containsMatchIn(s.title) || CJK.containsMatchIn(s.artist) ||
+        CJK.containsMatchIn(s.albumName.orEmpty())
+
+    /** Mostly Han characters and no kana or hangul anywhere: Chinese, not Japanese. */
+    private fun chineseOnly(lines: List<LyricLine>): Boolean {
+        val text = lines.filter { it.text.isNotBlank() }
+        if (text.isEmpty() || text.any { KANA_OR_HANGUL.containsMatchIn(it.text) }) return false
+        return text.count { HAN.containsMatchIn(it.text) } * 2 >= text.size
+    }
+
+    private const val KEY_RECHECKED = "kept_rechecked_v1"
 
     private suspend fun lookUp(s: Song): List<LyricLine>? {
         val seconds = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
