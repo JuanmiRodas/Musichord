@@ -143,7 +143,7 @@ internal class AudioFirst(
                 val at = (now + 1 until live.mediaItemCount).firstOrNull {
                     live.getMediaItemAt(it).mediaId == item.mediaId
                 } ?: return@launch
-                live.replaceMediaItem(at, audio.toMediaItem())
+                live.replaceInQueue(at, audio.toMediaItem())
                 TrackLog.d(TAG, "audio-first: queued '${song.title}' replaced by ${audio.videoId}", about = song.videoId)
             }
         }

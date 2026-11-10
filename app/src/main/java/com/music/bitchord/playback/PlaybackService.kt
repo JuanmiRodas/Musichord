@@ -2411,7 +2411,7 @@ class PlaybackService : MediaLibraryService() {
                 if (!canCrossfade || standbyPlayer == null) {
                     val pos = alignedPosition(activePlayer.currentPosition)
                     val wasPlaying = activePlayer.playWhenReady
-                    activePlayer.replaceMediaItem(currentIndex, targetMediaItem)
+                    activePlayer.replaceInQueue(currentIndex, targetMediaItem)
                     activePlayer.seekTo(currentIndex, pos)
                     if (wasPlaying) activePlayer.play()
                     onSwapCommitted?.invoke()
@@ -2422,7 +2422,8 @@ class PlaybackService : MediaLibraryService() {
 
                 // Build replacement playlist for standby player
                 val newItems = (0 until activePlayer.mediaItemCount).map { i ->
-                    if (i == currentIndex) targetMediaItem else activePlayer.getMediaItemAt(i)
+                    // Keeps the slot's queue identity — see [replaceInQueue].
+                    if (i == currentIndex) targetMediaItem.withQueueIdentityOf(currentItem) else activePlayer.getMediaItemAt(i)
                 }
                 val wasPlaying = activePlayer.playWhenReady
                 val alignedStartPos = alignedPosition(activePlayer.currentPosition)
@@ -2475,12 +2476,12 @@ class PlaybackService : MediaLibraryService() {
                 standbyPlayer.volume = 1f
                 swappingMediaId = null
                 val pos = alignedPosition(activePlayer.currentPosition)
-                activePlayer.replaceMediaItem(currentIndex, targetMediaItem)
+                activePlayer.replaceInQueue(currentIndex, targetMediaItem)
                 activePlayer.seekTo(currentIndex, pos)
                 if (wasPlaying) activePlayer.play()
                 onSwapCommitted?.invoke()
                 onTrackBecameCurrent(
-                    targetMediaItem,
+                    activePlayer.currentMediaItem ?: targetMediaItem,
                     previousEnded = false,
                     reason = Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED,
                     alreadyAudible = true,
@@ -2784,7 +2785,7 @@ class PlaybackService : MediaLibraryService() {
         val position = activePlayer.currentPosition
         val wasPlaying = activePlayer.isPlaying
         swappingMediaId = song.videoId
-        activePlayer.replaceMediaItem(index, song.toDirectYouTubeMediaItem())
+        activePlayer.replaceInQueue(index, song.toDirectYouTubeMediaItem())
         activePlayer.seekTo(index, position)
         if (wasPlaying) activePlayer.play()
         refreshCustomLayouts()
@@ -2821,7 +2822,7 @@ class PlaybackService : MediaLibraryService() {
             isVideoOrigin = if (targetIsVideo) false else song.isVideoOrigin,
         )
 
-        activePlayer.replaceMediaItem(index, targetSong.toMediaItem())
+        activePlayer.replaceInQueue(index, targetSong.toMediaItem())
         activePlayer.seekTo(index, position)
         if (wasPlaying) activePlayer.play()
         refreshCustomLayouts()
@@ -3091,6 +3092,15 @@ class PlaybackService : MediaLibraryService() {
         val snapshot = boundedContextRegistry.snapshot() ?: return
         if (snapshot.contextToken != boundedContextToken) return
         window.extendTo(snapshot.songs.size)
+        // BitChord Audio: a list song that no longer says where it is in its
+        // list leaves the cursor behind it, and topping up from there queues
+        // songs already heard — the same few, again and again. Better to let
+        // the queue run on (and AutoPlay take over) than to guess.
+        val playing = exoPlayer.currentMediaItem
+        if (playing?.queueTier == QueueTier.CONTEXT && QueueShuffle.getCanonicalIndex(playing) == null) {
+            TrackLog.w("BitChord", "queue top-up skipped: the playing list song has lost its place in the list", about = playing.mediaId)
+            return
+        }
         val currentIndex = boundedContextAnchor(exoPlayer) ?: window.currentCanonicalIndex ?: return
         if (window.currentCanonicalIndex != currentIndex) {
             window.jumpTo(currentIndex)
@@ -3868,7 +3878,11 @@ class PlaybackService : MediaLibraryService() {
         }
         TrackLog.d(
             "BitChord",
-            "TIMING track selected: ${mediaItem?.mediaId} (reason=$reason)",
+            "TIMING track selected: ${mediaItem?.mediaId} (reason=$reason)" +
+                // BitChord Audio: where in its album/playlist, and where the list's cursor is.
+                (boundedContextWindow?.let { w ->
+                    " list=${mediaItem?.let(QueueShuffle::getCanonicalIndex) ?: "?"}/${w.canonicalSize} cursor=${w.currentCanonicalIndex}"
+                } ?: ""),
             about = mediaItem?.mediaId,
         )
 
@@ -4326,7 +4340,7 @@ class PlaybackService : MediaLibraryService() {
                             recoveries.remove(mediaId)
                             TrackLog.w("BitChord", "$mediaId won't play; YouTube's copy plays instead", about = mediaId)
                             swappingMediaId = standIn.mediaId
-                            live.replaceMediaItem(live.currentMediaItemIndex, standIn)
+                            live.replaceInQueue(live.currentMediaItemIndex, standIn)
                             live.seekTo(live.currentMediaItemIndex, position)
                             live.prepare()
                             true
@@ -4396,7 +4410,7 @@ class PlaybackService : MediaLibraryService() {
                 val live = this@PlaybackService.player ?: return@withContext
                 if (live.currentMediaItem?.mediaId != mediaId) return@withContext
                 swappingMediaId = mediaId
-                live.replaceMediaItem(live.currentMediaItemIndex, fallback)
+                live.replaceInQueue(live.currentMediaItemIndex, fallback)
                 live.seekTo(live.currentMediaItemIndex, position)
                 live.prepare()
             }
@@ -4460,7 +4474,7 @@ class PlaybackService : MediaLibraryService() {
         // entirely. Letting the transition clear the count is the right answer
         // here — a stream that has never been tried deserves the full budget.
         recoveries.remove(mediaId)
-        player.replaceMediaItem(player.currentMediaItemIndex, restreamed)
+        player.replaceInQueue(player.currentMediaItemIndex, restreamed)
         player.seekTo(player.currentMediaItemIndex, position)
         player.prepare()
         return true
@@ -4542,7 +4556,7 @@ class PlaybackService : MediaLibraryService() {
                 // current item then would rewrite whatever the listener skipped
                 // to instead.
                 if (live.currentMediaItem?.mediaId != mediaId) return@withContext
-                live.replaceMediaItem(live.currentMediaItemIndex, declared)
+                live.replaceInQueue(live.currentMediaItemIndex, declared)
                 live.seekTo(live.currentMediaItemIndex, position)
                 live.prepare()
             }
@@ -5159,7 +5173,7 @@ class PlaybackService : MediaLibraryService() {
                     putBoolean(EXTRA_QUALITY_UPGRADED, true)
                 })
                 .build()
-            player.replaceMediaItem(
+            player.replaceInQueue(
                 player.currentMediaItemIndex,
                 now.item.buildUpon()
                     .setUri(upgradedUri)
@@ -5591,7 +5605,7 @@ class PlaybackService : MediaLibraryService() {
             }
             swappingMediaId = mediaId
             val abandoned = item.localConfiguration?.uri
-            player.replaceMediaItem(
+            player.replaceInQueue(
                 player.currentMediaItemIndex,
                 item.buildUpon()
                     .setUri(previousUri)
@@ -6381,6 +6395,16 @@ class PlaybackService : MediaLibraryService() {
         if (restoredWindow.canonicalSize != projected.context.songs.size) return false
         val restoredCurrent = restoredWindow.currentCanonicalIndex ?: return false
         if (projected.currentIndex !in projected.entries.indices) return false
+        // BitChord Audio: saved while the playing list song had lost its place
+        // (see [replaceInQueue]) — the saved cursor is behind it, and rebuilding
+        // from there would replay songs already heard. The exact saved queue
+        // (LastPlayed) is used instead.
+        persisted.entries.getOrNull(persisted.currentIndex)?.let { saved ->
+            if (saved.song.queueTier == QueueTier.CONTEXT && saved.canonicalIndex == null) {
+                TrackLog.w("BitChord", "saved list position is stale; restoring the saved queue as it was", about = saved.song.videoId)
+                return false
+            }
+        }
 
         val restoredContext = runCatching {
             boundedContextRegistry.restore(projected.context)

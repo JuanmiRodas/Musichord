@@ -178,7 +178,7 @@ internal class OwnFirst(
                 val at = (live.currentMediaItemIndex + 1 until live.mediaItemCount).firstOrNull {
                     live.getMediaItemAt(it).mediaId == item.mediaId
                 } ?: return@launch
-                live.replaceMediaItem(at, file.toMediaItem())
+                live.replaceInQueue(at, file.toMediaItem())
                 TrackLog.d(TAG, "own-first: queued '${song.title}' replaced by your file", about = song.videoId)
             }
         }
