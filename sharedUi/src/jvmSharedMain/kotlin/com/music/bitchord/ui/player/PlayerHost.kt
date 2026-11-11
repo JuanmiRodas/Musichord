@@ -87,9 +87,12 @@ interface PlayerHost {
     val videoModeTranslation: StateFlow<Boolean> get() = NoVideoMode
     fun setVideoModeTranslation(on: Boolean) = Unit
 
-    /** BitChord Audio: the video cropped into the album frame. */
-    val videoModeSquare: StateFlow<Boolean> get() = NoVideoMode
-    fun setVideoModeSquare(on: Boolean) = Unit
+    /** BitChord Audio: how the player frames the video — 0 album square, 1 screen edges, 2 its own shape. */
+    val videoModeFrame: StateFlow<Int> get() = NoVideoFrame
+    fun setVideoModeFrame(value: Int) = Unit
+
+    /** BitChord Audio: video mode's lyrics size, as a scale. */
+    val videoModeLyricsScale: StateFlow<Float> get() = NoVideoScale
 
     /** BitChord Audio: the music video's own sound in place of the song's. */
     val videoModeOriginalAudio: StateFlow<Boolean> get() = NoVideoMode
@@ -271,6 +274,8 @@ internal fun MusicVideoSurface(
 
 private val NoVideoMode = MutableStateFlow(false)
 private val NoVideoOn = MutableStateFlow(true)
+private val NoVideoFrame = MutableStateFlow(2)
+private val NoVideoScale = MutableStateFlow(1f)
 private val NoVideoReady = MutableStateFlow<Set<String>>(emptySet())
 private val NoVideoLooking = MutableStateFlow<String?>(null)
 

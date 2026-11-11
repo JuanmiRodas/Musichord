@@ -1630,4 +1630,9 @@
     </plurals>
     <string name="video_mode_original_audio">Original audio of the music video</string>
     <string name="video_mode_wrong">Wrong video</string>
+    <string name="video_lyrics_size">Video mode lyrics size</string>
+    <string name="size_small">Small</string>
+    <string name="size_medium">Medium</string>
+    <string name="size_large">Large</string>
+    <string name="size_extra_large">Extra large</string>
 </resources>

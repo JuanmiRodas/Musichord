@@ -1060,6 +1060,23 @@ fun SettingsScreen(
                     onClick = { showHomeSections = true },
                 )
             }
+            // BitChord Audio: the size of video mode's lyrics; a tap steps through the sizes.
+            val videoLyricsTitle = stringResource(R.string.video_lyrics_size)
+            row(videoLyricsTitle, "video", "lyrics", "letra", "size", "tamaño", "font") {
+                val scale by com.music.bitchord.data.video.VideoMode.lyricsScale.collectAsStateWithLifecycle()
+                val names = listOf(
+                    stringResource(R.string.size_small), stringResource(R.string.size_medium),
+                    stringResource(R.string.size_large), stringResource(R.string.size_extra_large),
+                )
+                val scales = com.music.bitchord.data.video.VideoMode.LYRICS_SCALES
+                val at = scales.indexOfFirst { kotlin.math.abs(it - scale) < 0.01f }.coerceAtLeast(1)
+                SettingsRow(
+                    icon = SfIcons.Tune,
+                    title = videoLyricsTitle,
+                    subtitle = names[at],
+                    onClick = { com.music.bitchord.data.video.VideoMode.setLyricsScale(scales[(at + 1) % scales.size]) },
+                )
+            }
             val preferMusicOnlyTitle = stringResource(R.string.prefer_music_only)
             row(preferMusicOnlyTitle, "video", "audio", "music video", "convert", "song") {
                 SettingsRow(

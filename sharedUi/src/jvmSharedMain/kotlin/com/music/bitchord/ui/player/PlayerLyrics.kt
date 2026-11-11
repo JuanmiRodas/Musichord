@@ -3456,9 +3456,11 @@ internal fun VideoKaraokeLyrics(
     translation: List<LyricLine>? = null,
     /** BitChord Audio: just the sung line (and its [translation], if given). */
     singleLine: Boolean = false,
+    /** BitChord Audio: the size chosen in Settings, as a scale. */
+    scale: Float = 1f,
 ) {
     if (translation != null || singleLine) {
-        VideoLyricWithTranslation(lines, translation, trackKey, playhead, isPlaying, compact, modifier)
+        VideoLyricWithTranslation(lines, translation, trackKey, playhead, isPlaying, compact, modifier, scale)
         return
     }
     val sung = remember(lines) { lines.filter { !it.isGap && it.text.isNotBlank() && lines.any { l -> l.timeMs > 0L } } }
@@ -3469,8 +3471,8 @@ internal fun VideoKaraokeLyrics(
     }
     val page = (index.coerceAtLeast(0) / 2) * 2
     val base = MaterialTheme.typography.headlineLarge.copy(
-        fontSize = if (compact) 17.sp else 27.sp,
-        lineHeight = if (compact) 22.sp else 34.sp,
+        fontSize = (if (compact) 17f else 27f).times(scale).sp,
+        lineHeight = (if (compact) 22f else 34f).times(scale).sp,
         fontWeight = FontWeight.ExtraBold,
         textAlign = TextAlign.Center,
         shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 8f),
@@ -3529,17 +3531,20 @@ private fun VideoLyricWithTranslation(
     isPlaying: Boolean,
     compact: Boolean,
     modifier: Modifier,
+    scale: Float = 1f,
 ) {
     if (lines.none { it.timeMs > 0L }) return
     val clock = rememberLyricClock(trackKey, playhead, isPlaying)
     val index by remember(lines) {
         derivedStateOf { lines.indexOfLast { it.timeMs <= clock.longValue && !it.isGap && it.text.isNotBlank() } }
     }
+    // Both lines from the left: a word-timed line sweeps from its start, and
+    // a centred translation over a left-swept line read as two columns.
     val base = MaterialTheme.typography.headlineLarge.copy(
-        fontSize = if (compact) 17.sp else 27.sp,
-        lineHeight = if (compact) 22.sp else 34.sp,
+        fontSize = (if (compact) 17f else 27f).times(scale).sp,
+        lineHeight = (if (compact) 22f else 34f).times(scale).sp,
         fontWeight = FontWeight.ExtraBold,
-        textAlign = TextAlign.Center,
+        textAlign = TextAlign.Start,
         shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 8f),
     )
     val line = lines.getOrNull(index.coerceAtLeast(0))?.takeIf { index >= 0 }
@@ -3555,9 +3560,22 @@ private fun VideoLyricWithTranslation(
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.Start,
     ) {
         androidx.compose.runtime.key(index) {
+            // The translation over the sung line, small.
+            if (translation != null) Text(
+                text = translated ?: "",
+                style = base.copy(
+                    fontSize = base.fontSize * 0.72f,
+                    lineHeight = base.lineHeight * 0.75f,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = Color.White.copy(alpha = 0.8f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
             when {
                 line == null -> Spacer(Modifier.height(base.lineHeight.value.dp))
                 line.isWordSynced -> SweptLyricLine(
@@ -3580,18 +3598,6 @@ private fun VideoLyricWithTranslation(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (translation != null) Text(
-                text = translated ?: "",
-                style = base.copy(
-                    fontSize = base.fontSize * 0.72f,
-                    lineHeight = base.lineHeight * 0.75f,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-                color = Color.White.copy(alpha = 0.8f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
         }
     }
 }

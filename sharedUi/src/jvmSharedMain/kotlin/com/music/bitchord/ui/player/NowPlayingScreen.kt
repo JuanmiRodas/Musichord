@@ -70,6 +70,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.MusicVideo
@@ -954,7 +955,11 @@ fun NowPlayingScreen(
     val videoModeLooking by PlayerPlatform.host.videoModeLooking.collectAsStateWithLifecycle()
     val videoOverlay = videoModeOn && song.videoId in videoModeReady
     val videoMode = showsMusicVideo(song) || videoOverlay
-    val videoModeSquare by PlayerPlatform.host.videoModeSquare.collectAsStateWithLifecycle()
+    val videoModeFrame by PlayerPlatform.host.videoModeFrame.collectAsStateWithLifecycle()
+    val videoModeSquare = videoModeFrame == 0
+    // BitChord Audio: the picture out to the screen's edges, at the album square's height.
+    val videoEdge = videoOverlay && videoModeFrame == 1
+    val videoLyricsScale by PlayerPlatform.host.videoModeLyricsScale.collectAsStateWithLifecycle()
     val videoModeLyrics by PlayerPlatform.host.videoModeLyrics.collectAsStateWithLifecycle()
     val videoModeOriginalAudio by PlayerPlatform.host.videoModeOriginalAudio.collectAsStateWithLifecycle()
     val videoModeTranslation by PlayerPlatform.host.videoModeTranslation.collectAsStateWithLifecycle()
@@ -2069,6 +2074,7 @@ fun NowPlayingScreen(
                                 durationMs = durationMs,
                                 compact = false,
                                 modifier = m,
+                                scale = videoLyricsScale,
                                 translation = if (withTranslation) lyricsTranslation.translatedLines else null,
                             )
                         }
@@ -3682,6 +3688,10 @@ fun NowPlayingScreen(
                                 Box(
                                     modifier = Modifier
                                         .offset {
+                                            // BitChord Audio: out to the player's edges, at the square's height.
+                                            if (videoEdge && playerBounds.width > 0) {
+                                                return@offset IntOffset(-(playerBounds.width - boxWidthPx) / 2, artTop().roundToPx())
+                                            }
                                             if (squareVideo) {
                                                 val side = artSize().roundToPx()
                                                 return@offset IntOffset(
@@ -3694,8 +3704,17 @@ fun NowPlayingScreen(
                                             IntOffset(0, centre - height / 2)
                                         }
                                         .layout { measurable, _ ->
-                                            val width = if (squareVideo) artSize().roundToPx() else boxWidthPx
-                                            val height = if (squareVideo) width else (boxWidthPx / aspect).roundToInt()
+                                            val edge = videoEdge && playerBounds.width > 0
+                                            val width = when {
+                                                edge -> playerBounds.width
+                                                squareVideo -> artSize().roundToPx()
+                                                else -> boxWidthPx
+                                            }
+                                            val height = when {
+                                                edge -> artSize().roundToPx()
+                                                squareVideo -> width
+                                                else -> (boxWidthPx / aspect).roundToInt()
+                                            }
                                             val placeable = measurable.measure(Constraints.fixed(width, height))
                                             layout(width, height) { placeable.placeRelative(0, 0) }
                                         }
@@ -3717,7 +3736,7 @@ fun NowPlayingScreen(
                                         VideoLoadingBackdrop(
                                             Modifier
                                                 .fillMaxSize()
-                                                .clip(RoundedCornerShape(10.dp)),
+                                                .clip(RoundedCornerShape(if (videoEdge) 0.dp else 10.dp)),
                                             artRequest = art.request.takeIf { videoOverlay },
                                             canvas = canvasAny.takeIf { videoOverlay },
                                             isPlaying = isPlaying,
@@ -3725,11 +3744,11 @@ fun NowPlayingScreen(
                                     }
                                     MusicVideoSurface(
                                         videoId = song.videoId,
-                                        fit = !squareVideo,
+                                        fit = !squareVideo && !videoEdge,
                                         onRenderedChanged = { videoRendered = it },
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .clip(RoundedCornerShape(10.dp)),
+                                            .clip(RoundedCornerShape(if (videoEdge) 0.dp else 10.dp)),
                                     )
                                     // BitChord Audio: video mode's lyrics, over the bottom of the picture.
                                     if (videoOverlay && syncedLyricsEnabled && videoModeLyrics) {
@@ -3752,6 +3771,7 @@ fun NowPlayingScreen(
                                                 durationMs = durationMs,
                                                 compact = true,
                                                 modifier = Modifier.fillMaxWidth(),
+                                                scale = videoLyricsScale,
                                                 translation = if (withTranslation) lyricsTranslation.translatedLines else null,
                                                 singleLine = true,
                                             )
@@ -3779,10 +3799,19 @@ fun NowPlayingScreen(
                                         onOpenQuality = { showVideoQuality = true },
                                         extras = {
                                             if (videoOverlay) {
+                                                // Album square → screen edges → own shape → album square.
                                                 VideoChromeButton(
-                                                    icon = if (videoModeSquare) Icons.Rounded.Crop169 else Icons.Rounded.CropSquare,
+                                                    icon = when (videoModeFrame) {
+                                                        0 -> Icons.Rounded.CropSquare
+                                                        1 -> Icons.Rounded.Fullscreen
+                                                        else -> Icons.Rounded.Crop169
+                                                    },
                                                     active = false,
-                                                    onClick = { PlayerPlatform.host.setVideoModeSquare(!videoModeSquare) },
+                                                    onClick = {
+                                                        PlayerPlatform.host.setVideoModeFrame(
+                                                            when (videoModeFrame) { 0 -> 1; 1 -> 2; else -> 0 },
+                                                        )
+                                                    },
                                                 )
                                                 VideoChromeButton(
                                                     icon = if (videoModeOriginalAudio) Icons.Rounded.MusicVideo else Icons.Rounded.MusicNote,

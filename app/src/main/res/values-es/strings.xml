@@ -1718,4 +1718,9 @@
     </plurals>
     <string name="video_mode_original_audio">Audio original del videoclip</string>
     <string name="video_mode_wrong">Vídeo incorrecto</string>
+    <string name="video_lyrics_size">Tamaño de la letra en modo vídeo</string>
+    <string name="size_small">Pequeño</string>
+    <string name="size_medium">Mediano</string>
+    <string name="size_large">Grande</string>
+    <string name="size_extra_large">Muy grande</string>
 </resources>

@@ -90,7 +90,8 @@ object VideoMode {
         app = context.applicationContext
         _on.value = p.getBoolean(KEY_ON, false)
         _lyrics.value = p.getBoolean("lyrics", true)
-        _square.value = p.getBoolean("square", false)
+        _frame.value = if (p.contains("frame")) p.getInt("frame", 2) else if (p.getBoolean("square", false)) 0 else 2
+        _lyricsScale.value = p.getFloat("lyrics_scale", 1f)
         _translation.value = p.getBoolean("translation", false)
     }
 
@@ -112,10 +113,16 @@ object VideoMode {
     val translation: StateFlow<Boolean> = _translation.asStateFlow()
     fun setTranslation(on: Boolean) { _translation.value = on; prefs?.edit()?.putBoolean("translation", on)?.apply() }
 
-    private val _square = MutableStateFlow(false)
-    /** The video cropped into the album frame, rather than at its own shape. */
-    val square: StateFlow<Boolean> = _square.asStateFlow()
-    fun setSquare(on: Boolean) { _square.value = on; prefs?.edit()?.putBoolean("square", on)?.apply() }
+    /** How the player frames the video: 0 in the album square, 1 to the screen's edges, 2 at its own shape. */
+    private val _frame = MutableStateFlow(2)
+    val frame: StateFlow<Int> = _frame.asStateFlow()
+    fun setFrame(value: Int) { _frame.value = value.mod(3); prefs?.edit()?.putInt("frame", _frame.value)?.apply() }
+
+    /** The size of video mode's lyrics, as a scale of the default. */
+    val LYRICS_SCALES = listOf(0.85f, 1f, 1.2f, 1.4f)
+    private val _lyricsScale = MutableStateFlow(1f)
+    val lyricsScale: StateFlow<Float> = _lyricsScale.asStateFlow()
+    fun setLyricsScale(value: Float) { _lyricsScale.value = value; prefs?.edit()?.putFloat("lyrics_scale", value)?.apply() }
 
     private val _originalAudio = MutableStateFlow(false)
     /** The music video's own sound, in place of the song's (not remembered). */
