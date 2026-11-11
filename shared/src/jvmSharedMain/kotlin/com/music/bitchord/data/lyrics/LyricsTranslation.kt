@@ -230,10 +230,10 @@ object LyricsTranslation {
      * the web romanizer below.
      */
     @Volatile
+    var localRomanizer: ((List<String>) -> List<String>?)? = null
+
     /** BitChord Audio: a word-timed line's romaji as timed words (set by the app). */
     @Volatile var localTimedRomanizer: ((LyricLine) -> List<LyricWord>?)? = null
-
-    var localRomanizer: ((List<String>) -> List<String>?)? = null
 
     suspend fun romanize(
         trackId: String,
