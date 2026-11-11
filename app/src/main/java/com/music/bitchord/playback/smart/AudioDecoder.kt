@@ -121,6 +121,44 @@ object AudioDecoder {
     }
 
     /**
+     * BitChord Audio: as [decodeRegion], but averaged down to about
+     * [targetRate] as it decodes — a whole song for analysis in a few MB
+     * rather than the hundred-odd a full-rate float copy takes.
+     */
+    fun decodeDownsampled(
+        source: MediaDataSource,
+        startSeconds: Double,
+        endSeconds: Double,
+        targetRate: Int,
+    ): Pair<Pcm, Double>? {
+        val out = ArrayList<FloatArray>()
+        var step = 0
+        var acc = 0f
+        var count = 0
+        var pending = FloatArray(8192)
+        var filled = 0
+        val decoded = decodeRaw(source, startSeconds, endSeconds, { false }) { buffer, info, channels, rate ->
+            if (step == 0) step = max(1, (rate.toDouble() / targetRate).toInt())
+            for (v in toMono(buffer, info, channels)) {
+                acc += v
+                if (++count == step) {
+                    if (filled == pending.size) {
+                        out += pending
+                        pending = FloatArray(8192)
+                        filled = 0
+                    }
+                    pending[filled++] = acc / step
+                    acc = 0f
+                    count = 0
+                }
+            }
+        } ?: return null
+        out += pending.copyOf(filled)
+        val rate = decoded.first / max(1, step)
+        return Pcm(flatten(out), rate) to decoded.second
+    }
+
+    /**
      * As [decodeRegion], but keeping the two channels apart.
      *
      * Only the vocal front end needs this: open-unmix was trained on stereo,

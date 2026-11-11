@@ -200,6 +200,7 @@ object MusicVideoEngine {
     val quality: StateFlow<MusicVideoQualityUi> = _quality.asStateFlow()
 
     private var prefs: android.content.SharedPreferences? = null
+    private var appContext: Context? = null
 
     /** What the loaded stream was asked for, so a failed high one can step down once. */
     private var loadedCap = 0
@@ -309,6 +310,7 @@ object MusicVideoEngine {
         surfaces.removeAll { it.view === view }
         surfaces += Surface(view, priority)
         val app = view.context.applicationContext
+        appContext = app
         if (prefs == null) {
             prefs = app.getSharedPreferences("music_video", Context.MODE_PRIVATE).also { stored ->
                 val held = stored.getInt(KEY_QUALITY, 0).takeIf { it > 0 }
@@ -421,6 +423,9 @@ object MusicVideoEngine {
         if (ref.key == forId) return audioMs
         val vm = com.music.bitchord.data.video.VideoMode
         vm.timeMap(forId, ref)?.let { return it.map(audioMs) }
+        // Measured: the song's notes found in the video's own sound — a live
+        // take, another cut (see [VideoAligner]).
+        com.music.bitchord.playback.smart.VideoAligner.timeline(forId, ref.key)?.let { return it.map(audioMs) }
         // No pairing from YouTube: the song runs through the video minus the
         // parts SponsorBlock marks as not music (intros, skits, dialogue).
         if (ref.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) return vm.skipNonMusic(ref.id, audioMs)
@@ -546,6 +551,18 @@ object MusicVideoEngine {
             } else picture
             if (stream.aspect > 0f) _aspect.value = stream.aspect
             _quality.value = _quality.value.copy(heights = stream.heights, activeHeight = stream.height)
+            // BitChord Audio: video mode's picture for another recording than
+            // the one playing, with no pairing from YouTube: measure the sync.
+            val forId = loadedFor
+            val itsSound = stream.audioUrl
+            val ctx = appContext
+            if (forId != null && forId != videoId && itsSound != null && ctx != null &&
+                com.music.bitchord.data.video.VideoMode.timeMap(forId, ref) == null
+            ) {
+                controller?.currentMediaItem?.toSong()?.takeIf { it.videoId == forId }?.let { song ->
+                    com.music.bitchord.playback.smart.VideoAligner.request(ctx, song, videoId, itsSound, stream.headers)
+                }
+            }
             loadedProfile = stream.profileId
             val start = videoPosition(controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
             exo.setMediaSource(source, start + seekLeadMs)

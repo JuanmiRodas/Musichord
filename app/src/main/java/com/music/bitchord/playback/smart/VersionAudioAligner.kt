@@ -267,7 +267,7 @@ object VersionAudioAligner {
      * the same order when it declares the head ready, so what the wait calls
      * ready is what gets opened here.
      */
-    private fun openDataSource(context: Context, song: Song): MediaDataSource? {
+    internal fun openDataSource(context: Context, song: Song): MediaDataSource? {
         song.localUri?.let { local ->
             val uri = Uri.parse(local)
             if (LocalAudioSource.isLocal(uri)) {
