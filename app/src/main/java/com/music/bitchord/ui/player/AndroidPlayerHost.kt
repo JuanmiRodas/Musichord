@@ -243,6 +243,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     ): LyricsRomanizationResult {
         // BitChord Audio: Japanese read as words on the device; the rest goes
         // to the web romanizer as before.
+        LyricsTranslation.localTimedRomanizer = { line -> com.music.bitchord.data.lyrics.JapaneseRomanizer.timedWords(line) }
         LyricsTranslation.localRomanizer = { texts ->
             if (com.music.bitchord.data.lyrics.JapaneseRomanizer.isJapanese(texts)) {
                 texts.map { com.music.bitchord.data.lyrics.JapaneseRomanizer.romanize(it) ?: return@map null }

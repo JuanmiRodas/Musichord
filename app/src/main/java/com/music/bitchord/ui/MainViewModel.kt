@@ -485,6 +485,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // BitChord Audio: also by the romaji / Japanese spelling of the names.
             val lookupStarted = System.currentTimeMillis()
             com.music.bitchord.data.TrackLog.d("Lyrics", "lyrics: looking up '$title' · '$artist'")
+            // BitChord Audio: where a lookup that never ends got stuck.
+            var stage = "names"
+            val watchdog = launch {
+                kotlinx.coroutines.delay(30_000)
+                if (!_lyricsChecked.value && lyricsGeneration == generation) {
+                    com.music.bitchord.data.TrackLog.w("Lyrics", "lyrics for '$title' still looking after 30 s (at: $stage)")
+                }
+            }
             // BitChord Audio: "Unknown artist" is nobody's name — the file's, or yours.
             val lookupArtist = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { com.music.bitchord.data.lyrics.LyricNames.lookupArtist(videoId, title, artist) }.getOrDefault(artist)
@@ -508,6 +516,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 artists = nameQueries.map { it.artist }.distinct(),
             )
             val ownFirst = AppSettings.ownLyricsFirst.value && keptAuto == null
+            stage = "your lyrics files"
             if (ownFirst) {
                 ownLyrics()?.let { own ->
                     _lyrics.value = own
@@ -520,6 +529,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // only needed to *match* a track against a stranger's database, and
             // nothing is being matched here — these lyrics were written into
             // this exact file, for this exact recording.
+            stage = "lyrics in the file"
             if (keptAuto == null && localUri != null && com.music.bitchord.data.lyrics.BadLyrics.OWN !in flaggedLyrics) {
                 EmbeddedLyrics.forUri(getApplication(), localUri)?.let { embedded ->
                     _lyrics.value = embedded
@@ -542,6 +552,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // (word sync > line sync > none; a Japanese song's own romaji first),
             // not merely the first to answer. Shown as soon as something is found
             // and upgraded when something better comes in. See LyricsRepository.best.
+            stage = "the lyrics services"
             val best = LyricsRepository.best(
                 videoId = videoId,
                 spellings = nameQueries.map { LyricsRepository.Spelling(it.title, it.artist) },

@@ -155,7 +155,7 @@ object LyricsTranslation {
                 Result.SameLanguage(cached.sourceLanguage)
             } else {
                 Result.Translated(
-                    lines = rebuild(lines, slots, cached.texts),
+                    lines = lineTimed(rebuild(lines, slots, cached.texts)),
                     sourceLanguage = cached.sourceLanguage,
                     fromCache = true,
                 )
@@ -216,7 +216,7 @@ object LyricsTranslation {
             Result.SameLanguage(source)
         } else {
             Result.Translated(
-                lines = rebuild(lines, slots, translated),
+                lines = lineTimed(rebuild(lines, slots, translated)),
                 sourceLanguage = source,
                 fromCache = false,
             )
@@ -230,6 +230,9 @@ object LyricsTranslation {
      * the web romanizer below.
      */
     @Volatile
+    /** BitChord Audio: a word-timed line's romaji as timed words (set by the app). */
+    @Volatile var localTimedRomanizer: ((LyricLine) -> List<LyricWord>?)? = null
+
     var localRomanizer: ((List<String>) -> List<String>?)? = null
 
     suspend fun romanize(
@@ -248,8 +251,16 @@ object LyricsTranslation {
         localRomanizer?.let { local ->
             val texts = withContext(Dispatchers.Default) { runCatching { local(slots.map { it.text }) }.getOrNull() }
             if (texts != null && texts.size == slots.size) {
+                val timed = localTimedRomanizer
                 return RomanizationResult.Romanized(
-                    lines = rebuild(lines, slots, texts),
+                    // BitChord Audio: word-timed lines get romaji words timed by
+                    // the Japanese they read, rather than a projected sweep.
+                    lines = rebuild(lines, slots, texts).mapIndexed { i, r ->
+                        val words = timed?.let { f -> runCatching { f(lines[i]) }.getOrNull() }
+                        val fits = words != null && lines[i].isWordSynced &&
+                            words.joinToString("") { it.text }.replace(" ", "") == r.text.replace(" ", "")
+                        if (fits) r.copy(words = words!!, timingSource = null) else r
+                    },
                     sourceLanguage = "ja",
                     fromCache = false,
                 )
@@ -527,6 +538,19 @@ object LyricsTranslation {
                 }
             }
         })
+    }
+
+    /**
+     * BitChord Audio: a translation lit line by line. Its words aren't the
+     * sung words — swept by the original's timing, it filled in out of step
+     * with the singing.
+     */
+    private fun lineTimed(lines: List<LyricLine>): List<LyricLine> = lines.map { l ->
+        l.copy(
+            words = emptyList(),
+            timingSource = null,
+            background = l.background?.copy(words = emptyList(), timingSource = null),
+        )
     }
 
     private fun rebuild(
