@@ -1716,4 +1716,5 @@
         <item quantity="one">Te gusta %1$d canción de %2$s</item>
         <item quantity="other">Te gustan %1$d canciones de %2$s</item>
     </plurals>
+    <string name="video_mode_original_audio">Audio original del videoclip</string>
 </resources>

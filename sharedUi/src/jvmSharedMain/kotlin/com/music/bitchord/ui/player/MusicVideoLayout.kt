@@ -1,5 +1,10 @@
 package com.music.bitchord.ui.player
 
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.MusicVideo
+import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -88,6 +93,13 @@ internal fun FullscreenVideoPlayer(
     modifier: Modifier = Modifier,
     /** BitChord Audio: video mode's karaoke lyrics, over the bottom of the picture. */
     lyrics: (@Composable (Modifier) -> Unit)? = null,
+    /** BitChord Audio: video mode's buttons — lyrics on/off, the video's own sound. */
+    lyricsOn: Boolean = true,
+    onToggleLyrics: (() -> Unit)? = null,
+    originalAudio: Boolean = false,
+    onToggleOriginalAudio: (() -> Unit)? = null,
+    /** BitChord Audio: a double tap's skip, ±10 s. */
+    onSeekBy: ((Long) -> Unit)? = null,
 ) {
     HideSystemBars(true)
     var controlsShown by remember { mutableStateOf(true) }
@@ -100,14 +112,30 @@ internal fun FullscreenVideoPlayer(
         }
     }
 
+    // BitChord Audio: which side a double tap skipped, for its little "10 s" mark.
+    var skipped by remember { mutableStateOf<Pair<Int, Long>?>(null) }
+    LaunchedEffect(skipped) {
+        if (skipped != null) {
+            delay(650)
+            skipped = null
+        }
+    }
+    val seekBy by rememberUpdatedState(onSeekBy)
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { controlsShown = !controlsShown },
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { controlsShown = !controlsShown },
+                    onDoubleTap = { at ->
+                        val seek = seekBy ?: return@detectTapGestures
+                        val forward = at.x > size.width / 2f
+                        seek(if (forward) 10_000L else -10_000L)
+                        skipped = (if (forward) 1 else -1) to System.nanoTime()
+                    },
+                )
+            },
     ) {
         // Black with a spinner until the picture's first frame lands.
         if (!rendered) VideoLoadingBackdrop(Modifier.fillMaxSize())
@@ -117,19 +145,51 @@ internal fun FullscreenVideoPlayer(
             onRenderedChanged = onRenderedChanged,
             modifier = Modifier.fillMaxSize(),
         )
-        lyrics?.let { content ->
+        if (lyrics != null) {
             // Lifted clear of the scrubber while the controls are up.
             val lift by androidx.compose.animation.core.animateDpAsState(
-                targetValue = if (controlsShown) 84.dp else 24.dp,
+                targetValue = if (controlsShown) 84.dp else 22.dp,
                 label = "videoLyricsLift",
             )
-            content(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.displayCutout)
-                    .padding(start = 56.dp, end = 56.dp, bottom = lift),
-            )
+            AnimatedVisibility(
+                visible = lyricsOn,
+                enter = fadeIn(tween(260)),
+                exit = fadeOut(tween(260)),
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .videoLyricsScrim()
+                        .padding(top = 56.dp),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    lyrics(
+                        Modifier
+                            .fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.displayCutout)
+                            .padding(start = 72.dp, end = 72.dp, bottom = lift),
+                    )
+                }
+            }
+        }
+        // BitChord Audio: where a double tap skipped to.
+        skipped?.let { (side, _) ->
+            Box(
+                modifier = Modifier
+                    .align(if (side > 0) Alignment.CenterEnd else Alignment.CenterStart)
+                    .padding(horizontal = 64.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    text = if (side > 0) "10 s ›" else "‹ 10 s",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
 
         AnimatedVisibility(
@@ -184,7 +244,23 @@ internal fun FullscreenVideoPlayer(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    VideoCornerControls(fullscreen = true, onToggleFullscreen = onExitFullscreen, onOpenQuality = onOpenQuality)
+                    VideoCornerControls(
+                        fullscreen = true,
+                        onToggleFullscreen = onExitFullscreen,
+                        onOpenQuality = onOpenQuality,
+                        extras = {
+                            onToggleOriginalAudio?.let {
+                                VideoChromeButton(
+                                    icon = if (originalAudio) Icons.Rounded.MusicVideo else Icons.Rounded.MusicNote,
+                                    active = originalAudio,
+                                    onClick = it,
+                                )
+                            }
+                            onToggleLyrics?.let {
+                                VideoChromeButton(icon = Icons.Rounded.Subtitles, active = lyricsOn, onClick = it)
+                            }
+                        },
+                    )
                 }
                 Box(
                     Modifier
@@ -233,12 +309,15 @@ internal fun VideoCornerControls(
     onToggleFullscreen: () -> Unit,
     onOpenQuality: () -> Unit,
     modifier: Modifier = Modifier,
+    /** BitChord Audio: video mode's own buttons, before the rest. */
+    extras: @Composable () -> Unit = {},
 ) {
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        extras()
         VideoQualityBox(onClick = onOpenQuality)
         Box(
             modifier = Modifier
@@ -386,5 +465,26 @@ private fun QualityRow(name: String, detail: String?, active: Boolean, onSelect:
                 )
             }
         }
+    }
+}
+
+
+/** BitChord Audio: one of video mode's buttons on the picture, lit while [active]. */
+@Composable
+internal fun VideoChromeButton(icon: androidx.compose.ui.graphics.vector.ImageVector, active: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (active) Color.White.copy(alpha = 0.32f) else Color.Black.copy(alpha = 0.38f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = if (active) 1f else 0.7f),
+            modifier = Modifier.size(19.dp),
+        )
     }
 }

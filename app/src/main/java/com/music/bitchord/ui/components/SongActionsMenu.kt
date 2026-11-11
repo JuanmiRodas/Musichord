@@ -163,6 +163,9 @@ fun SongActionsMenu(
      * [com.music.bitchord.playback.PlaybackService.smoothSwapCurrentTrackVersion].
      */
     onToggleAudioVersion: (() -> Unit)? = null,
+    /** BitChord Audio: in video mode, the music video's own sound on or off (null: not offered). */
+    onToggleVideoSound: (() -> Unit)? = null,
+    videoSoundOn: Boolean = false,
     /** Which cut is playing now, so the row can offer the other one. */
     isAudioVersion: Boolean = false,
     /**
@@ -253,7 +256,7 @@ fun SongActionsMenu(
         // a substituted copy, the other for a track held on YouTube's own —
         // and between them they are the whole of the choice, which is why they
         // sit in the same group.
-        if (onRollbackToOriginal != null || onUpgradeQuality != null || onToggleAudioVersion != null || onChooseSource != null) {
+        if (onRollbackToOriginal != null || onUpgradeQuality != null || onToggleAudioVersion != null || onChooseSource != null || onToggleVideoSound != null) {
             if (startsGroup()) IosMenuSeparator()
             (onRollbackToOriginal ?: onUpgradeQuality)?.let {
                 ActionRow(
@@ -292,6 +295,15 @@ fun SongActionsMenu(
                     },
                     accent = palette.accent,
                     enabled = isAudioVersion || !audioVersionMissing,
+                    onClick = it,
+                )
+            }
+            onToggleVideoSound?.let {
+                ActionRow(
+                    icon = SfIcons.Video,
+                    label = stringResource(R.string.video_mode_original_audio),
+                    value = stringResource(if (videoSoundOn) R.string.video_mode_on else R.string.video_mode_off),
+                    accent = palette.accent,
                     onClick = it,
                 )
             }

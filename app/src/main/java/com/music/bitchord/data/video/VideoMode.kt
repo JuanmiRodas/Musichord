@@ -88,11 +88,89 @@ object VideoMode {
         prefs = p
         app = context.applicationContext
         _on.value = p.getBoolean(KEY_ON, false)
+        _lyrics.value = p.getBoolean("lyrics", true)
+        _square.value = p.getBoolean("square", false)
     }
 
     fun setOn(value: Boolean) {
         _on.value = value
+        if (!value) _originalAudio.value = false
         prefs?.edit()?.putBoolean(KEY_ON, value)?.apply()
+    }
+
+    // ── What the video screen shows ───────────────────────────────────────
+
+    private val _lyrics = MutableStateFlow(true)
+    /** Lyrics over the video (the fullscreen and player buttons). */
+    val lyrics: StateFlow<Boolean> = _lyrics.asStateFlow()
+    fun setLyrics(on: Boolean) { _lyrics.value = on; prefs?.edit()?.putBoolean("lyrics", on)?.apply() }
+
+    private val _square = MutableStateFlow(false)
+    /** The video cropped into the album frame, rather than at its own shape. */
+    val square: StateFlow<Boolean> = _square.asStateFlow()
+    fun setSquare(on: Boolean) { _square.value = on; prefs?.edit()?.putBoolean("square", on)?.apply() }
+
+    private val _originalAudio = MutableStateFlow(false)
+    /** The music video's own sound, in place of the song's (not remembered). */
+    val originalAudio: StateFlow<Boolean> = _originalAudio.asStateFlow()
+    fun setOriginalAudio(on: Boolean) { _originalAudio.value = on }
+
+    // ── The search, remembered ────────────────────────────────────────────
+
+    /** What was last searched for [song]'s video, else for any. */
+    fun lastQuery(song: Song): String? =
+        prefs?.getString("q:id:" + song.videoId, null)
+
+    fun rememberQuery(song: Song, query: String) {
+        prefs?.edit()?.putString("q:id:" + song.videoId, query)?.apply()
+    }
+
+    // ── SponsorBlock: the parts of a music video that aren't the song ─────
+
+    private val offTopic = ConcurrentHashMap<String, List<LongRange>>()
+
+    /** The non-music stretches of YouTube video [id] (SponsorBlock), ms, in order; empty if none known. */
+    fun nonMusic(id: String): List<LongRange> = offTopic[id].orEmpty()
+
+    /** Asks SponsorBlock once per video. */
+    fun fetchNonMusic(id: String) {
+        if (offTopic.containsKey(id)) return
+        offTopic[id] = emptyList()
+        scope.launch {
+            val url = "https://sponsor.ajay.app/api/skipSegments?videoID=" + id +
+                "&categories=" + java.net.URLEncoder.encode("[\"music_offtopic\"]", "UTF-8")
+            val body = runCatching {
+                com.music.bitchord.data.Http.client.newCall(okhttp3.Request.Builder().url(url).build()).execute().use {
+                    if (it.isSuccessful) it.body?.string() else null
+                }
+            }.getOrNull() ?: return@launch
+            val ranges = runCatching {
+                kotlinx.serialization.json.Json.parseToJsonElement(body).let { it as kotlinx.serialization.json.JsonArray }
+                    .mapNotNull { e ->
+                        val seg = ((e as? kotlinx.serialization.json.JsonObject)?.get("segment") as? kotlinx.serialization.json.JsonArray)
+                            ?: return@mapNotNull null
+                        val a = seg.getOrNull(0)?.toString()?.toDoubleOrNull() ?: return@mapNotNull null
+                        val b = seg.getOrNull(1)?.toString()?.toDoubleOrNull() ?: return@mapNotNull null
+                        (a * 1000).toLong()..(b * 1000).toLong()
+                    }
+                    .filter { it.last > it.first }
+                    .sortedBy { it.first }
+            }.getOrDefault(emptyList())
+            offTopic[id] = ranges
+            if (ranges.isNotEmpty()) TrackLog.d(TAG, "SponsorBlock: ${ranges.size} non-music parts in $id")
+        }
+    }
+
+    /**
+     * Where in the video the song is at [audioMs]: past every non-music
+     * stretch that comes before it (an intro skit, a dialogue in the middle).
+     */
+    fun skipNonMusic(id: String, audioMs: Long): Long {
+        var v = audioMs
+        for (r in nonMusic(id)) {
+            if (r.first <= v) v += r.last - r.first else break
+        }
+        return v
     }
 
     fun openSearch(song: Song) { _searchFor.value = song }
@@ -124,6 +202,7 @@ object VideoMode {
         missing.remove(song.videoId)
         pairedFrom.remove(song.videoId)
         _ready.update { it + (song.videoId to ref) }
+        if (ref.site == VideoRef.Site.YOUTUBE) fetchNonMusic(ref.id)
         TrackLog.d(TAG, "video for '${song.title}' linked: ${ref.encode()}")
         setOn(true)
     }
@@ -155,6 +234,7 @@ object VideoMode {
                     if (sayIfMissing) say(R.string.video_mode_none)
                 } else {
                     TrackLog.d(TAG, "video for '${song.title}': ${ref.encode()}")
+                    if (ref.site == VideoRef.Site.YOUTUBE) fetchNonMusic(ref.id)
                     _ready.update { (it + (song.videoId to ref)).entries.toList().takeLast(64).associate { e -> e.key to e.value } }
                 }
             } finally {

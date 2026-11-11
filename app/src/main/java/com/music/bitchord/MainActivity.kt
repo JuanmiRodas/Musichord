@@ -4736,6 +4736,20 @@ private fun BitChordApp(
                 },
                 upgradeQualityInProgress = fromPlayer && song.videoId in qualityUpgradesInFlight,
                 onToggleAudioVersion = onToggleVersion,
+                onToggleVideoSound = if (
+                    controller?.currentMediaItem?.mediaId == song.videoId &&
+                    com.music.bitchord.data.video.VideoMode.on.value &&
+                    com.music.bitchord.data.video.VideoMode.cached(song.videoId) != null
+                ) {
+                    {
+                        songActions = null
+                        val vm = com.music.bitchord.data.video.VideoMode
+                        vm.setOriginalAudio(!vm.originalAudio.value)
+                    }
+                } else {
+                    null
+                },
+                videoSoundOn = com.music.bitchord.data.video.VideoMode.originalAudio.value,
                 isAudioVersion = menuIsAudioVersion,
                 audioVersionMissing = song.videoId in missingVersions,
                 // Hidden outright when there's no real YouTube id behind

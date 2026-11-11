@@ -62,8 +62,12 @@ private data class VideoHit(
 @Composable
 fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
+    // What you searched last time for this song, else its name and artist.
     var query by remember(song.videoId) {
-        mutableStateOf("${song.title} ${song.artist.split(',').first().trim()}".trim())
+        mutableStateOf(
+            VideoMode.lastQuery(song)
+                ?: "${song.title} ${song.artist.split(',').first().trim().takeUnless { com.music.bitchord.data.sources.TrackMatcher.isPlaceholderArtist(it) }.orEmpty()}".trim(),
+        )
     }
     var asked by remember { mutableStateOf(query) }
     var youtube by remember { mutableStateOf<List<VideoHit>?>(null) }
@@ -72,6 +76,7 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
     val current = remember(song.videoId) { VideoMode.linked(song) ?: VideoMode.cached(song.videoId) }
 
     LaunchedEffect(asked) {
+        VideoMode.rememberQuery(song, asked)
         youtube = null
         youtube = runCatching { VideoMode.youTube(asked) }.getOrDefault(emptyList()).map {
             VideoHit(VideoRef(VideoRef.Site.YOUTUBE, it.videoId), it.title, it.artist, it.durationText, it.thumbnailUrl)

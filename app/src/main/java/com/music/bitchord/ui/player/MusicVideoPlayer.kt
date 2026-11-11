@@ -170,6 +170,18 @@ object MusicVideoEngine {
         scope.launch {
             com.music.bitchord.data.video.VideoMode.ready.drop(1).collect { refresh() }
         }
+        scope.launch {
+            com.music.bitchord.data.video.VideoMode.originalAudio.drop(1).collect {
+                // A YouTube picture is fetched without its sound; asked for, it's loaded again with it.
+                val ref = loadedRef
+                if (ref != null && ref.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) {
+                    val id = loadedId
+                    if (id != null) streams.remove(id)
+                    reload()
+                }
+                applySound()
+            }
+        }
     }
 
     private val _shownVideoId = MutableStateFlow<String?>(null)
@@ -230,6 +242,7 @@ object MusicVideoEngine {
         override fun onRenderedFirstFrame() {
             _frameOn.value = top()
             _shownVideoId.value = loadedFor
+            applySound()
         }
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -406,7 +419,25 @@ object MusicVideoEngine {
         val ref = loadedRef ?: return audioMs
         val forId = loadedFor ?: return audioMs
         if (ref.key == forId) return audioMs
-        return com.music.bitchord.data.video.VideoMode.timeMap(forId, ref)?.map(audioMs) ?: audioMs
+        val vm = com.music.bitchord.data.video.VideoMode
+        vm.timeMap(forId, ref)?.let { return it.map(audioMs) }
+        // No pairing from YouTube: the song runs through the video minus the
+        // parts SponsorBlock marks as not music (intros, skits, dialogue).
+        if (ref.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) return vm.skipNonMusic(ref.id, audioMs)
+        return audioMs
+    }
+
+    /** BitChord Audio: the video's own sound in place of the song's — see [VideoMode.originalAudio]. */
+    private var videoSound = false
+
+    private fun applySound() {
+        val want = com.music.bitchord.data.video.VideoMode.originalAudio.value &&
+            com.music.bitchord.data.video.VideoMode.on.value && loadedRef != null && loadedFor != null
+        if (want == videoSound) return
+        videoSound = want
+        player?.volume = if (want) 1f else 0f
+        controller?.volume = if (want) 0f else 1f
+        TrackLog.d(TAG, "video: ${if (want) "the video's own sound" else "the song's sound"}")
     }
 
     /**
@@ -506,8 +537,13 @@ object MusicVideoEngine {
             val exo = player ?: return@launch
             val upstream = OkHttpDataSource.Factory(Http.client)
                 .setDefaultRequestProperties(stream.headers)
-            val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
-                .createMediaSource(MediaItem.fromUri(stream.url))
+            val factory = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
+            val picture = factory.createMediaSource(MediaItem.fromUri(stream.url))
+            // BitChord Audio: the video's own sound rides along only while asked for.
+            val sound = stream.audioUrl?.takeIf { com.music.bitchord.data.video.VideoMode.originalAudio.value }
+            val source = if (sound != null) {
+                androidx.media3.exoplayer.source.MergingMediaSource(picture, factory.createMediaSource(MediaItem.fromUri(sound)))
+            } else picture
             if (stream.aspect > 0f) _aspect.value = stream.aspect
             _quality.value = _quality.value.copy(heights = stream.heights, activeHeight = stream.height)
             loadedProfile = stream.profileId
@@ -566,6 +602,7 @@ object MusicVideoEngine {
         loadedFor = null
         loadedProfile = null
         _shownVideoId.value = null
+        applySound()
         _frameOn.value = null
         _quality.value = _quality.value.copy(heights = emptyList(), activeHeight = null)
         player?.let {
@@ -607,8 +644,10 @@ object MusicVideoEngine {
             if (now - lastSeekAt > SEEK_COOLDOWN_MS) seek(exo, audioPos + seekLeadMs)
             return
         }
-        // Catch up (or wait) over about a second, rather than jumping.
-        val nudge = if (abs(drift) > IGNORE_DRIFT_MS) (-drift / 1000f).coerceIn(-0.1f, 0.1f) else 0f
+        // Catch up (or wait) over about a second, rather than jumping —
+        // gently while its own sound is heard, where a rate change is a pitch change.
+        val most = if (videoSound) 0.02f else 0.1f
+        val nudge = if (abs(drift) > IGNORE_DRIFT_MS) (-drift / 1000f).coerceIn(-most, most) else 0f
         setSpeed(exo, speed * (1f + nudge))
     }
 

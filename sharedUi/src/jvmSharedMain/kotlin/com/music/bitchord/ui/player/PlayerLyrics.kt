@@ -84,6 +84,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
@@ -3407,11 +3408,11 @@ private fun List<LyricLine>.hasNonLatinScript(): Boolean = any { line ->
 }
 
 /**
- * BitChord Audio: video mode's lyrics — two lines at a time, karaoke style, in
- * the lyrics view's own type: under the video, or over the bottom of it
- * fullscreen ([overlay]). A page turns once both its lines are sung. Lines
- * with only line timing are swept evenly across their time, so every song
- * fills in as it is sung.
+ * BitChord Audio: video mode's lyrics over the picture — two lines at a time,
+ * centred, in the lyrics view's type ([compact] under the player's video,
+ * larger fullscreen). Lines that carry word timing fill in as they are sung;
+ * lines that don't are simply lit while sung, rather than swept by a guess.
+ * A page turns once both its lines are sung.
  */
 @Composable
 internal fun VideoKaraokeLyrics(
@@ -3420,10 +3421,10 @@ internal fun VideoKaraokeLyrics(
     playhead: LyricPlayhead,
     isPlaying: Boolean,
     durationMs: Long,
-    overlay: Boolean,
+    compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val sung = remember(lines, durationMs) { karaokeLines(lines, durationMs) }
+    val sung = remember(lines) { lines.filter { !it.isGap && it.text.isNotBlank() && lines.any { l -> l.timeMs > 0L } } }
     if (sung.isEmpty()) return
     val clock = rememberLyricClock(trackKey, playhead, isPlaying)
     val index by remember(sung) {
@@ -3431,76 +3432,81 @@ internal fun VideoKaraokeLyrics(
     }
     val page = (index.coerceAtLeast(0) / 2) * 2
     val base = MaterialTheme.typography.headlineLarge.copy(
-        fontSize = if (overlay) 28.sp else 23.sp,
-        lineHeight = if (overlay) 34.sp else 29.sp,
+        fontSize = if (compact) 17.sp else 27.sp,
+        lineHeight = if (compact) 22.sp else 34.sp,
         fontWeight = FontWeight.ExtraBold,
-        shadow = if (overlay) androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.8f), blurRadius = 10f) else null,
+        textAlign = TextAlign.Center,
+        shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 8f),
     )
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         for (slot in 0..1) {
-            val line = sung.getOrNull(page + slot)
+            val at = page + slot
+            val line = sung.getOrNull(at)
             if (line == null) {
                 Spacer(Modifier.height(base.lineHeight.value.dp))
                 continue
             }
-            val end = slot == 1
-            androidx.compose.runtime.key(page + slot) {
-                SweptLyricLine(
-                    line = line,
-                    clock = clock,
-                    style = voiceStyle(
-                        base.copy(textAlign = if (end) TextAlign.End else TextAlign.Start),
-                        line.text,
-                        alignEnd = end,
+            androidx.compose.runtime.key(at) {
+                if (line.isWordSynced) {
+                    SweptLyricLine(
+                        line = line,
+                        clock = clock,
+                        style = base,
+                        dimAlpha = 0.55f,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        rise = false,
                         laneLocked = true,
-                    ),
-                    dimAlpha = if (overlay) 0.6f else UNSUNG_ALPHA,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    rise = false,
-                    alignEnd = end,
-                    laneLocked = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    val lit by animateFloatAsState(
+                        targetValue = if (at == index) 1f else 0.5f,
+                        animationSpec = tween(220),
+                        label = "videoLyricLit",
+                    )
+                    Text(
+                        text = line.text,
+                        style = base,
+                        color = Color.White.copy(alpha = lit),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
 }
 
-/** The sung lines, each with word timing — its own, or spread evenly over the line. */
-private fun karaokeLines(lines: List<LyricLine>, durationMs: Long): List<LyricLine> {
-    if (lines.none { it.timeMs > 0L }) return emptyList()
-    val sung = lines.withIndex().filter { (_, l) -> !l.isGap && l.text.isNotBlank() }
-    return sung.map { (i, line) ->
-        if (line.isWordSynced) return@map line
-        val next = lines.drop(i + 1).firstOrNull()?.timeMs
-            ?: durationMs.takeIf { it > line.timeMs }
-            ?: (line.timeMs + 4_000L)
-        val span = ((next - line.timeMs) * 0.9).toLong().coerceIn(400L, 12_000L)
-        val parts = karaokeParts(line.text)
-        val weight = parts.sumOf { it.length }.coerceAtLeast(1)
-        var at = line.timeMs
-        val words = parts.map { part ->
-            val len = span * part.length / weight
-            com.music.bitchord.data.lyrics.LyricWord(at, at + len, part).also { at += len }
-        }
-        line.copy(words = words)
+/**
+ * BitChord Audio: the shade the video's lyrics sit on — a soft black ellipse
+ * rising from the bottom edge and fading out well before the sides and top,
+ * so the words read on any picture while the picture still reads around them.
+ */
+internal fun Modifier.videoLyricsScrim(strength: Float = 0.78f): Modifier = this.drawBehind {
+    val w = size.width
+    val h = size.height
+    val stretch = (w / h).coerceAtLeast(1f)
+    withTransform({
+        scale(scaleX = stretch, scaleY = 1f, pivot = Offset(w / 2f, h))
+    }) {
+        drawCircle(
+            brush = Brush.radialGradient(
+                0f to Color.Black.copy(alpha = strength),
+                0.45f to Color.Black.copy(alpha = strength * 0.62f),
+                0.75f to Color.Black.copy(alpha = strength * 0.22f),
+                1f to Color.Transparent,
+                center = Offset(w / 2f, h),
+                radius = h,
+            ),
+            radius = h,
+            center = Offset(w / 2f, h),
+        )
     }
 }
 
-/** A line cut where it is sung word by word: at spaces, or character by character in CJK. */
-private fun karaokeParts(text: String): List<String> {
-    val spaced = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    return spaced.flatMap { word ->
-        if (word.any { Character.UnicodeScript.of(it.code) in KARAOKE_CHAR_SCRIPTS }) word.map { it.toString() }
-        else listOf(word)
-    }
-}
-
-private val KARAOKE_CHAR_SCRIPTS = setOf(
-    Character.UnicodeScript.HAN,
-    Character.UnicodeScript.HIRAGANA,
-    Character.UnicodeScript.KATAKANA,
-    Character.UnicodeScript.HANGUL,
-    Character.UnicodeScript.THAI,
-)

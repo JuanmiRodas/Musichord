@@ -70,6 +70,9 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.Subtitles
+import androidx.compose.material.icons.rounded.CropSquare
+import androidx.compose.material.icons.rounded.Crop169
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -948,9 +951,13 @@ fun NowPlayingScreen(
     val videoModeLooking by PlayerPlatform.host.videoModeLooking.collectAsStateWithLifecycle()
     val videoOverlay = videoModeOn && song.videoId in videoModeReady
     val videoMode = showsMusicVideo(song) || videoOverlay
+    val videoModeSquare by PlayerPlatform.host.videoModeSquare.collectAsStateWithLifecycle()
+    val videoModeLyrics by PlayerPlatform.host.videoModeLyrics.collectAsStateWithLifecycle()
+    val videoModeOriginalAudio by PlayerPlatform.host.videoModeOriginalAudio.collectAsStateWithLifecycle()
     // Square video thumbnails: the picture takes the sleeve's own slot, cropped
-    // to it, in place of the full-width box at the video's shape.
-    val squareVideo = videoMode && VideoThumbnails.square
+    // to it, in place of the full-width box at the video's shape. In video
+    // mode, the player's own aspect button decides.
+    val squareVideo = videoMode && (if (videoOverlay) videoModeSquare else VideoThumbnails.square)
     val canvas = rememberCanvasArtwork(song)?.takeUnless { videoMode }?.let {
         // Apple's 3:4 rendition runs under the whole phone screen, the way its
         // own player shows it; the square one stays the fallback.
@@ -2045,12 +2052,27 @@ fun NowPlayingScreen(
                                 playhead = lyricsPlayhead,
                                 isPlaying = isPlaying && position.advancing,
                                 durationMs = durationMs,
-                                overlay = true,
+                                compact = false,
                                 modifier = m,
                             )
                         }
                     } else {
                         null
+                    },
+                    lyricsOn = videoModeLyrics,
+                    onToggleLyrics = if (videoOverlay) {
+                        { PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics) }
+                    } else {
+                        null
+                    },
+                    originalAudio = videoModeOriginalAudio,
+                    onToggleOriginalAudio = if (videoOverlay) {
+                        { PlayerPlatform.host.setVideoModeOriginalAudio(!videoModeOriginalAudio) }
+                    } else {
+                        null
+                    },
+                    onSeekBy = { delta ->
+                        onSeek((position.positionMs + delta).coerceIn(0L, durationMs.coerceAtLeast(0L)))
                     },
                     scrubber = {
                         PlayerScrubber(
@@ -2490,6 +2512,16 @@ fun NowPlayingScreen(
                 fullArtworkBlurContent(
                     Modifier.graphicsLayer { alpha = fullArtworkBackdropAlpha },
                 )
+                // BitChord Audio: video mode dims the player around the picture —
+                // the song's own colours kept, only darker — easing in and out.
+                val videoDim by animateFloatAsState(
+                    targetValue = if (videoOverlay) 0.62f else 0f,
+                    animationSpec = tween(durationMillis = 750, easing = FastOutSlowInEasing),
+                    label = "videoModeDim",
+                )
+                if (videoDim > 0f) {
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = videoDim)))
+                }
 
                 // Mount once, behind the controls. A known portrait aspect changes the
                 // invisible view to full-player bounds before its first frame is shown.
@@ -3629,9 +3661,6 @@ fun NowPlayingScreen(
                                                 )
                                             }
                                             val height = (boxWidthPx / aspect).roundToInt()
-                                            // BitChord Audio: in video mode the picture sits at the
-                                            // top of the sleeve, the lyrics in the room under it.
-                                            if (videoOverlay) return@offset IntOffset(0, artTop().roundToPx())
                                             val centre = (artTop() + artSize() / 2).roundToPx()
                                             IntOffset(0, centre - height / 2)
                                         }
@@ -3663,6 +3692,27 @@ fun NowPlayingScreen(
                                             .fillMaxSize()
                                             .clip(RoundedCornerShape(10.dp)),
                                     )
+                                    // BitChord Audio: video mode's lyrics, over the bottom of the picture.
+                                    if (videoOverlay && syncedLyricsEnabled && videoModeLyrics) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
+                                                .videoLyricsScrim(0.72f)
+                                                .padding(start = 14.dp, end = 14.dp, top = 30.dp, bottom = 10.dp),
+                                        ) {
+                                            VideoKaraokeLyrics(
+                                                lines = lyricsTranslation.displayedLyrics,
+                                                trackKey = song.videoId,
+                                                playhead = lyricsPlayhead,
+                                                isPlaying = isPlaying && position.advancing,
+                                                durationMs = durationMs,
+                                                compact = true,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                    }
                                     VideoCornerControls(
                                         fullscreen = false,
                                         onToggleFullscreen = {
@@ -3670,44 +3720,24 @@ fun NowPlayingScreen(
                                             screenOrientation.landscape()
                                         },
                                         onOpenQuality = { showVideoQuality = true },
+                                        extras = {
+                                            if (videoOverlay) {
+                                                VideoChromeButton(
+                                                    icon = if (videoModeSquare) Icons.Rounded.Crop169 else Icons.Rounded.CropSquare,
+                                                    active = false,
+                                                    onClick = { PlayerPlatform.host.setVideoModeSquare(!videoModeSquare) },
+                                                )
+                                                VideoChromeButton(
+                                                    icon = Icons.Rounded.Subtitles,
+                                                    active = videoModeLyrics,
+                                                    onClick = { PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics) },
+                                                )
+                                            }
+                                        },
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
                                             .padding(8.dp),
                                     )
-                                }
-                                // BitChord Audio: video mode's lyrics, two lines, under the picture.
-                                if (videoOverlay && !squareVideo && syncedLyricsEnabled) {
-                                    Box(
-                                        modifier = Modifier
-                                            .offset {
-                                                val height = (boxWidthPx / aspect).roundToInt()
-                                                IntOffset(0, artTop().roundToPx() + height + 14.dp.roundToPx())
-                                            }
-                                            .layout { measurable, _ ->
-                                                val height = (boxWidthPx / aspect).roundToInt()
-                                                val top = artTop().roundToPx() + height + 14.dp.roundToPx()
-                                                val room = ((artTop() + artSize()).roundToPx() - top)
-                                                    .coerceAtLeast(64.dp.roundToPx())
-                                                val placeable = measurable.measure(Constraints.fixed(boxWidthPx, room))
-                                                layout(boxWidthPx, room) { placeable.placeRelative(0, 0) }
-                                            }
-                                            .graphicsLayer {
-                                                alpha = (1f - p() * 2f).coerceIn(0f, 1f)
-                                                translationX = swipeSettle.value * (1f - p())
-                                            }
-                                            .padding(horizontal = 22.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        VideoKaraokeLyrics(
-                                            lines = lyricsTranslation.displayedLyrics,
-                                            trackKey = song.videoId,
-                                            playhead = lyricsPlayhead,
-                                            isPlaying = isPlaying && position.advancing,
-                                            durationMs = durationMs,
-                                            overlay = false,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -4197,7 +4227,7 @@ fun NowPlayingScreen(
                             .height(lyricSlotHeight),
                         contentAlignment = Alignment.CenterStart,
                     ) {
-                    if (!lyricsOpen && syncedLyricsEnabled && !videoOverlay) {
+                    if (!lyricsOpen && syncedLyricsEnabled && !(videoOverlay && videoModeLyrics)) {
                         CurrentLyricStrip(
                             lines = lyricsTranslation.displayedLyrics,
                             trackKey = song.videoId,

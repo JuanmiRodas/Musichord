@@ -79,6 +79,18 @@ interface PlayerHost {
     /** BitChord Audio: the video button held — the search for [song]'s video. */
     fun openVideoSearch(song: Song) = Unit
 
+    /** BitChord Audio: lyrics over the video. */
+    val videoModeLyrics: StateFlow<Boolean> get() = NoVideoOn
+    fun setVideoModeLyrics(on: Boolean) = Unit
+
+    /** BitChord Audio: the video cropped into the album frame. */
+    val videoModeSquare: StateFlow<Boolean> get() = NoVideoMode
+    fun setVideoModeSquare(on: Boolean) = Unit
+
+    /** BitChord Audio: the music video's own sound in place of the song's. */
+    val videoModeOriginalAudio: StateFlow<Boolean> get() = NoVideoMode
+    fun setVideoModeOriginalAudio(on: Boolean) = Unit
+
     /** The playing music video's width over its height. */
     val musicVideoAspect: StateFlow<Float> get() = DefaultVideoAspect
 
@@ -254,6 +266,7 @@ internal fun MusicVideoSurface(
 ) = PlayerPlatform.host.MusicVideo(videoId, fit, onRenderedChanged, modifier)
 
 private val NoVideoMode = MutableStateFlow(false)
+private val NoVideoOn = MutableStateFlow(true)
 private val NoVideoReady = MutableStateFlow<Set<String>>(emptySet())
 private val NoVideoLooking = MutableStateFlow<String?>(null)
 

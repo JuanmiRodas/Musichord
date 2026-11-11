@@ -274,6 +274,8 @@ object InnerTubeXResolver {
         val heights: List<Int>,
         /** InnerTubeX's catalog id for the client that minted [url]; what a refusal skips. */
         val profileId: String,
+        /** BitChord Audio: the video's own sound, minted alongside — video mode's "original audio". */
+        val audioUrl: String? = null,
     ) {
         val aspect: Float get() = if (height > 0) width.toFloat() / height else 0f
     }
@@ -340,6 +342,7 @@ object InnerTubeXResolver {
                 .distinct()
                 .sortedDescending(),
             profileId = stream.profileId,
+            audioUrl = runCatching { stream.audioUrl }.getOrNull()?.takeIf { it.isNotBlank() },
         )
     }
 
