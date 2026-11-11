@@ -427,8 +427,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val key = lyricsLookupKey(
             videoId, sources, AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
         ) + com.music.bitchord.data.lyrics.LyricAliases.version.value +
-            "/" + com.music.bitchord.data.lyrics.EditedLyrics.version.value +
-            "/" + com.music.bitchord.data.lyrics.BadLyrics.version.value
+            // BitChord Audio: this song's saved and flagged lyrics, not the
+            // global counters: the background keeper saves lyrics for other
+            // songs every few seconds, and each save restarted — so never let
+            // finish — the lookup of the song playing.
+            "/" + com.music.bitchord.data.lyrics.EditedLyrics.savedAt(videoId) +
+            "/" + flaggedLyrics.sorted().joinToString(",")
         if (lyricsFor == key) return
         // The duration lands a beat after the track, and a database match needs
         // it. Turned away here rather than inside the job below: claiming the
