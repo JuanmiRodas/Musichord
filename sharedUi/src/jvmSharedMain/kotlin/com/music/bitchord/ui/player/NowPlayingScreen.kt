@@ -70,6 +70,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.MusicVideo
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.CropSquare
 import androidx.compose.material.icons.rounded.Crop169
@@ -3746,6 +3748,11 @@ fun NowPlayingScreen(
                                                     icon = if (videoModeSquare) Icons.Rounded.Crop169 else Icons.Rounded.CropSquare,
                                                     active = false,
                                                     onClick = { PlayerPlatform.host.setVideoModeSquare(!videoModeSquare) },
+                                                )
+                                                VideoChromeButton(
+                                                    icon = if (videoModeOriginalAudio) Icons.Rounded.MusicVideo else Icons.Rounded.MusicNote,
+                                                    active = videoModeOriginalAudio,
+                                                    onClick = { PlayerPlatform.host.setVideoModeOriginalAudio(!videoModeOriginalAudio) },
                                                 )
                                                 VideoChromeButton(
                                                     icon = Icons.Rounded.Subtitles,
