@@ -162,6 +162,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             .stateIn(kotlinx.coroutines.MainScope(), kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
     }
     override val videoModeLooks: StateFlow<com.music.bitchord.ui.player.VideoLooksUi?> get() = looksUi
+    override val videoModeOver: StateFlow<Boolean> get() = MusicVideoEngine.over
     override val videoModeLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.lyricsScale
     override val videoModeOriginalAudio: StateFlow<Boolean> get() = com.music.bitchord.data.video.VideoMode.originalAudio
     override fun setVideoModeOriginalAudio(on: Boolean) = com.music.bitchord.data.video.VideoMode.setOriginalAudio(on)

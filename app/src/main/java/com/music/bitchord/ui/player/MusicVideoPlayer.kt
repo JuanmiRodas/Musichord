@@ -543,6 +543,41 @@ object MusicVideoEngine {
     private val _dip = MutableStateFlow(false)
 
     /**
+     * BitChord Audio: the video ran out before the song — a shorter cut. The
+     * song's id and where in it (audio ms) the picture ended; the player goes
+     * back to its cover or visualizer from there, and the video comes back if
+     * the song is taken back before that point. Kept past an unload, so a
+     * player that let go of the picture doesn't reload it just to end again.
+     */
+    private var endsAt: Pair<String, Long>? = null
+    private val _over = MutableStateFlow(false)
+    val over: StateFlow<Boolean> = _over.asStateFlow()
+    private var overJob: Job? = null
+
+    private fun markEnded(forId: String, audioMs: Long) {
+        val known = endsAt
+        if (known != null && known.first == forId && known.second <= audioMs) return
+        endsAt = forId to audioMs
+        TrackLog.i(TAG, "video: ended before the song, at ${audioMs / 1000}s — back to the cover", about = forId)
+        _over.value = true
+        if (overJob?.isActive == true) return
+        overJob = scope.launch {
+            while (isActive) {
+                val end = endsAt ?: break
+                val audio = controller
+                val playingId = audio?.currentMediaItem?.toSong()?.videoId
+                if (audio == null || playingId != end.first) {
+                    endsAt = null
+                    _over.value = false
+                    break
+                }
+                _over.value = audio.currentPosition >= end.second - 150L
+                delay(300)
+            }
+        }
+    }
+
+    /**
      * BitChord Audio: true for the moment the picture jumps to a new place
      * (a sync found later, a large drift) — the surface fades through it.
      */
@@ -790,9 +825,22 @@ object MusicVideoEngine {
     private fun sync() {
         val audio = controller ?: return
         val exo = player ?: return
-        if (loadedId == null || exo.playbackState == Player.STATE_IDLE || exo.playbackState == Player.STATE_ENDED) return
+        if (loadedId == null || exo.playbackState == Player.STATE_IDLE) return
         val speed = audio.playbackParameters.speed
         val audioPos = videoPosition(audio.currentPosition)
+        // BitChord Audio: the picture at (or past) its own end while the song goes on.
+        val length = exo.duration.takeIf { it != C.TIME_UNSET && it > 0L }
+        val forId = loadedFor
+        if (forId != null && length != null && (exo.playbackState == Player.STATE_ENDED || audioPos >= length - 250L)) {
+            markEnded(forId, audio.currentPosition)
+            exo.playWhenReady = false
+            return
+        }
+        if (exo.playbackState == Player.STATE_ENDED) {
+            // Taken back before the end: play on from there.
+            seek(exo, audioPos)
+            return
+        }
         val now = System.currentTimeMillis()
         if (!audio.isPlaying) {
             exo.playWhenReady = false

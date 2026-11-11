@@ -953,7 +953,9 @@ fun NowPlayingScreen(
     val videoModeOn by PlayerPlatform.host.videoModeOn.collectAsStateWithLifecycle()
     val videoModeReady by PlayerPlatform.host.videoModeReady.collectAsStateWithLifecycle()
     val videoModeLooking by PlayerPlatform.host.videoModeLooking.collectAsStateWithLifecycle()
-    val videoOverlay = videoModeOn && song.videoId in videoModeReady
+    // BitChord Audio: a video shorter than the song hands back to the cover (or visualizer) once it ends.
+    val videoOver by PlayerPlatform.host.videoModeOver.collectAsStateWithLifecycle()
+    val videoOverlay = videoModeOn && song.videoId in videoModeReady && !videoOver
     val videoMode = showsMusicVideo(song) || videoOverlay
     val videoModeFrame by PlayerPlatform.host.videoModeFrame.collectAsStateWithLifecycle()
     val videoModeSquare = videoModeFrame == 0

@@ -94,6 +94,9 @@ interface PlayerHost {
     /** BitChord Audio: how the video on screen looks — its black bars and text at its bottom — once measured. */
     val videoModeLooks: StateFlow<VideoLooksUi?> get() = NoVideoLooks
 
+    /** BitChord Audio: the video ended before the song — the player shows its cover (or visualizer) again. */
+    val videoModeOver: StateFlow<Boolean> get() = NoVideoOver
+
     /** BitChord Audio: video mode's lyrics size, as a scale. */
     val videoModeLyricsScale: StateFlow<Float> get() = NoVideoScale
 
@@ -585,3 +588,5 @@ internal fun rememberRemoteArtworkUrl(song: Song?): String? =
 @Composable
 internal fun AudioPipelineDialog(hazeState: HazeState, isPlaying: Boolean, onDismiss: () -> Unit) =
     PlayerPlatform.host.AudioPipelineDialog(hazeState, isPlaying, onDismiss)
+
+private val NoVideoOver: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)
