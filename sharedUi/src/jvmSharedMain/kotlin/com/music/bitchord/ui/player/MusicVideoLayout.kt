@@ -98,6 +98,8 @@ internal fun FullscreenVideoPlayer(
     lyrics: (@Composable (Modifier) -> Unit)? = null,
     /** BitChord Audio: video mode's buttons — lyrics on/off, the video's own sound. */
     lyricsOn: Boolean = true,
+    /** BitChord Audio: how dark the lyrics' shade is (deeper over text in the video). */
+    lyricsShade: Float = 0.78f,
     onToggleLyrics: (() -> Unit)? = null,
     originalAudio: Boolean = false,
     onToggleOriginalAudio: (() -> Unit)? = null,
@@ -167,8 +169,8 @@ internal fun FullscreenVideoPlayer(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .videoLyricsScrim()
-                        .padding(top = 56.dp),
+                        .videoLyricsScrim(lyricsShade)
+                        .padding(top = if (lyricsShade > 0.9f) 84.dp else 56.dp),
                     contentAlignment = Alignment.BottomCenter,
                 ) {
                     lyrics(

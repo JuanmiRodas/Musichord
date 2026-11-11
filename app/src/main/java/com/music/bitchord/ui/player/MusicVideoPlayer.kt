@@ -249,6 +249,7 @@ object MusicVideoEngine {
             _shownVideoId.value = loadedFor
             applySound()
             startAlign()
+            startLooks()
         }
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -441,6 +442,91 @@ object MusicVideoEngine {
         // parts SponsorBlock marks as not music (intros, skits, dialogue).
         if (ref.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) return vm.skipNonMusic(ref.id, audioMs)
         return audioMs
+    }
+
+    /**
+     * BitChord Audio: how the video on screen looks — black bars above and
+     * below the picture (the album-square view zooms past them) and text
+     * burnt into its bottom (subtitles, credits: the lyrics' shade deepens).
+     * Read off small copies of the frames on screen, a sample every 1.5 s
+     * while it plays; settled after enough samples, and kept per video.
+     */
+    private var looksJob: Job? = null
+
+    private fun startLooks() {
+        val key = loadedId ?: return
+        looksJob?.cancel()
+        val known = com.music.bitchord.data.video.VideoMode.looksOf(key)
+        com.music.bitchord.data.video.VideoMode.showLooks(known)
+        if (known != null) return
+        looksJob = scope.launch {
+            val tops = ArrayList<Float>()
+            val bottoms = ArrayList<Float>()
+            var busy = 0
+            var seen = 0
+            var tries = 0
+            while (seen < 14 && tries < 60 && loadedId == key) {
+                delay(1_500)
+                tries++
+                if (player?.isPlaying != true) continue
+                val bitmap = runCatching { top()?.getBitmap(192, 108) }.getOrNull() ?: continue
+                val sample = withContext(Dispatchers.Default) { runCatching { readFrame(bitmap) }.getOrNull() }
+                bitmap.recycle()
+                sample ?: continue
+                seen++
+                tops += sample.barTop
+                bottoms += sample.barBottom
+                if (sample.text) busy++
+                if (seen >= 6) {
+                    val looks = com.music.bitchord.data.video.VideoMode.Looks(
+                        barTop = tops.sorted()[tops.size / 2],
+                        barBottom = bottoms.sorted()[bottoms.size / 2],
+                        busyBottom = busy * 3 >= seen,
+                    )
+                    com.music.bitchord.data.video.VideoMode.showLooks(looks)
+                    if (seen >= 14) com.music.bitchord.data.video.VideoMode.saveLooks(key, looks)
+                }
+            }
+        }
+    }
+
+    private class FrameRead(val barTop: Float, val barBottom: Float, val text: Boolean)
+
+    /** One frame: its black rows at the top and bottom, and white-on-dark edges in its bottom third. */
+    private fun readFrame(b: android.graphics.Bitmap): FrameRead? {
+        val w = b.width
+        val h = b.height
+        val px = IntArray(w * h)
+        b.getPixels(px, 0, w, 0, 0, w, h)
+        fun lum(c: Int): Int = (((c shr 16) and 0xff) * 299 + ((c shr 8) and 0xff) * 587 + (c and 0xff) * 114) / 1000
+        var total = 0L
+        for (c in px) total += lum(c)
+        if (total / px.size < 14) return null // a fade to black says nothing
+        fun rowBlack(y: Int): Boolean {
+            var sum = 0
+            var max = 0
+            for (x in 0 until w) {
+                val l = lum(px[y * w + x])
+                sum += l
+                if (l > max) max = l
+            }
+            return sum / w < 20 && max < 48
+        }
+        var top = 0
+        while (top < h / 3 && rowBlack(top)) top++
+        var bottom = 0
+        while (bottom < h / 3 && rowBlack(h - 1 - bottom)) bottom++
+        // Text: bright pixels with a dark neighbour, in the bottom third of the picture itself.
+        val from = (h - bottom) - (h - top - bottom) / 3
+        var edges = 0
+        var count = 0
+        for (y in from until h - bottom - 1) for (x in 0 until w - 1) {
+            val l = lum(px[y * w + x])
+            count++
+            if (l > 200 && (lum(px[y * w + x + 1]) < 90 || lum(px[(y + 1) * w + x]) < 90)) edges++
+        }
+        val text = count > 0 && edges.toFloat() / count > 0.012f
+        return FrameRead(top.toFloat() / h, bottom.toFloat() / h, text)
     }
 
     /** BitChord Audio: the sync measurement waiting for the picture to be up — see [VideoAligner]. */
@@ -677,6 +763,8 @@ object MusicVideoEngine {
         _shownVideoId.value = null
         pendingAlign = null
         alignJob?.cancel()
+        looksJob?.cancel()
+        com.music.bitchord.data.video.VideoMode.showLooks(null)
         _dip.value = false
         applySound()
         _frameOn.value = null

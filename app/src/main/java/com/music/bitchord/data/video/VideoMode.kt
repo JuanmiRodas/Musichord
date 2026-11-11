@@ -129,6 +129,27 @@ object VideoMode {
     val originalAudio: StateFlow<Boolean> = _originalAudio.asStateFlow()
     fun setOriginalAudio(on: Boolean) { _originalAudio.value = on }
 
+    // ── How a video looks: letterbox bars, text burnt into its bottom ─────
+
+    /** Fractions of the picture's height that are black bars, and whether its bottom carries text. */
+    data class Looks(val barTop: Float, val barBottom: Float, val busyBottom: Boolean)
+
+    private val _currentLooks = MutableStateFlow<Looks?>(null)
+    /** The looks of the video on screen now, once known. */
+    val currentLooks: StateFlow<Looks?> = _currentLooks.asStateFlow()
+
+    /** Measured once per video, kept (and backed up with the rest of video mode). */
+    fun looksOf(key: String): Looks? = prefs?.getString("looks:$key", null)?.split(',')?.takeIf { it.size == 3 }?.let {
+        Looks(it[0].toFloatOrNull() ?: 0f, it[1].toFloatOrNull() ?: 0f, it[2] == "1")
+    }
+
+    fun saveLooks(key: String, looks: Looks) {
+        prefs?.edit()?.putString("looks:$key", "${looks.barTop},${looks.barBottom},${if (looks.busyBottom) 1 else 0}")?.apply()
+        TrackLog.d(TAG, "video $key looks: bars ${"%.2f".format(looks.barTop)}/${"%.2f".format(looks.barBottom)}, text at the bottom: ${looks.busyBottom}")
+    }
+
+    fun showLooks(looks: Looks?) { _currentLooks.value = looks }
+
     // ── The search, remembered ────────────────────────────────────────────
 
     /** What was last searched for [song]'s video, else for any. */

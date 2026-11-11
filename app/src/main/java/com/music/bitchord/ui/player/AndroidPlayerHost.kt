@@ -156,6 +156,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override fun setVideoModeTranslation(on: Boolean) = com.music.bitchord.data.video.VideoMode.setTranslation(on)
     override val videoModeFrame: StateFlow<Int> get() = com.music.bitchord.data.video.VideoMode.frame
     override fun setVideoModeFrame(value: Int) = com.music.bitchord.data.video.VideoMode.setFrame(value)
+    private val looksUi: StateFlow<com.music.bitchord.ui.player.VideoLooksUi?> by lazy {
+        com.music.bitchord.data.video.VideoMode.currentLooks
+            .map { l -> l?.let { com.music.bitchord.ui.player.VideoLooksUi(it.barTop, it.barBottom, it.busyBottom) } }
+            .stateIn(kotlinx.coroutines.MainScope(), kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
+    }
+    override val videoModeLooks: StateFlow<com.music.bitchord.ui.player.VideoLooksUi?> get() = looksUi
     override val videoModeLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.lyricsScale
     override val videoModeOriginalAudio: StateFlow<Boolean> get() = com.music.bitchord.data.video.VideoMode.originalAudio
     override fun setVideoModeOriginalAudio(on: Boolean) = com.music.bitchord.data.video.VideoMode.setOriginalAudio(on)

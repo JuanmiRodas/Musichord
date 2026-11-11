@@ -960,6 +960,10 @@ fun NowPlayingScreen(
     // BitChord Audio: the picture out to the screen's edges, at the album square's height.
     val videoEdge = videoOverlay && videoModeFrame == 1
     val videoLyricsScale by PlayerPlatform.host.videoModeLyricsScale.collectAsStateWithLifecycle()
+    val videoLooks by PlayerPlatform.host.videoModeLooks.collectAsStateWithLifecycle()
+    // BitChord Audio: text burnt into the video's bottom (its own subtitles,
+    // credits) — the lyrics' shade goes much darker over it.
+    val videoShade = if (videoLooks?.busyBottom == true) 0.95f else 0.72f
     val videoModeLyrics by PlayerPlatform.host.videoModeLyrics.collectAsStateWithLifecycle()
     val videoModeOriginalAudio by PlayerPlatform.host.videoModeOriginalAudio.collectAsStateWithLifecycle()
     val videoModeTranslation by PlayerPlatform.host.videoModeTranslation.collectAsStateWithLifecycle()
@@ -2082,6 +2086,7 @@ fun NowPlayingScreen(
                         null
                     },
                     lyricsOn = videoModeLyrics,
+                    lyricsShade = if (videoLooks?.busyBottom == true) 0.95f else 0.78f,
                     onToggleLyrics = if (videoOverlay) {
                         { PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics) }
                     } else {
@@ -3742,13 +3747,33 @@ fun NowPlayingScreen(
                                             isPlaying = isPlaying,
                                         )
                                     }
+                                    // BitChord Audio: in the album square or out to the
+                                    // edges, the picture is zoomed (smoothly, once
+                                    // measured) past black bars above and below it.
+                                    val looks = videoLooks.takeIf { videoOverlay && (squareVideo || videoEdge) }
+                                    val content = looks?.let { 1f - it.barTop - it.barBottom }?.takeIf { it in 0.4f..0.96f }
+                                    val zoom by animateFloatAsState(
+                                        targetValue = content?.let { (1f / it).coerceAtMost(1.8f) } ?: 1f,
+                                        animationSpec = tween(900, easing = FastOutSlowInEasing),
+                                        label = "videoBarsZoom",
+                                    )
+                                    val shift by animateFloatAsState(
+                                        targetValue = if (content != null && looks != null) (looks.barBottom - looks.barTop) / 2f else 0f,
+                                        animationSpec = tween(900, easing = FastOutSlowInEasing),
+                                        label = "videoBarsShift",
+                                    )
                                     MusicVideoSurface(
                                         videoId = song.videoId,
                                         fit = !squareVideo && !videoEdge,
                                         onRenderedChanged = { videoRendered = it },
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .clip(RoundedCornerShape(if (videoEdge) 0.dp else 10.dp)),
+                                            .clip(RoundedCornerShape(if (videoEdge) 0.dp else 10.dp))
+                                            .graphicsLayer {
+                                                scaleX = zoom
+                                                scaleY = zoom
+                                                translationY = shift * size.height * zoom
+                                            },
                                     )
                                     // BitChord Audio: video mode's lyrics, over the bottom of the picture.
                                     if (videoOverlay && syncedLyricsEnabled && videoModeLyrics) {
@@ -3757,8 +3782,8 @@ fun NowPlayingScreen(
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
-                                                .videoLyricsScrim(0.72f)
-                                                .padding(start = 14.dp, end = 14.dp, top = 30.dp, bottom = 10.dp),
+                                                .videoLyricsScrim(videoShade)
+                                                .padding(start = 14.dp, end = 14.dp, top = if (videoShade > 0.9f) 44.dp else 30.dp, bottom = 10.dp),
                                         ) {
                                             // One line here — the sung one — with its
                                             // translation under it when that's on.
@@ -3783,6 +3808,25 @@ fun NowPlayingScreen(
                                         cornerShown = true
                                         delay(3_500)
                                         cornerShown = false
+                                    }
+                                    // BitChord Audio: lyrics earlier / later by half a second, as in the lyrics view.
+                                    if (videoOverlay && videoModeLyrics && syncedLyricsEnabled) {
+                                        androidx.compose.animation.AnimatedVisibility(
+                                            visible = cornerShown && videoRendered,
+                                            enter = androidx.compose.animation.fadeIn(tween(220)),
+                                            exit = androidx.compose.animation.fadeOut(tween(450)),
+                                            modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                                        ) {
+                                            VideoNudgeButton("−0.5 s") { lyricsTranslation.nudge(-500) }
+                                        }
+                                        androidx.compose.animation.AnimatedVisibility(
+                                            visible = cornerShown && videoRendered,
+                                            enter = androidx.compose.animation.fadeIn(tween(220)),
+                                            exit = androidx.compose.animation.fadeOut(tween(450)),
+                                            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                                        ) {
+                                            VideoNudgeButton("+0.5 s") { lyricsTranslation.nudge(500) }
+                                        }
                                     }
                                     androidx.compose.animation.AnimatedVisibility(
                                         visible = cornerShown || !videoRendered,
@@ -4521,4 +4565,19 @@ private suspend fun AwaitPointerEventScope.dragQueueIn(
     }
     onHold(false)
     onSettle(open)
+}
+
+
+/** BitChord Audio: a small "±0.5 s" chip on the video, moving its lyrics. */
+@Composable
+private fun VideoNudgeButton(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
+    }
 }

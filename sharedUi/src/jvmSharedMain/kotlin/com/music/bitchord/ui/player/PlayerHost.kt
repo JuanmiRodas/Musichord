@@ -91,6 +91,9 @@ interface PlayerHost {
     val videoModeFrame: StateFlow<Int> get() = NoVideoFrame
     fun setVideoModeFrame(value: Int) = Unit
 
+    /** BitChord Audio: how the video on screen looks — its black bars and text at its bottom — once measured. */
+    val videoModeLooks: StateFlow<VideoLooksUi?> get() = NoVideoLooks
+
     /** BitChord Audio: video mode's lyrics size, as a scale. */
     val videoModeLyricsScale: StateFlow<Float> get() = NoVideoScale
 
@@ -276,6 +279,10 @@ private val NoVideoMode = MutableStateFlow(false)
 private val NoVideoOn = MutableStateFlow(true)
 private val NoVideoFrame = MutableStateFlow(2)
 private val NoVideoScale = MutableStateFlow(1f)
+private val NoVideoLooks = MutableStateFlow<VideoLooksUi?>(null)
+
+/** BitChord Audio: fractions of a video's height that are black bars, and whether its bottom carries text. */
+data class VideoLooksUi(val barTop: Float, val barBottom: Float, val busyBottom: Boolean)
 private val NoVideoReady = MutableStateFlow<Set<String>>(emptySet())
 private val NoVideoLooking = MutableStateFlow<String?>(null)
 
