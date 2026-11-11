@@ -3067,6 +3067,8 @@ internal class LyricsTranslationUi(
     val offsetMs: Long = 0L,
     /** Moves the lyrics by the given milliseconds, saved for this song. */
     val nudge: (Long) -> Unit = {},
+    /** BitChord Audio: the translation, line for line with [panelLines], once fetched. */
+    val translatedLines: List<LyricLine>? = null,
 )
 
 /**
@@ -3325,6 +3327,7 @@ internal fun rememberLyricsTranslation(
 
     return LyricsTranslationUi(
         displayedLyrics = displayedLyrics.shiftedBy(offsetMs),
+        translatedLines = translatedLines?.shiftedBy(offsetMs),
         panelLines = panelLines.shiftedBy(offsetMs),
         subLines = lyricsSubLines?.shiftedBy(offsetMs),
         translationState = translationState,
@@ -3423,7 +3426,13 @@ internal fun VideoKaraokeLyrics(
     durationMs: Long,
     compact: Boolean,
     modifier: Modifier = Modifier,
+    /** BitChord Audio: the sung line with its translation under it, in place of the next line. */
+    translation: List<LyricLine>? = null,
 ) {
+    if (translation != null) {
+        VideoLyricWithTranslation(lines, translation, trackKey, playhead, isPlaying, compact, modifier)
+        return
+    }
     val sung = remember(lines) { lines.filter { !it.isGap && it.text.isNotBlank() && lines.any { l -> l.timeMs > 0L } } }
     if (sung.isEmpty()) return
     val clock = rememberLyricClock(trackKey, playhead, isPlaying)
@@ -3479,6 +3488,74 @@ internal fun VideoKaraokeLyrics(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun VideoLyricWithTranslation(
+    lines: List<LyricLine>,
+    translation: List<LyricLine>,
+    trackKey: String,
+    playhead: LyricPlayhead,
+    isPlaying: Boolean,
+    compact: Boolean,
+    modifier: Modifier,
+) {
+    if (lines.none { it.timeMs > 0L }) return
+    val clock = rememberLyricClock(trackKey, playhead, isPlaying)
+    val index by remember(lines) {
+        derivedStateOf { lines.indexOfLast { it.timeMs <= clock.longValue && !it.isGap && it.text.isNotBlank() } }
+    }
+    val base = MaterialTheme.typography.headlineLarge.copy(
+        fontSize = if (compact) 17.sp else 27.sp,
+        lineHeight = if (compact) 22.sp else 34.sp,
+        fontWeight = FontWeight.ExtraBold,
+        textAlign = TextAlign.Center,
+        shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 8f),
+    )
+    val line = lines.getOrNull(index.coerceAtLeast(0))?.takeIf { index >= 0 }
+    val translated = translation.getOrNull(index)?.text?.takeIf { it.isNotBlank() && it != line?.text }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        androidx.compose.runtime.key(index) {
+            when {
+                line == null -> Spacer(Modifier.height(base.lineHeight.value.dp))
+                line.isWordSynced -> SweptLyricLine(
+                    line = line,
+                    clock = clock,
+                    style = base,
+                    dimAlpha = 0.55f,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    rise = false,
+                    laneLocked = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                else -> Text(
+                    text = line.text,
+                    style = base,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Text(
+                text = translated ?: "",
+                style = base.copy(
+                    fontSize = base.fontSize * 0.72f,
+                    lineHeight = base.lineHeight * 0.75f,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = Color.White.copy(alpha = 0.8f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

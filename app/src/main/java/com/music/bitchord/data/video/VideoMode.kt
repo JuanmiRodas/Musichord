@@ -90,6 +90,7 @@ object VideoMode {
         _on.value = p.getBoolean(KEY_ON, false)
         _lyrics.value = p.getBoolean("lyrics", true)
         _square.value = p.getBoolean("square", false)
+        _translation.value = p.getBoolean("translation", false)
     }
 
     fun setOn(value: Boolean) {
@@ -104,6 +105,11 @@ object VideoMode {
     /** Lyrics over the video (the fullscreen and player buttons). */
     val lyrics: StateFlow<Boolean> = _lyrics.asStateFlow()
     fun setLyrics(on: Boolean) { _lyrics.value = on; prefs?.edit()?.putBoolean("lyrics", on)?.apply() }
+
+    private val _translation = MutableStateFlow(false)
+    /** Fullscreen: the sung line with its translation, rather than two lines. */
+    val translation: StateFlow<Boolean> = _translation.asStateFlow()
+    fun setTranslation(on: Boolean) { _translation.value = on; prefs?.edit()?.putBoolean("translation", on)?.apply() }
 
     private val _square = MutableStateFlow(false)
     /** The video cropped into the album frame, rather than at its own shape. */

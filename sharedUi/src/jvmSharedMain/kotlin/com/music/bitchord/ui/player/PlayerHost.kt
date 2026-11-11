@@ -83,6 +83,10 @@ interface PlayerHost {
     val videoModeLyrics: StateFlow<Boolean> get() = NoVideoOn
     fun setVideoModeLyrics(on: Boolean) = Unit
 
+    /** BitChord Audio: fullscreen video lyrics as the sung line and its translation. */
+    val videoModeTranslation: StateFlow<Boolean> get() = NoVideoMode
+    fun setVideoModeTranslation(on: Boolean) = Unit
+
     /** BitChord Audio: the video cropped into the album frame. */
     val videoModeSquare: StateFlow<Boolean> get() = NoVideoMode
     fun setVideoModeSquare(on: Boolean) = Unit

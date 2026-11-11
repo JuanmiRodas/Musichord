@@ -954,6 +954,7 @@ fun NowPlayingScreen(
     val videoModeSquare by PlayerPlatform.host.videoModeSquare.collectAsStateWithLifecycle()
     val videoModeLyrics by PlayerPlatform.host.videoModeLyrics.collectAsStateWithLifecycle()
     val videoModeOriginalAudio by PlayerPlatform.host.videoModeOriginalAudio.collectAsStateWithLifecycle()
+    val videoModeTranslation by PlayerPlatform.host.videoModeTranslation.collectAsStateWithLifecycle()
     // Square video thumbnails: the picture takes the sleeve's own slot, cropped
     // to it, in place of the full-width box at the video's shape. In video
     // mode, the player's own aspect button decides.
@@ -2046,14 +2047,16 @@ fun NowPlayingScreen(
                     onOpenQuality = { showVideoQuality = true },
                     lyrics = if (videoOverlay && syncedLyricsEnabled) {
                         { m ->
+                            val withTranslation = videoModeTranslation && lyricsTranslation.translatedLines != null
                             VideoKaraokeLyrics(
-                                lines = lyricsTranslation.displayedLyrics,
+                                lines = if (withTranslation) lyricsTranslation.panelLines else lyricsTranslation.displayedLyrics,
                                 trackKey = song.videoId,
                                 playhead = lyricsPlayhead,
                                 isPlaying = isPlaying && position.advancing,
                                 durationMs = durationMs,
                                 compact = false,
                                 modifier = m,
+                                translation = if (withTranslation) lyricsTranslation.translatedLines else null,
                             )
                         }
                     } else {
@@ -2062,6 +2065,17 @@ fun NowPlayingScreen(
                     lyricsOn = videoModeLyrics,
                     onToggleLyrics = if (videoOverlay) {
                         { PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics) }
+                    } else {
+                        null
+                    },
+                    translationOn = videoModeTranslation,
+                    onToggleTranslation = if (videoOverlay) {
+                        {
+                            val on = !videoModeTranslation
+                            PlayerPlatform.host.setVideoModeTranslation(on)
+                            // Asked for once: the same translation the lyrics view uses.
+                            if (on && lyricsTranslation.translatedLines == null) lyricsTranslation.toggleTranslation()
+                        }
                     } else {
                         null
                     },

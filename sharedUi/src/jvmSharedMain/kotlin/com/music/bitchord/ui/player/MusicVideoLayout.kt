@@ -5,6 +5,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.MusicVideo
 import androidx.compose.material.icons.rounded.Subtitles
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -98,6 +99,8 @@ internal fun FullscreenVideoPlayer(
     onToggleLyrics: (() -> Unit)? = null,
     originalAudio: Boolean = false,
     onToggleOriginalAudio: (() -> Unit)? = null,
+    translationOn: Boolean = false,
+    onToggleTranslation: (() -> Unit)? = null,
     /** BitChord Audio: a double tap's skip, ±10 s. */
     onSeekBy: ((Long) -> Unit)? = null,
 ) {
@@ -258,6 +261,9 @@ internal fun FullscreenVideoPlayer(
                             }
                             onToggleLyrics?.let {
                                 VideoChromeButton(icon = Icons.Rounded.Subtitles, active = lyricsOn, onClick = it)
+                            }
+                            if (lyricsOn) onToggleTranslation?.let {
+                                VideoChromeButton(icon = Icons.Rounded.Translate, active = translationOn, onClick = it)
                             }
                         },
                     )
