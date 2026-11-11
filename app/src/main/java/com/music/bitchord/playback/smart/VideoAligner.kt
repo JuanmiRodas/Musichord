@@ -49,7 +49,7 @@ object VideoAligner {
     private const val MIN_AGREEMENT = 0.28
 
     /** song ms → video ms, sampled every [HOP_SEC], and linear in between. */
-    class Timeline(private val songMs: LongArray, private val videoMs: LongArray) {
+    class Timeline(internal val songMs: LongArray, internal val videoMs: LongArray) {
         fun map(audioMs: Long): Long {
             if (songMs.isEmpty()) return audioMs
             if (audioMs <= songMs[0]) return videoMs[0] - (songMs[0] - audioMs)
@@ -74,6 +74,55 @@ object VideoAligner {
     private val waiting = ConcurrentHashMap<String, Long>()
 
     fun timeline(mediaId: String, videoKey: String): Timeline? = results["$mediaId|$videoKey"]
+
+    // ── Kept: on the device, and (see CloudBackup) in pCloud ──
+
+    const val FILE = "video-sync.json"
+    @Volatile private var store: File? = null
+
+    /** Reads the syncs found before; each is measured once, ever. */
+    fun init(context: Context) {
+        val f = File(context.filesDir, FILE)
+        store = f
+        scope.launch(Dispatchers.IO) { load(f) }
+    }
+
+    /** (Again) after a restore from the backup. */
+    fun reload(context: Context) {
+        scope.launch(Dispatchers.IO) { load(File(context.filesDir, FILE)) }
+    }
+
+    private fun load(f: File) {
+        val text = runCatching { f.takeIf { it.isFile }?.readText() }.getOrNull() ?: return
+        runCatching {
+            val o = org.json.JSONObject(text)
+            o.keys().forEach { k ->
+                val e = o.getJSONObject(k)
+                val a = e.getJSONArray("s")
+                val b = e.getJSONArray("v")
+                val n = min(a.length(), b.length())
+                results[k] = Timeline(LongArray(n) { a.getLong(it) }, LongArray(n) { b.getLong(it) })
+                settled += k
+            }
+        }
+        TrackLog.d(TAG, "video sync: ${results.size} kept")
+    }
+
+    @Synchronized
+    private fun save() {
+        val f = store ?: return
+        val o = org.json.JSONObject()
+        results.forEach { (k, t) ->
+            // Every second is plenty to draw the line through.
+            val step = max(1, (1000 / (HOP_SEC * 1000)).toInt())
+            val idx = (t.songMs.indices step step).toList()
+            o.put(k, org.json.JSONObject().apply {
+                put("s", org.json.JSONArray(idx.map { t.songMs[it] }))
+                put("v", org.json.JSONArray(idx.map { t.videoMs[it] }))
+            })
+        }
+        runCatching { f.writeText(o.toString()) }
+    }
 
     /**
      * Aligns [song] with the video whose sound is at [audioUrl], once per
@@ -102,6 +151,7 @@ object VideoAligner {
             when (outcome) {
                 is Outcome.Aligned -> {
                     results[key] = outcome.timeline
+                    runCatching { save() }
                     TrackLog.d(TAG, "video sync for '${song.title}': aligned in ${System.currentTimeMillis() - started}ms")
                 }
                 Outcome.NoAudio, null -> {
