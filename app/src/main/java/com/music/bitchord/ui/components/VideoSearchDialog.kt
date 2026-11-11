@@ -127,6 +127,17 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
         confirmButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
+        // BitChord Audio: the video shown isn't this song's — unlinked and not offered again.
+        dismissButton = if (current != null) {
+            {
+                TextButton(onClick = {
+                    VideoMode.markWrong(song)
+                    onDismiss()
+                }) { Text(stringResource(R.string.video_mode_wrong)) }
+            }
+        } else {
+            null
+        },
     )
 }
 

@@ -577,6 +577,11 @@ object MusicVideoEngine {
             val source = if (sound != null) {
                 androidx.media3.exoplayer.source.MergingMediaSource(picture, factory.createMediaSource(MediaItem.fromUri(sound)))
             } else picture
+            // The picture player was built deaf (audio tracks off): its sound
+            // is decoded — silently, until asked for — only when it has one.
+            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, sound == null)
+                .build()
             if (stream.aspect > 0f) _aspect.value = stream.aspect
             _quality.value = _quality.value.copy(heights = stream.heights, activeHeight = stream.height)
             // BitChord Audio: video mode's picture for another recording than
@@ -629,6 +634,9 @@ object MusicVideoEngine {
         val upstream = OkHttpDataSource.Factory(Http.client).setDefaultRequestProperties(stream.headers)
         val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
             .createMediaSource(MediaItem.fromUri(stream.url))
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .build()
         if (stream.height > 0) _aspect.value = stream.width.toFloat() / stream.height
         _quality.value = _quality.value.copy(heights = emptyList(), activeHeight = stream.height)
         loadedProfile = null

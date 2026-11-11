@@ -58,6 +58,7 @@ object VideoMode {
     private const val TAG = "VideoMode"
     private const val KEY_ON = "on"
     private const val LINK = "link:"
+    private const val WRONG = "wrong:"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var prefs: SharedPreferences? = null
@@ -257,7 +258,7 @@ object VideoMode {
     private val unplayable = ConcurrentHashMap.newKeySet<String>()
 
     private suspend fun resolve(song: Song): VideoRef? {
-        val linked = linked(song)?.takeUnless { it.key in unplayable }
+        val linked = linked(song)?.takeUnless { it.key in unplayable || isWrong(song, it) }
         if (song.isVideo && LocalLikes.isYouTubeId(song.videoId) && song.videoId !in unplayable) {
             return VideoRef(VideoRef.Site.YOUTUBE, song.videoId)
         }
@@ -279,12 +280,41 @@ object VideoMode {
         val all = (listOfNotNull(linked) + listOfNotNull(paired?.let { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) }) +
             searched.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) })
             .distinctBy { it.key }
-            .filterNot { it.key in unplayable }
+            .filterNot { it.key in unplayable || isWrong(song, it) }
         val first = all.firstOrNull() ?: return null
         alternatives[song.videoId] = all.drop(1).take(5).toMutableList()
         if (base != null && paired != null && first.id == paired.videoId) pairedFrom[song.videoId] = base.videoId
         return first
     }
+
+    /**
+     * BitChord Audio: the video shown for [song] is the wrong one — unlinked,
+     * never offered for this song again, and the next likely video takes
+     * its place.
+     */
+    fun markWrong(song: Song) {
+        val ref = _ready.value[song.videoId] ?: linked(song) ?: return
+        val e = prefs?.edit() ?: return
+        keysOf(song).forEach { k ->
+            if (prefs?.getString(LINK + k, null)?.let(VideoRef::decode) == ref) e.remove(LINK + k)
+            val wrong = prefs?.getStringSet(WRONG + k, emptySet()).orEmpty() + ref.key
+            e.putStringSet(WRONG + k, wrong)
+        }
+        e.apply()
+        TrackLog.d(TAG, "video ${ref.encode()} marked wrong for '${song.title}'")
+        val next = alternatives[song.videoId]?.let { list ->
+            list.removeAll { it.key == ref.key || isWrong(song, it) }
+            list.removeFirstOrNull()
+        }
+        _ready.update { if (next != null) it + (song.videoId to next) else it - song.videoId }
+        if (next == null) {
+            missing.remove(song.videoId)
+            request(song, sayIfMissing = true)
+        } else if (next.site == VideoRef.Site.YOUTUBE) fetchNonMusic(next.id)
+    }
+
+    private fun isWrong(song: Song, ref: VideoRef): Boolean =
+        keysOf(song).any { k -> ref.key in prefs?.getStringSet(WRONG + k, emptySet()).orEmpty() }
 
     /**
      * BitChord Audio: [ref] can't be played here (YouTube refused every

@@ -1629,4 +1629,5 @@
         <item quantity="other">You\'ve liked %1$d songs by %2$s</item>
     </plurals>
     <string name="video_mode_original_audio">Original audio of the music video</string>
+    <string name="video_mode_wrong">Wrong video</string>
 </resources>
