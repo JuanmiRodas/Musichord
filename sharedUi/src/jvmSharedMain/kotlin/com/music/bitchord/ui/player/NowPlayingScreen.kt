@@ -959,7 +959,9 @@ fun NowPlayingScreen(
     // to it, in place of the full-width box at the video's shape. In video
     // mode, the player's own aspect button decides.
     val squareVideo = videoMode && (if (videoOverlay) videoModeSquare else VideoThumbnails.square)
-    val canvas = rememberCanvasArtwork(song)?.takeUnless { videoMode }?.let {
+    // BitChord Audio: kept for video mode, which shows it while its picture loads.
+    val canvasAny = rememberCanvasArtwork(song)
+    val canvas = canvasAny?.takeUnless { videoMode }?.let {
         // Apple's 3:4 rendition runs under the whole phone screen, the way its
         // own player shows it; the square one stays the fallback.
         val tall = it.portraitUrl
@@ -2045,6 +2047,7 @@ fun NowPlayingScreen(
                     onRenderedChanged = { videoRendered = it },
                     onExitFullscreen = exitFullscreen,
                     onOpenQuality = { showVideoQuality = true },
+                    loadingCanvas = canvasAny.takeIf { videoOverlay },
                     lyrics = if (videoOverlay && syncedLyricsEnabled) {
                         { m ->
                             val withTranslation = videoModeTranslation && lyricsTranslation.translatedLines != null
@@ -3696,6 +3699,9 @@ fun NowPlayingScreen(
                                             Modifier
                                                 .fillMaxSize()
                                                 .clip(RoundedCornerShape(10.dp)),
+                                            artRequest = art.request.takeIf { videoOverlay },
+                                            canvas = canvasAny.takeIf { videoOverlay },
+                                            isPlaying = isPlaying,
                                         )
                                     }
                                     MusicVideoSurface(

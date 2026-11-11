@@ -549,7 +549,11 @@ object MusicVideoEngine {
                 // Settled until something changes it: the age gate by a sign-in
                 // (which clears [noPicture]), the rest not at all. A network
                 // failure is asked again on the next surface or track change.
-                if (e.reason != StreamResolveException.Reason.NETWORK) noPicture += videoId
+                if (e.reason != StreamResolveException.Reason.NETWORK) {
+                    noPicture += videoId
+                    // BitChord Audio: video mode moves on to the song's next video.
+                    loadedFor?.let { forId -> if (forId != videoId || com.music.bitchord.data.video.VideoMode.on.value) com.music.bitchord.data.video.VideoMode.failed(forId, ref) }
+                }
                 return@launch
             } catch (e: Exception) {
                 // Not remembered as pictureless: the next surface or track
@@ -562,6 +566,7 @@ object MusicVideoEngine {
             // A catalogue track's "video" is its cover held still; nothing to show.
             if (stream == null || stream.aspect < MIN_VIDEO_ASPECT) {
                 noPicture += videoId
+                loadedFor?.let { forId -> if (com.music.bitchord.data.video.VideoMode.on.value) com.music.bitchord.data.video.VideoMode.failed(forId, ref) }
                 loadedId = null
                 return@launch
             }

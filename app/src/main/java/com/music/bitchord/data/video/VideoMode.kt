@@ -250,20 +250,58 @@ object VideoMode {
         }
     }
 
+    /** Other videos for a song, best first, for when the one chosen can't be played. */
+    private val alternatives = ConcurrentHashMap<String, MutableList<VideoRef>>()
+
+    /** Videos YouTube wouldn't play here; never offered again this session. */
+    private val unplayable = ConcurrentHashMap.newKeySet<String>()
+
     private suspend fun resolve(song: Song): VideoRef? {
-        linked(song)?.let { return it }
-        if (song.isVideo && LocalLikes.isYouTubeId(song.videoId)) return VideoRef(VideoRef.Site.YOUTUBE, song.videoId)
+        val linked = linked(song)?.takeUnless { it.key in unplayable }
+        if (song.isVideo && LocalLikes.isYouTubeId(song.videoId) && song.videoId !in unplayable) {
+            return VideoRef(VideoRef.Site.YOUTUBE, song.videoId)
+        }
         // The YouTube song this plays in place of, when it does: YouTube Music
         // pairs videos with its own songs (with a time map), not with files.
         val base = SongOrigins.originOf(song.videoId)?.takeIf { LocalLikes.isYouTubeId(it.videoId) }
             ?: song.takeIf { LocalLikes.isYouTubeId(it.videoId) }
         val search = base ?: song
-        val found = runCatching { YtMusicRepository.resolveVideo(search) }.getOrNull()
-            ?.takeUnless { TrackMatcher.isKaraokeLike(it.title, it.albumName) }
-            ?: bestVideo(song)
-        if (found == null) return null
-        if (base != null) pairedFrom[song.videoId] = base.videoId
-        return VideoRef(VideoRef.Site.YOUTUBE, found.videoId)
+        val paired = if (linked == null) {
+            runCatching { YtMusicRepository.resolveVideo(search) }.getOrNull()
+                ?.takeUnless { TrackMatcher.isKaraokeLike(it.title, it.albumName) }
+        } else null
+        // Every likely video, best first: the one you linked or YouTube pairs,
+        // then the search's matches — so a video YouTube won't play here
+        // gives way to the next rather than to nothing.
+        val searched = runCatching {
+            TrackMatcher.ranked(youTube("${song.title} ${song.artist.split(',').first().trim()}"), TrackMatcher.targetOf(song))
+        }.getOrDefault(emptyList())
+        val all = (listOfNotNull(linked) + listOfNotNull(paired?.let { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) }) +
+            searched.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) })
+            .distinctBy { it.key }
+            .filterNot { it.key in unplayable }
+        val first = all.firstOrNull() ?: return null
+        alternatives[song.videoId] = all.drop(1).take(5).toMutableList()
+        if (base != null && paired != null && first.id == paired.videoId) pairedFrom[song.videoId] = base.videoId
+        return first
+    }
+
+    /**
+     * BitChord Audio: [ref] can't be played here (YouTube refused every
+     * client): the song's next likely video takes its place.
+     */
+    fun failed(mediaId: String, ref: VideoRef) {
+        unplayable += ref.key
+        if (_ready.value[mediaId] != ref) return
+        val next = alternatives[mediaId]?.let { list ->
+            while (list.isNotEmpty() && list.first().key in unplayable) list.removeAt(0)
+            list.removeFirstOrNull()
+        }
+        pairedFrom.remove(mediaId)
+        TrackLog.d(TAG, "video ${ref.encode()} won't play here; " + (next?.let { "trying ${it.encode()}" } ?: "no other video"))
+        _ready.update { if (next != null) it + (mediaId to next) else it - mediaId }
+        if (next == null) missing += mediaId
+        else if (next.site == VideoRef.Site.YOUTUBE) fetchNonMusic(next.id)
     }
 
     /** BitChord Audio: the YouTube release of [song] — what it plays in place of, or the best match. */

@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import androidx.compose.ui.graphics.graphicsLayer
 import coil3.request.ImageRequest
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.ui.theme.HideSystemBars
@@ -101,6 +102,8 @@ internal fun FullscreenVideoPlayer(
     onToggleOriginalAudio: (() -> Unit)? = null,
     translationOn: Boolean = false,
     onToggleTranslation: (() -> Unit)? = null,
+    /** BitChord Audio: the animated cover to show while the picture loads. */
+    loadingCanvas: com.music.bitchord.data.canvas.CanvasArtwork? = null,
     /** BitChord Audio: a double tap's skip, ±10 s. */
     onSeekBy: ((Long) -> Unit)? = null,
 ) {
@@ -141,7 +144,7 @@ internal fun FullscreenVideoPlayer(
             },
     ) {
         // Black with a spinner until the picture's first frame lands.
-        if (!rendered) VideoLoadingBackdrop(Modifier.fillMaxSize())
+        if (!rendered) VideoLoadingBackdrop(Modifier.fillMaxSize(), artRequest = artRequest, canvas = loadingCanvas, isPlaying = isPlaying)
         MusicVideoSurface(
             videoId = song.videoId,
             fit = true,
@@ -294,13 +297,45 @@ internal fun FullscreenVideoPlayer(
  * fullscreen landscape player.
  */
 @Composable
-internal fun VideoLoadingBackdrop(modifier: Modifier = Modifier) {
+internal fun VideoLoadingBackdrop(
+    modifier: Modifier = Modifier,
+    /** BitChord Audio: video mode's stand-in — the cover, breathing, until the picture lands. */
+    artRequest: ImageRequest? = null,
+    /** BitChord Audio: the song's animated cover, shown in its place when there is one. */
+    canvas: com.music.bitchord.data.canvas.CanvasArtwork? = null,
+    isPlaying: Boolean = true,
+) {
+    if (artRequest == null && canvas == null) {
+        Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                color = Color.White,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(36.dp),
+            )
+        }
+        return
+    }
+    val breath = androidx.compose.animation.core.rememberInfiniteTransition(label = "videoWait")
+    val alpha by breath.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 0.95f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "videoWaitAlpha",
+    )
     Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(
-            color = Color.White,
-            strokeWidth = 3.dp,
-            modifier = Modifier.size(36.dp),
-        )
+        if (canvas != null) {
+            CanvasArtworkPlayer(canvas = canvas, isPlaying = isPlaying, modifier = Modifier.fillMaxSize())
+        } else if (artRequest != null) {
+            AsyncImage(
+                model = artRequest,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha },
+            )
+        }
     }
 }
 
