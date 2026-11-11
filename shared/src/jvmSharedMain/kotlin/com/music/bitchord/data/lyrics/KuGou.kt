@@ -109,20 +109,10 @@ object KuGou {
         // Credits ("作词：…") sit at the head as ordinary lines.
         val lines = parsed.dropWhile { CREDIT_TEXT.containsMatchIn(it.text) }
             .takeIf { l -> l.count { it.text.isNotBlank() } >= 2 } ?: return null
-        // Romaji, word by word, one entry per lyric line (credits included, so aligned from the end).
-        Regex("""\[language:([^\]]+)]""").find(text)?.groupValues?.get(1)?.let { b64 ->
-            runCatching {
-                val json = lyricsJson.parseToJsonElement(String(Base64.getDecoder().decode(b64), Charsets.UTF_8)).jsonObject
-                val romaji = json["content"]?.jsonArray?.map { it.jsonObject }
-                    ?.firstOrNull { it["type"]?.jsonPrimitive?.intOrNull == 0 }
-                    ?.get("lyricContent")?.jsonArray
-                    ?.map { row -> row.jsonArray.joinToString("") { it.jsonPrimitive.content }.trim() }
-                if (romaji != null && romaji.size >= parsed.size) {
-                    val offset = romaji.size - parsed.size
-                    parsed.forEachIndexed { i, l -> ProvidedRomaji.put(l.text, romaji[i + offset]) }
-                }
-            }
-        }
+        // BitChord Audio: the KRC's own romaji ([language:]) is not used. It is
+        // per syllable, character by character — "ama i" for 甘い — and leaves
+        // what it can't read as kanji ("予 ki" for 予期); the dictionary
+        // romanizer reads the whole line as words instead.
         return lines
     }
 

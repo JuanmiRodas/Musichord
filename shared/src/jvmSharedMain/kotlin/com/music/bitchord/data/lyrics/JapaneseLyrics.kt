@@ -33,6 +33,8 @@ object ProvidedRomaji {
         val o = original.trim()
         val r = romaji.trim()
         if (o.isEmpty() || r.isEmpty() || o == r || !NON_LATIN.containsMatchIn(o)) return
+        // Romaji that still has kanji or kana in it is a partial reading, not romaji.
+        if (NON_LATIN.containsMatchIn(r)) return
         if (byLine.size > 20_000) byLine.clear()
         byLine[o] = r
     }
@@ -42,7 +44,8 @@ object ProvidedRomaji {
         val needing = texts.filter { NON_LATIN.containsMatchIn(it) }
         if (needing.isEmpty()) return null
         val known = needing.count { byLine.containsKey(it.trim()) }
-        if (known < needing.size * 0.8) return null
+        // All or nothing: a line left in Japanese among romaji reads as a bug.
+        if (known < needing.size) return null
         return texts.map { byLine[it.trim()] ?: it }
     }
 

@@ -30,8 +30,25 @@ object JapaneseRomanizer {
     /** Lyrics that are Japanese: some kana, not just kanji (which Chinese shares). */
     fun isJapanese(lines: List<String>): Boolean = lines.any { KANA.containsMatchIn(it) }
 
-    fun romanize(line: String): String? {
-        if (!JapaneseReading.isJapanese(line)) return line
+    /** Spaces between two Japanese characters — how syllable-timed lyrics often spell a line ("甘 い 恋"). */
+    private val INNER_SPACE = Regex("""(?<=[\p{IsHan}\p{IsHiragana}\p{IsKatakana}ー々])[ \u3000]+(?=[\p{IsHan}\p{IsHiragana}\p{IsKatakana}ー々])""")
+
+    /** Kanji with their reading in brackets after them — "運命(さだめ)", "未来（あした）". */
+    private val RUBY = Regex("""[\p{IsHan}々〆ヶ]+[ \u3000]*[(（]([\p{IsHiragana}\p{IsKatakana}ー ]+)[)）]""")
+
+    /**
+     * BitChord Audio: the line as it should be read. A syllable-timed line
+     * spaced character by character is closed up, so the dictionary sees
+     * words (予期, not 予 and 期 read on their own — or not at all); and a
+     * reading the lyrics give in brackets is the reading, in place of the
+     * kanji's dictionary one, rather than read as well.
+     */
+    fun prepare(line: String): String =
+        RUBY.replace(line.replace(INNER_SPACE, "")) { it.groupValues[1].replace(" ", "") }
+
+    fun romanize(raw: String): String? {
+        if (!JapaneseReading.isJapanese(raw)) return raw
+        val line = prepare(raw)
         val tokenizer = JapaneseReading.tokenizerNow() ?: return null
         val tokens = runCatching { tokenizer.tokenize(line) }.getOrNull() ?: return null
         val out = StringBuilder()
