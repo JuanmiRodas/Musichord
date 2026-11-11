@@ -85,7 +85,10 @@ internal fun LyricsProviderSheet(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            sources.forEach { source ->
+            // BitChord Audio: just the three actions — the search finds every
+            // provider's lyrics at once, so the provider-by-provider list
+            // only stands in the way. (Kept for hosts without them.)
+            if (onFlagWrong == null && onTimeLyrics == null && onEditAliases == null) sources.forEach { source ->
                 LyricsProviderRow(
                     source = source,
                     state = states[source] ?: LyricsProviderState.NOT_FETCHED,

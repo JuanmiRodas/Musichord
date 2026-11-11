@@ -104,12 +104,6 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
     // Fields typed in (or cleared) by hand are left as they are.
     var titlesTouched by remember(song.videoId) { mutableStateOf(false) }
     var artistsTouched by remember(song.videoId) { mutableStateOf(false) }
-    LaunchedEffect(song.videoId) {
-        if (!current.isEmpty) return@LaunchedEffect
-        val s = LyricNames.suggest(song)
-        if (titles.isBlank() && !titlesTouched) titles = s.titles.joinToString("\n")
-        if (artists.isBlank() && !artistsTouched) artists = s.artists.joinToString("\n")
-    }
 
     fun saveNames() = LyricAliases.setUser(
         song.videoId,
@@ -145,6 +139,17 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
             jobs.forEach { it.join() }
             searching = null
         }
+    }
+
+    // BitChord Audio: and searched straight away — the answers are what
+    // this was opened for; the boxes are there to search again differently.
+    LaunchedEffect(song.videoId) {
+        if (current.isEmpty) {
+            val s = LyricNames.suggest(song)
+            if (titles.isBlank() && !titlesTouched) titles = s.titles.joinToString("\n")
+            if (artists.isBlank() && !artistsTouched) artists = s.artists.joinToString("\n")
+        }
+        search()
     }
 
     AlertDialog(
