@@ -560,7 +560,11 @@ object MusicVideoEngine {
                 com.music.bitchord.data.video.VideoMode.timeMap(forId, ref) == null
             ) {
                 controller?.currentMediaItem?.toSong()?.takeIf { it.videoId == forId }?.let { song ->
-                    com.music.bitchord.playback.smart.VideoAligner.request(ctx, song, videoId, itsSound, stream.headers)
+                    com.music.bitchord.playback.smart.VideoAligner.request(ctx, song, videoId, itsSound, stream.headers) {
+                        val yt = com.music.bitchord.data.video.VideoMode.youTubeSongOf(song) ?: return@request null
+                        val got = withContext(Dispatchers.IO) { InnerTubeXResolver.extract(yt, 64) } ?: return@request null
+                        got.url to got.headers
+                    }
                 }
             }
             loadedProfile = stream.profileId

@@ -266,6 +266,18 @@ object VideoMode {
         return VideoRef(VideoRef.Site.YOUTUBE, found.videoId)
     }
 
+    /** BitChord Audio: the YouTube release of [song] — what it plays in place of, or the best match. */
+    suspend fun youTubeSongOf(song: Song): String? {
+        if (LocalLikes.isYouTubeId(song.videoId) && !song.isVideo) return song.videoId
+        SongOrigins.originOf(song.videoId)?.takeIf { LocalLikes.isYouTubeId(it.videoId) && !it.isVideo }?.let { return it.videoId }
+        LocalLikes.youTubeOf(song.videoId)?.let { return it }
+        val results = YtMusicRepository.search("${song.title} ${song.artist.split(',').first().trim()}", SearchFilter.SONGS)
+            .getOrNull().orEmpty()
+            .mapNotNull { (it as? SearchResult.Track)?.song ?: (it as? SearchResult.TopTrack)?.song }
+            .filterNot { it.isVideo }
+        return TrackMatcher.best(results, TrackMatcher.targetOf(song))?.videoId
+    }
+
     /** The closest YouTube video to [song] by title, artist and length. */
     private suspend fun bestVideo(song: Song): Song? {
         val results = youTube("${song.title} ${song.artist.split(',').first().trim()}")

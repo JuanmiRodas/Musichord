@@ -68,56 +68,118 @@ object VideoAligner {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val results = ConcurrentHashMap<String, Timeline>()
-    private val tried = ConcurrentHashMap.newKeySet<String>()
+    /** Pairs being aligned, or settled (aligned, or not the same music). */
+    private val settled = ConcurrentHashMap.newKeySet<String>()
+    /** When a pair last couldn't be tried (no audio for the song yet); asked again after a while. */
+    private val waiting = ConcurrentHashMap<String, Long>()
 
     fun timeline(mediaId: String, videoKey: String): Timeline? = results["$mediaId|$videoKey"]
 
-    /** Aligns [song] with the video whose sound is at [audioUrl], once per pair, in the background. */
-    fun request(context: Context, song: Song, videoKey: String, audioUrl: String, headers: Map<String, String>) {
+    /**
+     * Aligns [song] with the video whose sound is at [audioUrl], once per
+     * pair, in the background. The song is read from the device or the cache
+     * when it's there, else fetched through [songSound] — a pCloud file isn't
+     * cached the way a stream is.
+     */
+    fun request(
+        context: Context,
+        song: Song,
+        videoKey: String,
+        audioUrl: String,
+        headers: Map<String, String>,
+        songSound: (suspend () -> Pair<String, Map<String, String>>?)? = null,
+    ) {
         val key = "${song.videoId}|$videoKey"
-        if (!tried.add(key)) return
+        waiting[key]?.let { if (System.currentTimeMillis() - it < 30_000) return }
+        if (!settled.add(key)) return
+        waiting.remove(key)
         val app = context.applicationContext
         scope.launch {
             val started = System.currentTimeMillis()
-            val timeline = runCatching { align(app, song, audioUrl, headers) }
+            val outcome = runCatching { align(app, song, audioUrl, headers, songSound) }
                 .onFailure { TrackLog.w(TAG, "video sync for '${song.title}' failed: ${it.message}") }
                 .getOrNull()
-            if (timeline != null) {
-                results[key] = timeline
-                TrackLog.d(TAG, "video sync for '${song.title}': aligned in ${System.currentTimeMillis() - started}ms")
+            when (outcome) {
+                is Outcome.Aligned -> {
+                    results[key] = outcome.timeline
+                    TrackLog.d(TAG, "video sync for '${song.title}': aligned in ${System.currentTimeMillis() - started}ms")
+                }
+                Outcome.NoAudio, null -> {
+                    // Not settled: asked again when the picture next loads, or a little later.
+                    settled.remove(key)
+                    waiting[key] = System.currentTimeMillis()
+                }
+                Outcome.Different -> Unit
             }
         }
     }
 
-    private fun align(context: Context, song: Song, audioUrl: String, headers: Map<String, String>): Timeline? {
-        val songSource = VersionAudioAligner.openDataSource(context, song) ?: run {
-            TrackLog.d(TAG, "video sync for '${song.title}': the song isn't on the device yet")
-            return null
-        }
-        val songPcm = try {
-            AudioDecoder.decodeDownsampled(songSource, 0.0, MAX_SECONDS, RATE)
-        } finally {
-            runCatching { songSource.close() }
-        } ?: return null
+    private sealed interface Outcome {
+        class Aligned(val timeline: Timeline) : Outcome
+        data object NoAudio : Outcome
+        data object Different : Outcome
+    }
+
+    private suspend fun align(
+        context: Context,
+        song: Song,
+        audioUrl: String,
+        headers: Map<String, String>,
+        songSound: (suspend () -> Pair<String, Map<String, String>>?)?,
+    ): Outcome {
+        val songPcm = VersionAudioAligner.openDataSource(context, song)?.let { source ->
+            try {
+                AudioDecoder.decodeDownsampled(source, 0.0, MAX_SECONDS, RATE)
+            } finally {
+                runCatching { source.close() }
+            }
+        }?.takeIf { it.first.samples.size > RATE * 30 } ?: run {
+            // Not on the device (a pCloud file streams past the cache): the
+            // same song's own release, fetched small.
+            val (url, h) = songSound?.invoke() ?: run {
+                TrackLog.d(TAG, "video sync for '${song.title}': no audio of the song to compare yet")
+                return Outcome.NoAudio
+            }
+            val f = File(context.cacheDir, "video-sync-song-${url.hashCode().toUInt()}.audio")
+            try {
+                if (!download(url, h, f)) return Outcome.NoAudio
+                val src = FileSource(f)
+                try {
+                    AudioDecoder.decodeDownsampled(src, 0.0, MAX_SECONDS, RATE)
+                } finally {
+                    runCatching { src.close() }
+                }
+            } finally {
+                f.delete()
+            }
+        } ?: return Outcome.NoAudio
         val file = File(context.cacheDir, "video-sync-${audioUrl.hashCode().toUInt()}.audio")
         try {
-            if (!download(audioUrl, headers, file)) return null
+            if (!download(audioUrl, headers, file)) return Outcome.NoAudio
             val videoSource = FileSource(file)
             val videoPcm = try {
                 AudioDecoder.decodeDownsampled(videoSource, 0.0, MAX_SECONDS, RATE)
             } finally {
                 runCatching { videoSource.close() }
-            } ?: return null
+            } ?: return Outcome.NoAudio
 
             val a = chroma(songPcm.first.samples, songPcm.first.sampleRate)
-            val b = chroma(videoPcm.first.samples, videoPcm.first.sampleRate)
-            if (a.size < 50 || b.size < 50) return null
+            val b0 = chroma(videoPcm.first.samples, videoPcm.first.sampleRate)
+            if (a.size < 50 || b0.size < 50) return Outcome.NoAudio
+            // A live take is often sung lower (or higher): the video's notes are
+            // turned to the song's key first.
+            val shift = keyShift(a, b0)
+            val b = if (shift == 0) b0 else Array(b0.size) { i -> FloatArray(12) { k -> b0[i][(k + shift) % 12] } }
             val songStart = songPcm.second
             val videoStart = videoPcm.second
-            val (path, agreement) = dtw(a, b) ?: return null
-            TrackLog.d(TAG, "video sync for '${song.title}': agreement ${"%.2f".format(agreement)} over ${a.size}×${b.size} frames")
-            if (agreement < MIN_AGREEMENT) return null
-            return timelineOf(path, a.size, songStart, videoStart)
+            val (path, agreement) = dtw(a, b) ?: return Outcome.Different
+            TrackLog.d(
+                TAG,
+                "video sync for '${song.title}': agreement ${"%.2f".format(agreement)} over ${a.size}×${b.size} frames" +
+                    (if (shift != 0) ", key shifted $shift" else ""),
+            )
+            if (agreement < MIN_AGREEMENT) return Outcome.Different
+            return Outcome.Aligned(timelineOf(path, a.size, songStart, videoStart))
         } finally {
             file.delete()
         }
@@ -194,22 +256,50 @@ object VideoAligner {
                 val note = binNote[k]
                 if (note >= 0) c[note] += sqrt(re[k] * re[k] + im[k] * im[k])
             }
-            // Log-compressed, centred, unit length: a frame's shape, not its loudness.
-            var mean = 0f
+            // Log-compressed, and each frame scaled to its own total: a
+            // frame's balance of notes, not its loudness.
+            var total = 0f
             for (i in 0 until 12) {
                 c[i] = ln(1f + 10f * c[i])
-                mean += c[i]
+                total += c[i]
             }
+            if (total > 1e-6f) for (i in 0 until 12) c[i] /= total
+            c
+        }.let(::smoothed)
+    }
+
+    /**
+     * Each frame averaged with its neighbours (about two seconds) and then
+     * centred to unit length: the harmony of a passage rather than of an
+     * instant, which is what a different performance keeps — the CENS idea.
+     */
+    private fun smoothed(raw: Array<FloatArray>): Array<FloatArray> {
+        val w = 2
+        return Array(raw.size) { i ->
+            val c = FloatArray(12)
+            val lo = max(0, i - w)
+            val hi = min(raw.size - 1, i + w)
+            for (j in lo..hi) for (k in 0 until 12) c[k] += raw[j][k]
+            var mean = 0f
+            for (k in 0 until 12) mean += c[k]
             mean /= 12
             var norm = 0f
-            for (i in 0 until 12) {
-                c[i] -= mean
-                norm += c[i] * c[i]
+            for (k in 0 until 12) {
+                c[k] -= mean
+                norm += c[k] * c[k]
             }
             norm = sqrt(norm)
-            if (norm > 1e-6f) for (i in 0 until 12) c[i] /= norm else c.fill(0f)
+            if (norm > 1e-6f) for (k in 0 until 12) c[k] /= norm else c.fill(0f)
             c
         }
+    }
+
+    /** The rotation of [b]'s notes that best matches [a]'s overall harmony. */
+    private fun keyShift(a: Array<FloatArray>, b: Array<FloatArray>): Int {
+        fun profile(x: Array<FloatArray>) = FloatArray(12) { k -> x.sumOf { it[k].toDouble() }.toFloat() / x.size }
+        val pa = profile(a)
+        val pb = profile(b)
+        return (0 until 12).maxByOrNull { s -> (0 until 12).sumOf { k -> (pa[k] * pb[(k + s) % 12]).toDouble() } } ?: 0
     }
 
     private fun fft(re: FloatArray, im: FloatArray) {
