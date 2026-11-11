@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
 import coil3.request.ImageRequest
 import com.music.bitchord.data.model.Song
@@ -320,7 +321,7 @@ internal fun VideoLoadingBackdrop(
         initialValue = 0.45f,
         targetValue = 0.95f,
         animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            tween<Float>(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             androidx.compose.animation.core.RepeatMode.Reverse,
         ),
         label = "videoWaitAlpha",
