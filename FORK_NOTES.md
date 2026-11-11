@@ -231,3 +231,9 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 - Sync: YouTube time map > VideoAligner (chroma CENS + key shift + DTW, song audio from cache or its YouTube release; started after first frame) > SponsorBlock music_offtopic. Syncs kept in filesDir/video-sync.json.
 - Video's own sound: audio merged silently in video mode; toggle swaps volumes (no reload).
 - CloudBackup: daily backup of per-song prefs + video-sync.json to pCloud .bitchord-audio/backup/, restored when missing locally.
+
+## Video mode: bars, on-screen text, quick lyric offset
+- After the first frame the engine samples small frames every 1.5 s: black bars at top/bottom and text-like edges in the bottom third.
+- Result (`looks:<song>` in bitchord_video_mode prefs, so backed up to pCloud) is reused next time without measuring.
+- Square/edge framings zoom smoothly past the bars; lyrics shade goes to 0.95 when the video has its own text (player and fullscreen).
+- ±0.5 s lyric offset chips at the video's bottom corners while its controls show.
