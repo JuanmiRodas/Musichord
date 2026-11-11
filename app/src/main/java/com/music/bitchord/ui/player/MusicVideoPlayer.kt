@@ -244,6 +244,7 @@ object MusicVideoEngine {
             _frameOn.value = top()
             _shownVideoId.value = loadedFor
             applySound()
+            startAlign()
         }
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -255,6 +256,12 @@ object MusicVideoEngine {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY && _dip.value) {
+                scope.launch {
+                    delay(120)
+                    _dip.value = false
+                }
+            }
             if (playbackState == Player.STATE_READY && seekStartedAt > 0L) {
                 val took = System.currentTimeMillis() - seekStartedAt
                 seekLeadMs = ((seekLeadMs + took) / 2).coerceIn(0L, 1_500L)
@@ -432,6 +439,25 @@ object MusicVideoEngine {
         return audioMs
     }
 
+    /** BitChord Audio: the sync measurement waiting for the picture to be up — see [VideoAligner]. */
+    private var pendingAlign: (() -> Unit)? = null
+    private var alignJob: Job? = null
+
+    private fun startAlign() {
+        val go = pendingAlign ?: return
+        pendingAlign = null
+        alignJob?.cancel()
+        go()
+    }
+
+    private val _dip = MutableStateFlow(false)
+
+    /**
+     * BitChord Audio: true for the moment the picture jumps to a new place
+     * (a sync found later, a large drift) — the surface fades through it.
+     */
+    val dip: StateFlow<Boolean> = _dip.asStateFlow()
+
     /** BitChord Audio: the video's own sound in place of the song's — see [VideoMode.originalAudio]. */
     private var videoSound = false
 
@@ -560,10 +586,19 @@ object MusicVideoEngine {
                 com.music.bitchord.data.video.VideoMode.timeMap(forId, ref) == null
             ) {
                 controller?.currentMediaItem?.toSong()?.takeIf { it.videoId == forId }?.let { song ->
+                    pendingAlign = {
                     com.music.bitchord.playback.smart.VideoAligner.request(ctx, song, videoId, itsSound, stream.headers) {
                         val yt = com.music.bitchord.data.video.VideoMode.youTubeSongOf(song) ?: return@request null
                         val got = withContext(Dispatchers.IO) { InnerTubeXResolver.extract(yt, 64) } ?: return@request null
                         got.url to got.headers
+                    }
+                    }
+                    // Started once the picture is up (or after 5 s regardless):
+                    // the measuring mustn't hold the video back.
+                    alignJob?.cancel()
+                    alignJob = scope.launch {
+                        delay(5_000)
+                        startAlign()
                     }
                 }
             }
@@ -623,6 +658,9 @@ object MusicVideoEngine {
         loadedFor = null
         loadedProfile = null
         _shownVideoId.value = null
+        pendingAlign = null
+        alignJob?.cancel()
+        _dip.value = false
         applySound()
         _frameOn.value = null
         _quality.value = _quality.value.copy(heights = emptyList(), activeHeight = null)
@@ -662,7 +700,23 @@ object MusicVideoEngine {
         if (exo.playbackState == Player.STATE_BUFFERING) return
         val drift = exo.currentPosition - audioPos
         if (abs(drift) > SEEK_DRIFT_MS) {
-            if (now - lastSeekAt > SEEK_COOLDOWN_MS) seek(exo, audioPos + seekLeadMs)
+            if (now - lastSeekAt > SEEK_COOLDOWN_MS) {
+                // A jump of seconds (the sync arriving, a scrub): faded through.
+                if (abs(drift) > 2_000L && _shownVideoId.value != null) {
+                    _dip.value = true
+                    val target = audioPos + seekLeadMs
+                    lastSeekAt = now
+                    scope.launch {
+                        delay(180)
+                        seek(exo, videoPosition(audio.currentPosition) + seekLeadMs)
+                        delay(2_000)
+                        _dip.value = false
+                    }
+                    if (target < 0) return
+                } else {
+                    seek(exo, audioPos + seekLeadMs)
+                }
+            }
             return
         }
         // Catch up (or wait) over about a second, rather than jumping —
@@ -748,9 +802,10 @@ internal fun AndroidMusicVideo(
     LaunchedEffect(rendered) { report(rendered) }
     DisposableEffect(Unit) { onDispose { report(false) } }
 
+    val dip by MusicVideoEngine.dip.collectAsStateWithLifecycle()
     val alpha by animateFloatAsState(
-        targetValue = if (rendered) 1f else 0f,
-        animationSpec = tween(durationMillis = 320),
+        targetValue = if (rendered && !dip) 1f else 0f,
+        animationSpec = tween(durationMillis = if (dip) 160 else 320),
         label = "musicVideoAlpha",
     )
 
