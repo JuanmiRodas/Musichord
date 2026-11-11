@@ -70,6 +70,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.MusicVideo
 import androidx.compose.material.icons.rounded.Subtitles
@@ -3724,14 +3725,19 @@ fun NowPlayingScreen(
                                                 .videoLyricsScrim(0.72f)
                                                 .padding(start = 14.dp, end = 14.dp, top = 30.dp, bottom = 10.dp),
                                         ) {
+                                            // One line here — the sung one — with its
+                                            // translation under it when that's on.
+                                            val withTranslation = videoModeTranslation && lyricsTranslation.translatedLines != null
                                             VideoKaraokeLyrics(
-                                                lines = lyricsTranslation.displayedLyrics,
+                                                lines = if (withTranslation) lyricsTranslation.panelLines else lyricsTranslation.displayedLyrics,
                                                 trackKey = song.videoId,
                                                 playhead = lyricsPlayhead,
                                                 isPlaying = isPlaying && position.advancing,
                                                 durationMs = durationMs,
                                                 compact = true,
                                                 modifier = Modifier.fillMaxWidth(),
+                                                translation = if (withTranslation) lyricsTranslation.translatedLines else null,
+                                                singleLine = true,
                                             )
                                         }
                                     }
@@ -3759,6 +3765,17 @@ fun NowPlayingScreen(
                                                     active = videoModeLyrics,
                                                     onClick = { PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics) },
                                                 )
+                                                if (videoModeLyrics) {
+                                                    VideoChromeButton(
+                                                        icon = Icons.Rounded.Translate,
+                                                        active = videoModeTranslation,
+                                                        onClick = {
+                                                            val on = !videoModeTranslation
+                                                            PlayerPlatform.host.setVideoModeTranslation(on)
+                                                            if (on && lyricsTranslation.translatedLines == null) lyricsTranslation.toggleTranslation()
+                                                        },
+                                                    )
+                                                }
                                             }
                                         },
                                         modifier = Modifier

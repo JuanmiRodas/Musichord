@@ -3428,8 +3428,10 @@ internal fun VideoKaraokeLyrics(
     modifier: Modifier = Modifier,
     /** BitChord Audio: the sung line with its translation under it, in place of the next line. */
     translation: List<LyricLine>? = null,
+    /** BitChord Audio: just the sung line (and its [translation], if given). */
+    singleLine: Boolean = false,
 ) {
-    if (translation != null) {
+    if (translation != null || singleLine) {
         VideoLyricWithTranslation(lines, translation, trackKey, playhead, isPlaying, compact, modifier)
         return
     }
@@ -3495,7 +3497,7 @@ internal fun VideoKaraokeLyrics(
 @Composable
 private fun VideoLyricWithTranslation(
     lines: List<LyricLine>,
-    translation: List<LyricLine>,
+    translation: List<LyricLine>?,
     trackKey: String,
     playhead: LyricPlayhead,
     isPlaying: Boolean,
@@ -3515,7 +3517,7 @@ private fun VideoLyricWithTranslation(
         shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 8f),
     )
     val line = lines.getOrNull(index.coerceAtLeast(0))?.takeIf { index >= 0 }
-    val translated = translation.getOrNull(index)?.text?.takeIf { it.isNotBlank() && it != line?.text }
+    val translated = translation?.getOrNull(index)?.text?.takeIf { it.isNotBlank() && it != line?.text }
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp),
@@ -3544,7 +3546,7 @@ private fun VideoLyricWithTranslation(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Text(
+            if (translation != null) Text(
                 text = translated ?: "",
                 style = base.copy(
                     fontSize = base.fontSize * 0.72f,
