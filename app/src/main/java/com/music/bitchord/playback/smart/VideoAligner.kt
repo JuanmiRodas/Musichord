@@ -14,6 +14,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.max
@@ -50,6 +51,9 @@ object VideoAligner {
 
     /** song ms → video ms, sampled every [HOP_SEC], and linear in between. */
     class Timeline(internal val songMs: LongArray, internal val videoMs: LongArray) {
+        var sections = 0
+        var cuts = 0
+        fun describe() = "$sections section(s), $cuts cut(s), starts at +${if (songMs.isEmpty()) 0 else (videoMs[0] - songMs[0]) / 1000.0}s"
         fun map(audioMs: Long): Long {
             if (songMs.isEmpty()) return audioMs
             if (audioMs <= songMs[0]) return videoMs[0] - (songMs[0] - audioMs)
@@ -77,7 +81,7 @@ object VideoAligner {
 
     // ── Kept: on the device, and (see CloudBackup) in pCloud ──
 
-    const val FILE = "video-sync.json"
+    const val FILE = "video-sync-v2.json"
     @Volatile private var store: File? = null
 
     /** Reads the syncs found before; each is measured once, ever. */
@@ -222,14 +226,17 @@ object VideoAligner {
             val b = if (shift == 0) b0 else Array(b0.size) { i -> FloatArray(12) { k -> b0[i][(k + shift) % 12] } }
             val songStart = songPcm.second
             val videoStart = videoPcm.second
-            val (path, agreement) = dtw(a, b) ?: return Outcome.Different
+            val path = dtw(a, b) ?: return Outcome.Different
+            val agreement = path.mean
             TrackLog.d(
                 TAG,
                 "video sync for '${song.title}': agreement ${"%.2f".format(agreement)} over ${a.size}×${b.size} frames" +
                     (if (shift != 0) ", key shifted $shift" else ""),
             )
             if (agreement < MIN_AGREEMENT) return Outcome.Different
-            return Outcome.Aligned(timelineOf(path, a.size, songStart, videoStart))
+            val timeline = timelineOf(path, a.size, songStart, videoStart)
+            TrackLog.d(TAG, "video sync for '${song.title}': ${timeline.describe()}")
+            return Outcome.Aligned(timeline)
         } finally {
             file.delete()
         }
@@ -398,7 +405,9 @@ object VideoAligner {
     // ── Dynamic time warping, free start and end in the video ──
 
     /** For each song frame, its video frame; and how well the notes agreed along the way. */
-    private fun dtw(a: Array<FloatArray>, b: Array<FloatArray>): Pair<IntArray, Double>? {
+    private class Path(val video: IntArray, val agree: FloatArray, val mean: Double)
+
+    private fun dtw(a: Array<FloatArray>, b: Array<FloatArray>): Path? {
         val n = a.size
         val m = b.size
         if (n.toLong() * m > 4_000_000L) return null
@@ -435,11 +444,13 @@ object VideoAligner {
         var j = (0 until m).minByOrNull { d[n - 1][it] } ?: return null
         if (d[n - 1][j].isInfinite()) return null
         val map = IntArray(n)
+        val agree = FloatArray(n)
         var i = n - 1
         var agreement = 0.0
         var steps = 0
         while (i >= 0 && j >= 0) {
             map[i] = j
+            agree[i] = 1f - cost(i, j)
             agreement += 1.0 - cost(i, j)
             steps++
             if (i == 0) break
@@ -448,24 +459,124 @@ object VideoAligner {
                 1 -> { i -= 1; j -= 2 }
                 else -> {
                     map[i - 1] = j
+                    agree[i - 1] = 1f - cost(i - 1, j)
                     i -= 2; j -= 1
                 }
             }
             if (j < 0) return null
         }
-        return map to (agreement / steps.coerceAtLeast(1))
+        return Path(map, agree, agreement / steps.coerceAtLeast(1))
     }
 
-    /** The path, smoothed (a running median), as song ms → video ms. */
-    private fun timelineOf(path: IntArray, frames: Int, songStartSec: Double, videoStartSec: Double): Timeline {
+    /**
+     * The path as a timeline that holds still. A warping path wobbles by a
+     * frame or two all along — followed literally, the picture would be
+     * re-placed every few seconds. So the path is read as *offsets* (video
+     * minus song), and:
+     *  - stretches where the notes don't really agree (a solo played
+     *    differently, crowd noise) don't get a say: they keep the offset of
+     *    the nearest stretch that does;
+     *  - the offset is smoothed over ~10 s, then cut into sections that each
+     *    keep one offset while it stays within ±0.8 s of where it began;
+     *  - neighbouring sections close together (a live band speeding up)
+     *    are joined by a ramp the picture follows by playing a little faster
+     *    or slower; only a real cut — a skit, a break, an extended intro —
+     *    is a jump, and the picture fades through it.
+     */
+    private fun timelineOf(path: Path, frames: Int, songStartSec: Double, videoStartSec: Double): Timeline {
         val hopMs = HOP_SEC * 1000
-        val smooth = IntArray(frames) { i ->
-            val lo = max(0, i - 5)
-            val hi = min(frames - 1, i + 5)
-            path.copyOfRange(lo, hi + 1).sorted()[(hi - lo) / 2]
+        val raw = IntArray(frames) { path.video[it] - it }
+        // Local agreement, over ~10 s.
+        val win = (10.0 / HOP_SEC).toInt()
+        val local = FloatArray(frames) { i ->
+            val lo = max(0, i - win / 2)
+            val hi = min(frames - 1, i + win / 2)
+            var sum = 0f
+            for (k in lo..hi) sum += path.agree[k]
+            sum / (hi - lo + 1)
         }
+        val trusted = BooleanArray(frames) { local[it] >= max(MIN_AGREEMENT.toFloat(), (path.mean * 0.8).toFloat()) }
+        val offset = IntArray(frames)
+        if (trusted.none { it }) {
+            raw.copyInto(offset)
+        } else {
+            // Untrusted frames take the nearest trusted frame's offset.
+            var last = -1
+            val nextTrusted = IntArray(frames) { -1 }
+            var nt = -1
+            for (i in frames - 1 downTo 0) {
+                if (trusted[i]) nt = i
+                nextTrusted[i] = nt
+            }
+            for (i in 0 until frames) {
+                if (trusted[i]) {
+                    last = i
+                    offset[i] = raw[i]
+                } else {
+                    val n = nextTrusted[i]
+                    val pick = when {
+                        last < 0 -> n
+                        n < 0 -> last
+                        i - last <= n - i -> last
+                        else -> n
+                    }
+                    offset[i] = raw[pick]
+                }
+            }
+        }
+        // Running median over ~10 s.
+        val smooth = IntArray(frames) { i ->
+            val lo = max(0, i - win / 2)
+            val hi = min(frames - 1, i + win / 2)
+            offset.copyOfRange(lo, hi + 1).sorted()[(hi - lo) / 2]
+        }
+        // Sections of one offset.
+        val tolerance = max(1, (0.8 / HOP_SEC).toInt())
+        data class Section(val start: Int, var end: Int, var value: Int)
+        val sections = ArrayList<Section>()
+        var startAt = 0
+        while (startAt < frames) {
+            val anchor = smooth[startAt]
+            var end = startAt
+            while (end + 1 < frames && abs(smooth[end + 1] - anchor) <= tolerance) end++
+            val median = smooth.copyOfRange(startAt, end + 1).sorted()[(end - startAt) / 2]
+            sections += Section(startAt, end, median)
+            startAt = end + 1
+        }
+        // Too-short sections (under ~8 s) are folded into a neighbour.
+        val minLen = (8.0 / HOP_SEC).toInt()
+        var k = 0
+        while (sections.size > 1 && k < sections.size) {
+            val sct = sections[k]
+            if (sct.end - sct.start + 1 < minLen) {
+                val into = if (k > 0) k - 1 else k + 1
+                val other = sections[into]
+                if (into < k) other.end = sct.end else sections[into] = Section(sct.start, other.end, other.value)
+                sections.removeAt(k)
+                k = max(0, k - 1)
+            } else k++
+        }
+        // Offsets per frame: flat within a section; between close sections a
+        // ramp over the last ~6 s; a real cut stays a step.
+        val ramp = (6.0 / HOP_SEC).toInt()
+        val jump = (1.5 / HOP_SEC).toInt()
+        val final = DoubleArray(frames)
+        for ((index, sct) in sections.withIndex()) {
+            for (f in sct.start..sct.end) final[f] = sct.value.toDouble()
+            val next = sections.getOrNull(index + 1) ?: continue
+            if (abs(next.value - sct.value) > jump) continue
+            val from = max(sct.start, sct.end - ramp + 1)
+            for (f in from..sct.end) {
+                val t = (f - from + 1).toDouble() / (sct.end - from + 2)
+                final[f] = sct.value + t * (next.value - sct.value)
+            }
+        }
+        jumps = sections.zipWithNext().count { (x, y) -> abs(y.value - x.value) > jump }
         val songMs = LongArray(frames) { ((songStartSec * 1000) + it * hopMs).toLong() }
-        val videoMs = LongArray(frames) { ((videoStartSec * 1000) + smooth[it] * hopMs).toLong() }
-        return Timeline(songMs, videoMs)
+        val videoMs = LongArray(frames) { ((videoStartSec * 1000) + (it + final[it]) * hopMs).toLong() }
+        return Timeline(songMs, videoMs).also { it.sections = sections.size; it.cuts = jumps }
     }
+
+    @Volatile private var jumps = 0
+
 }

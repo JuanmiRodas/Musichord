@@ -84,6 +84,8 @@ object MusicVideoEngine {
 
     /** No second seek inside this, while the first is still landing. */
     private const val SEEK_COOLDOWN_MS = 1_500L
+    private const val MAPPED_SEEK_DRIFT_MS = 1_200L
+    private const val MAPPED_SEEK_COOLDOWN_MS = 5_000L
 
     /** How long the picture outlives its last surface: a rotation, a sheet reopened. */
     private const val RELEASE_GRACE_MS = 4_000L
@@ -699,8 +701,16 @@ object MusicVideoEngine {
         exo.playWhenReady = true
         if (exo.playbackState == Player.STATE_BUFFERING) return
         val drift = exo.currentPosition - audioPos
-        if (abs(drift) > SEEK_DRIFT_MS) {
-            if (now - lastSeekAt > SEEK_COOLDOWN_MS) {
+        // BitChord Audio: a video that isn't the playing recording is held
+        // more loosely — re-placed only when it's more than a second out, and
+        // at most every 5 s; the rest is caught up by playing a touch faster
+        // or slower. Its timeline is approximate, and a picture re-placed
+        // every time it wobbled is the stutter.
+        val mapped = loadedFor != null && loadedFor != loadedId
+        val seekAt = if (mapped) MAPPED_SEEK_DRIFT_MS else SEEK_DRIFT_MS
+        val cooldown = if (mapped) MAPPED_SEEK_COOLDOWN_MS else SEEK_COOLDOWN_MS
+        if (abs(drift) > seekAt) {
+            if (now - lastSeekAt > cooldown) {
                 // A jump of seconds (the sync arriving, a scrub): faded through.
                 if (abs(drift) > 2_000L && _shownVideoId.value != null) {
                     _dip.value = true
