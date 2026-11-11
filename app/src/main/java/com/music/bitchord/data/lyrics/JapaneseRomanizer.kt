@@ -54,7 +54,11 @@ object JapaneseRomanizer {
         val out = StringBuilder()
         var carry = ""
         var previousPos: String? = null
+        var previousNamed = false
         tokens.forEachIndexed { index, tok ->
+            val named = previousNamed
+            previousNamed = tok.partOfSpeechLevel3 == "人名" ||
+                (tok.surface.isNotEmpty() && tok.surface.all { it in 'ァ'..'ヺ' || it == 'ー' } && tok.partOfSpeechLevel2 == "固有名詞")
             val surface = tok.surface
             val pos1 = tok.partOfSpeechLevel1
             val pos2 = tok.partOfSpeechLevel2
@@ -72,7 +76,10 @@ object JapaneseRomanizer {
                 return@forEachIndexed
             }
             var reading = when {
-                surface == "君" -> if (pos2 == "接尾") "クン" else "キミ"
+                // The dictionary tags 君 after almost any noun as the suffix
+                // ("あの日君が" → 日 + -kun); in lyrics it is "you" unless it
+                // follows a person's name.
+                surface == "君" -> if (pos2 == "接尾" && named) "クン" else "キミ"
                 pos1 == "助詞" && surface == "は" -> "ワ"
                 pos1 == "助詞" && surface == "へ" -> "エ"
                 pos1 == "助詞" && surface == "を" -> "オ"
