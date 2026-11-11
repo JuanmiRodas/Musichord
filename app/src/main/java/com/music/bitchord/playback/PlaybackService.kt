@@ -8428,58 +8428,46 @@ class PlaybackService : MediaLibraryService() {
 
         override fun addListener(listener: Player.Listener) {
             listeners += listener
-            super.addListener(guarded.getOrPut(listener) { WhileCasting(listener) })
+            super.addListener(listener)
         }
 
         override fun removeListener(listener: Player.Listener) {
             listeners -= listener
-            guarded.remove(listener)?.let { super.removeListener(it) }
+            super.removeListener(listener)
         }
-
-        private val guarded = java.util.concurrent.ConcurrentHashMap<Player.Listener, Player.Listener>()
 
         /**
          * BitChord Audio: the phone's own player, held paused (or idle) while a
          * receiver plays, still announces *its* play state, and the session
-         * took those announcements at their word: it recorded "paused" or
-         * "idle" while the speakers played, and never heard otherwise, since
+         * takes that at its word: it recorded "paused" or "idle" while the
+         * speakers played, and never heard otherwise, since
          * [onRemotePlaybackChanged] only speaks when the receiver's state
-         * changes. An idle session has no notification, and a paused one loses
-         * it once the foreground timeout lapses — so casting showed nothing
-         * outside the app. While casting, those announcements are dropped
-         * here; the receiver's are the only ones that count.
+         * changes — so casting showed no notification outside the app. While
+         * casting, every such local announcement is answered straight after
+         * with the receiver's state, in full.
+         *
+         * (Done this way rather than by filtering the listeners: a wrapper
+         * that has to pass on every other Player.Listener call is one missed
+         * call away from a session that never hears of a seek.)
          */
-        private inner class WhileCasting(private val inner: Player.Listener) : Player.Listener by inner {
-            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (!cast.active) inner.onPlayWhenReadyChanged(playWhenReady, reason)
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (!cast.active) inner.onPlaybackStateChanged(playbackState)
-            }
-
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!cast.active) inner.onIsPlayingChanged(isPlaying)
-            }
-
-            override fun onIsLoadingChanged(isLoading: Boolean) {
-                if (!cast.active) inner.onIsLoadingChanged(isLoading)
-            }
-
-            override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
-                if (!cast.active) inner.onPlaybackSuppressionReasonChanged(playbackSuppressionReason)
-            }
-
+        private val localPlayState = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
-                if (!cast.active) return inner.onEvents(player, events)
-                val kept = FlagSet.Builder()
-                for (i in 0 until events.size()) {
-                    val e = events.get(i)
-                    if (e !in LOCAL_PLAY_STATE_EVENTS) kept.add(e)
+                if (!cast.active) return
+                if (LOCAL_PLAY_STATE_EVENTS.none { events.contains(it) }) return
+                mainHandler.post {
+                    if (!cast.active) return@post
+                    reportedPlayWhenReady = !getPlayWhenReady()
+                    reportedPlaybackState = -1
+                    reportedIsPlaying = !isPlaying()
+                    onRemotePlaybackChanged()
                 }
-                val left = kept.build()
-                if (left.size() > 0) inner.onEvents(player, Player.Events(left))
             }
+        }
+
+        private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+        init {
+            player.addListener(localPlayState)
         }
 
         // While a receiver is the speaker the phone's player is paused and its
