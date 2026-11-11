@@ -208,13 +208,18 @@ object VideoMode {
         e.apply()
         missing.remove(song.videoId)
         pairedFrom.remove(song.videoId)
-        _ready.update { it + (song.videoId to ref) }
+        _ready.update { it + idsOf(song).associateWith { ref } }
         if (ref.site == VideoRef.Site.YOUTUBE) fetchNonMusic(ref.id)
         TrackLog.d(TAG, "video for '${song.title}' linked: ${ref.encode()}")
         setOn(true)
     }
 
     fun cached(mediaId: String): VideoRef? = _ready.value[mediaId]
+        ?: SongOrigins.originOf(mediaId)?.let { _ready.value[it.videoId] }
+
+    /** The ids a song's video is filed under: its own, and the one it stands in for. */
+    private fun idsOf(song: Song): List<String> =
+        listOfNotNull(song.videoId, SongOrigins.originOf(song.videoId)?.videoId).distinct()
 
     /** YouTube's song→video time map for what [mediaId] shows, when it paired them. */
     fun timeMap(mediaId: String, ref: VideoRef): VersionTimeMap? {
@@ -242,7 +247,7 @@ object VideoMode {
                 } else {
                     TrackLog.d(TAG, "video for '${song.title}': ${ref.encode()}")
                     if (ref.site == VideoRef.Site.YOUTUBE) fetchNonMusic(ref.id)
-                    _ready.update { (it + (song.videoId to ref)).entries.toList().takeLast(64).associate { e -> e.key to e.value } }
+                    _ready.update { (it + idsOf(song).associateWith { ref }).entries.toList().takeLast(64).associate { e -> e.key to e.value } }
                 }
             } finally {
                 inFlight.remove(song.videoId)
@@ -275,7 +280,16 @@ object VideoMode {
         // then the search's matches — so a video YouTube won't play here
         // gives way to the next rather than to nothing.
         val searched = runCatching {
-            TrackMatcher.ranked(youTube("${song.title} ${song.artist.split(',').first().trim()}"), TrackMatcher.targetOf(song))
+            val results = youTube("${song.title} ${song.artist.split(',').first().trim()}")
+            TrackMatcher.ranked(results, TrackMatcher.targetOf(song)).ifEmpty {
+                // Videos are credited to channels ("Hiroyuki Sawano" for
+                // SawanoHiroyuki[nZk]) and titled freely ("\"B-Cuz\" from …
+                // 10th Anniversary"): failing a full match, a video whose
+                // title carries the song's — the guest credit and asides
+                // left out — in the order YouTube ranked them.
+                val core = norm(com.music.bitchord.data.lyrics.LyricNames.cleanTitles(song.title).lastOrNull() ?: song.title)
+                if (core.length < 2) emptyList() else results.filter { norm(it.title).contains(core) }
+            }
         }.getOrDefault(emptyList())
         val all = (listOfNotNull(linked) + listOfNotNull(paired?.let { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) }) +
             searched.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) })
@@ -306,7 +320,7 @@ object VideoMode {
             list.removeAll { it.key == ref.key || isWrong(song, it) }
             list.removeFirstOrNull()
         }
-        _ready.update { if (next != null) it + (song.videoId to next) else it - song.videoId }
+        _ready.update { if (next != null) it + idsOf(song).associateWith { next } else it - idsOf(song).toSet() }
         if (next == null) {
             missing.remove(song.videoId)
             request(song, sayIfMissing = true)

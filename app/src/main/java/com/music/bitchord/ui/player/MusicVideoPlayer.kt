@@ -177,7 +177,14 @@ object MusicVideoEngine {
             // (silent), so switching to it is a change of volumes, not a
             // reload — a reload had to ask YouTube again, and lost the
             // picture whenever YouTube refused the second time.
-            com.music.bitchord.data.video.VideoMode.originalAudio.drop(1).collect { applySound() }
+            com.music.bitchord.data.video.VideoMode.originalAudio.drop(1).collect {
+                // The sound rides along only while asked for (a second stream
+                // to open made every video slower to start). Switching it on
+                // rebuilds the picture from the stream already found — not
+                // asking YouTube again, which is what lost it before.
+                if (loadedRef?.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) reload()
+                applySound()
+            }
         }
     }
 
@@ -573,7 +580,7 @@ object MusicVideoEngine {
             val factory = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
             val picture = factory.createMediaSource(MediaItem.fromUri(stream.url))
             // BitChord Audio: the video's own sound rides along only while asked for.
-            val sound = stream.audioUrl?.takeIf { com.music.bitchord.data.video.VideoMode.on.value }
+            val sound = stream.audioUrl?.takeIf { com.music.bitchord.data.video.VideoMode.originalAudio.value }
             val source = if (sound != null) {
                 androidx.media3.exoplayer.source.MergingMediaSource(picture, factory.createMediaSource(MediaItem.fromUri(sound)))
             } else picture

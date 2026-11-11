@@ -84,6 +84,8 @@ object LyricNames {
     }
 
     private val FEATURING = Regex("""\s*[(（\[]?\s*\b(?:featuring|feat\.?|ft\.)\s+[^()（）\[\]]*[)）\]]?""", RegexOption.IGNORE_CASE)
+    /** A guest credit in brackets in any language YouTube writes it: "(con SennaRin)", "(with …)". */
+    private val GUEST_BRACKET = Regex("""\s*[(（\[]\s*(?:con|with|avec|mit|com|feat\.?|ft\.?|featuring)\s+[^)）\]]*[)）\]]""", RegexOption.IGNORE_CASE)
     private val BRACKETED = Regex("""[(（\[【「]([^)）\]】」]+)[)）\]】」]?""")
 
     /**
@@ -95,7 +97,7 @@ object LyricNames {
      */
     fun cleanTitles(title: String): List<String> {
         val out = LinkedHashSet<String>()
-        fun tidy(t: String) = t.replace(FEATURING, " ").replace(Regex("\\s+"), " ").trim(' ', '-', '~', '～', '「', '」')
+        fun tidy(t: String) = t.replace(GUEST_BRACKET, " ").replace(FEATURING, " ").replace(Regex("\\s+"), " ").trim(' ', '-', '~', '～', '「', '」')
         val outer = tidy(BRACKETED.replace(title, " "))
         val outerJapanese = JapaneseReading.isJapanese(outer)
         for (m in BRACKETED.findAll(title)) {

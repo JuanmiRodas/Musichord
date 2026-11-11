@@ -483,6 +483,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // lyrics folder, found by any of the song's names (see
             // [SidecarLyrics]). First unless Settings says online goes first.
             // BitChord Audio: also by the romaji / Japanese spelling of the names.
+            val lookupStarted = System.currentTimeMillis()
+            com.music.bitchord.data.TrackLog.d("Lyrics", "lyrics: looking up '$title' · '$artist'")
             // BitChord Audio: "Unknown artist" is nobody's name — the file's, or yours.
             val lookupArtist = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { com.music.bitchord.data.lyrics.LyricNames.lookupArtist(videoId, title, artist) }.getOrDefault(artist)
@@ -564,6 +566,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             com.music.bitchord.data.TrackLog.d(
                 "BitChord",
                 "lyrics for '$title': " + (best?.let { "${it.result.source.label} under '${it.spelling.title}' · '${it.spelling.artist}' (score ${it.score})" } ?: "none") +
+                    " · in ${System.currentTimeMillis() - lookupStarted}ms" +
                     " · asked as ${nameQueries.take(4).joinToString { "'${it.title}' · '${it.artist}'" }}" +
                     com.music.bitchord.data.lyrics.LyricsHealth.failures().takeIf { it.isNotEmpty() }?.let { " · failing: ${it.joinToString()}" }.orEmpty(),
             )
