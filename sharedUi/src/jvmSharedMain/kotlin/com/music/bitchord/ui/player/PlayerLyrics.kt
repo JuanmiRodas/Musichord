@@ -3069,6 +3069,8 @@ internal class LyricsTranslationUi(
     val nudge: (Long) -> Unit = {},
     /** BitChord Audio: the translation, line for line with [panelLines], once fetched. */
     val translatedLines: List<LyricLine>? = null,
+    /** BitChord Audio: fetches the translation without changing what the lyrics view shows. */
+    val ensureTranslation: () -> Unit = {},
 )
 
 /**
@@ -3243,6 +3245,29 @@ internal fun rememberLyricsTranslation(
             }
         }
     }
+    // BitChord Audio: video mode's translation line — fetched quietly, the
+    // lyrics view left as it is (toggling it there switched the main lyrics
+    // to the translation, and left them so).
+    val ensureTranslation: () -> Unit = ensure@{
+        if (translationState !is LyricsTranslationUiState.Idle) return@ensure
+        val source = lyrics.orEmpty()
+        if (source.isEmpty()) return@ensure
+        translationState = LyricsTranslationUiState.Loading
+        translationJob?.cancel()
+        translationJob = translationScope.launch {
+            translationState = when (
+                val result = PlayerPlatform.host.translateLyrics(
+                    trackId = trackId,
+                    lines = source,
+                    targetLanguageTag = translationLanguage,
+                )
+            ) {
+                is LyricsTranslationResult.Translated -> LyricsTranslationUiState.Ready(result.lines)
+                is LyricsTranslationResult.SameLanguage -> LyricsTranslationUiState.SameLanguage
+                LyricsTranslationResult.Unavailable -> LyricsTranslationUiState.Idle
+            }
+        }
+    }
     val toggleRomanization: () -> Unit = toggleRomanization@{
         when (val state = romanizationState) {
             is LyricsTranslationUiState.Ready -> {
@@ -3338,6 +3363,7 @@ internal fun rememberLyricsTranslation(
         reduceMotion = reduceTranslationMotion,
         status = status,
         toggleTranslation = toggleTranslation,
+        ensureTranslation = ensureTranslation,
         toggleRomanization = toggleRomanization,
         offsetMs = offsetMs,
         nudge = { delta -> lyrics?.let { PlayerPlatform.host.nudgeLyrics(trackId, it, delta) } },
@@ -3517,7 +3543,15 @@ private fun VideoLyricWithTranslation(
         shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 8f),
     )
     val line = lines.getOrNull(index.coerceAtLeast(0))?.takeIf { index >= 0 }
-    val translated = translation?.getOrNull(index)?.text?.takeIf { it.isNotBlank() && it != line?.text }
+    // By time, not by position: word-timed and romaji lines needn't number
+    // the same as the lines the translation was made from.
+    val translated = remember(line, translation) {
+        val at = line?.timeMs ?: return@remember null
+        translation?.filter { !it.isGap && it.text.isNotBlank() }
+            ?.minByOrNull { abs(it.timeMs - at) }
+            ?.takeIf { abs(it.timeMs - at) <= 600L }
+            ?.text?.takeIf { it != line.text }
+    }
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp),

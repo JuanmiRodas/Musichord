@@ -1132,6 +1132,13 @@ fun NowPlayingScreen(
         loadingText = lyricsLoadingText,
         haptics = haptics,
     )
+    // BitChord Audio: video mode's translation line stays on from song to
+    // song: each song's translation is fetched as its lyrics arrive.
+    LaunchedEffect(song.videoId, lyrics, videoOverlay, videoModeTranslation) {
+        if (videoOverlay && videoModeTranslation && !lyrics.isNullOrEmpty() && lyricsTranslation.translatedLines == null) {
+            lyricsTranslation.ensureTranslation()
+        }
+    }
     // The drawer holding the finished card, set the moment Share is confirmed.
     // Nothing is drawn here: the picture is a bitmap and a canvas, which is the
     // phone's to make, so the request is handed down and the sheet comes back
@@ -2080,7 +2087,7 @@ fun NowPlayingScreen(
                             val on = !videoModeTranslation
                             PlayerPlatform.host.setVideoModeTranslation(on)
                             // Asked for once: the same translation the lyrics view uses.
-                            if (on && lyricsTranslation.translatedLines == null) lyricsTranslation.toggleTranslation()
+                            if (on) lyricsTranslation.ensureTranslation()
                         }
                     } else {
                         null
@@ -3666,6 +3673,8 @@ fun NowPlayingScreen(
                         // is the still sleeve, and for the trip to the mini player,
                         // which takes the picture over.
                         if (videoMode) {
+                            var cornerTouch by remember { mutableStateOf(0) }
+                            var cornerShown by remember { mutableStateOf(true) }
                             WhileShown({ !collapsePastHalf && !docking() }) {
                                 val videoAspect by PlayerPlatform.host.musicVideoAspect
                                     .collectAsStateWithLifecycle()
@@ -3693,6 +3702,13 @@ fun NowPlayingScreen(
                                         .graphicsLayer {
                                             alpha = (1f - p() * 2f).coerceIn(0f, 1f)
                                             translationX = swipeSettle.value * (1f - p())
+                                        }
+                                        // BitChord Audio: a touch on the picture brings its buttons back.
+                                        .pointerInput(Unit) {
+                                            awaitEachGesture {
+                                                awaitFirstDown(requireUnconsumed = false)
+                                                cornerTouch++
+                                            }
                                         },
                                 ) {
                                     // Black with a spinner under the picture until
@@ -3741,6 +3757,19 @@ fun NowPlayingScreen(
                                             )
                                         }
                                     }
+                                    // BitChord Audio: the buttons fade out a few seconds after
+                                    // the picture lands or is touched, and back on a touch.
+                                    LaunchedEffect(cornerTouch, videoRendered) {
+                                        cornerShown = true
+                                        delay(3_500)
+                                        cornerShown = false
+                                    }
+                                    androidx.compose.animation.AnimatedVisibility(
+                                        visible = cornerShown || !videoRendered,
+                                        enter = androidx.compose.animation.fadeIn(tween(220)),
+                                        exit = androidx.compose.animation.fadeOut(tween(450)),
+                                        modifier = Modifier.align(Alignment.TopEnd),
+                                    ) {
                                     VideoCornerControls(
                                         fullscreen = false,
                                         onToggleFullscreen = {
@@ -3772,16 +3801,15 @@ fun NowPlayingScreen(
                                                         onClick = {
                                                             val on = !videoModeTranslation
                                                             PlayerPlatform.host.setVideoModeTranslation(on)
-                                                            if (on && lyricsTranslation.translatedLines == null) lyricsTranslation.toggleTranslation()
+                                                            if (on) lyricsTranslation.ensureTranslation()
                                                         },
                                                     )
                                                 }
                                             }
                                         },
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(8.dp),
+                                        modifier = Modifier.padding(8.dp),
                                     )
+                                    }
                                 }
                             }
                         }
