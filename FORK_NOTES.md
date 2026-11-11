@@ -223,3 +223,11 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 - InnertubeParser RELEASE_WORDS localized (Spanish "Álbum" made album tracks "Unknown artist"). Placeholder artists: targetIn uses MetadataEdits artist, catalogue sources skipped, no ArtistLinks learning.
 - isKaraokeLike also catches credited covers (翻自, 翻唱, (cover：…), 歌ってみた, カバー).
 - ReleaseSelectionBar: Like action. Artist page: "Liked songs" row → likedby:<id>|<name> local page (LikedByArtist).
+
+## Night of 2026-11-11 (v1.9.127 → v1.9.137)
+- Seek fix: removed the WhileCasting listener wrapper (delegation dropped session callbacks → scrubber couldn't move); cast state re-announced after local play-state events instead.
+- Romaji: KuGou KRC per-syllable romaji no longer used; ProvidedRomaji rejects non-Latin and is all-or-nothing; JapaneseRomanizer.prepare closes spaces between Japanese chars and reads 漢字(よみ) as the bracket reading.
+- Video mode: lyrics over the video (compact / fullscreen centred, swept only with word timing, elliptical scrim), buttons (lyrics, aspect, video's own sound, translation in fullscreen), double-tap ±10 s, player dims (0.62), search remembers per-song query, cover/canvas while loading, fade through sync jumps, fallback to next candidate when YouTube refuses a video.
+- Sync: YouTube time map > VideoAligner (chroma CENS + key shift + DTW, song audio from cache or its YouTube release; started after first frame) > SponsorBlock music_offtopic. Syncs kept in filesDir/video-sync.json.
+- Video's own sound: audio merged silently in video mode; toggle swaps volumes (no reload).
+- CloudBackup: daily backup of per-song prefs + video-sync.json to pCloud .bitchord-audio/backup/, restored when missing locally.
