@@ -258,3 +258,6 @@ class SoundCloudSource(
             runCatching { this[key]?.jsonPrimitive?.booleanOrNull }.getOrNull()
     }
 }
+
+/** "m:ss", the form [Song.durationText] holds. */
+internal fun sourceDurationText(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
