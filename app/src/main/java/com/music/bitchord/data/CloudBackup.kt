@@ -39,6 +39,7 @@ object CloudBackup {
         "bitchord_lyric_offsets",
         "bitchord_local_likes",
         "bitchord_artist_links",
+        "bitchord_youtube_twins",
     )
     private val FILES = listOf(com.music.bitchord.playback.smart.VideoAligner.FILE)
 

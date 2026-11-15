@@ -5742,7 +5742,7 @@ class PlaybackService : MediaLibraryService() {
         // handing over the search that just cost three attempts would only
         // schedule a fourth.
         if (StreamChoice.substitutesRefused(videoId)) {
-            return Resolved.YouTube(StreamResolver.resolve(videoId))
+            return Resolved.YouTube(youTubeOrTwin(videoId, target))
         }
         // BitChord Audio: JioSaavn's copy the source map already matched,
         // when it beats your file — the best copy plays from the start.
@@ -5870,7 +5870,12 @@ class PlaybackService : MediaLibraryService() {
             return Resolved.Module(quick)
         }
 
-        val url = fallback.await().getOrThrow()
+        // BitChord Audio: YouTube refused this id and no source had it —
+        // another YouTube upload of the same recording, before skipping it.
+        val first = fallback.await()
+        val url = first.getOrNull()
+            ?: YouTubeTwin.stream(this, videoId, target)
+            ?: first.getOrThrow()
         // Marked pending only here, with the fallback's own bitrate in hand:
         // that figure is the answer to "better than what?" the second look
         // measures candidates against, and it isn't known until the client
@@ -5900,6 +5905,14 @@ class PlaybackService : MediaLibraryService() {
      * [replayAsManifest] re-prepares it with the type declared, which is a
      * short cut before the first note rather than a YouTube start and a seam.
      */
+    /** BitChord Audio: [videoId] from YouTube, or the same recording's other upload when it refuses. */
+    private suspend fun youTubeOrTwin(videoId: String, target: TrackMatcher.Target): String = try {
+        StreamResolver.resolve(videoId)
+    } catch (e: Exception) {
+        if (e is CancellationException) throw e
+        YouTubeTwin.stream(this, videoId, target) ?: throw e
+    }
+
     private suspend fun resolveDirect(videoId: String, target: TrackMatcher.Target): Resolved {
         val direct = runCatching { DirectSourceGate.lookup(videoId, target) }
             .onFailure { if (it is CancellationException) throw it }
@@ -5922,7 +5935,8 @@ class PlaybackService : MediaLibraryService() {
             if (e is CancellationException) throw e
             // YouTube cannot serve it, so a lookup still running is all that
             // is left, and there is nothing playing for it to swap into.
-            return Resolved.Module(running?.await() ?: throw e)
+            running?.await()?.let { return Resolved.Module(it) }
+            return Resolved.YouTube(YouTubeTwin.stream(this, videoId, target) ?: throw e)
         }
         DirectSourceGate.startedOnYouTube(videoId, target)
         return Resolved.YouTube(url)
