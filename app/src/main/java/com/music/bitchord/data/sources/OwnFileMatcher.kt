@@ -106,7 +106,11 @@ object OwnFileMatcher {
             .toSet()
     }
 
-    private fun allKeys(title: String): Set<String> = titleKeys(title) + soundKeys(title)
+    internal fun allKeys(title: String): Set<String> = titleKeys(title) + soundKeys(title)
+
+    /** BitChord Audio: every key a song goes by — its title's, and its other names' (romaji tables). */
+    fun wantedKeys(title: String, artist: String): Set<String> =
+        (listOf(title) + LyricAliases.queries("", title, artist).map { it.title }).flatMap(::allKeys).toSet()
 
     private fun keysOf(title: String): Set<String> {
         val base = title.replace(NOTE, " ").replace(GUEST, "").trim()

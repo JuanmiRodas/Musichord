@@ -156,6 +156,8 @@ fun BrowseActionsMenu(
     onEditInfo: (() -> Unit)? = null,
     /** BitChord Audio: pick some (or all) of the page's songs to act on. */
     onSelectSongs: (() -> Unit)? = null,
+    /** BitChord Audio: play the release from one of your pCloud folders, song by song. */
+    onLinkFiles: (() -> Unit)? = null,
 ) {
     var renaming by remember { mutableStateOf(startRenaming) }
     var confirmingDelete by remember { mutableStateOf(false) }
@@ -234,6 +236,7 @@ fun BrowseActionsMenu(
             onSelectSongs?.let { ActionRow(SfIcons.Check, stringResource(R.string.select_songs), onClick = it) }
             onChangeCover?.let { ActionRow(SfIcons.Album, stringResource(R.string.album_change_cover), onClick = it) }
             onEditInfo?.let { ActionRow(SfIcons.Pencil, stringResource(R.string.album_edit_info), onClick = it) }
+            onLinkFiles?.let { ActionRow(SfIcons.Cloud, stringResource(R.string.album_link_files), onClick = it) }
             onOpen?.let {
                 ActionRow(
                     SfIcons.Open,

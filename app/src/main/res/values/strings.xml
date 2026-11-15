@@ -1635,4 +1635,13 @@
     <string name="size_medium">Medium</string>
     <string name="size_large">Large</string>
     <string name="size_extra_large">Extra large</string>
+    <string name="album_link_files">Link to my pCloud files</string>
+    <string name="album_link_files_title">Link to my pCloud files</string>
+    <string name="album_link_search_folder">Search your folders</string>
+    <string name="album_link_no_library">Your pCloud library is not loaded yet.</string>
+    <string name="album_link_no_folder">No folder of yours seems to hold these songs. Search for it by name.</string>
+    <string name="album_link_folder_counts">%1$d files · %2$d of %3$d songs match</string>
+    <string name="album_link_no_file">No file (keeps playing as usual)</string>
+    <string name="album_link_confirm">Link %1$d songs</string>
+    <string name="album_link_unlink">Unlink</string>
 </resources>

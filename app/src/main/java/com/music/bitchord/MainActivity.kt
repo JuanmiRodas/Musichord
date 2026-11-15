@@ -5404,6 +5404,16 @@ private fun BitChordApp(
                     .takeIf { target.type == BrowseType.ALBUM || target.type == BrowseType.PLAYLIST || target.type == BrowseType.OTHER },
                 onEditInfo = act { songs -> com.music.bitchord.ui.components.MetadataEditor.open(songs) }
                     .takeIf { target.type == BrowseType.ALBUM || target.type == BrowseType.OTHER },
+                onLinkFiles = act { songs ->
+                    com.music.bitchord.ui.components.AlbumFileLinker.open(
+                        target.title,
+                        target.subtitle.substringBefore(" • ").substringBefore(" · "),
+                        songs.filter { !com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(it.videoId) && it.localUri == null },
+                    )
+                }.takeIf {
+                    (target.type == BrowseType.ALBUM || target.type == BrowseType.PLAYLIST || target.type == BrowseType.OTHER) &&
+                        com.music.bitchord.data.webdav.WebDavRepository.isConfigured()
+                },
                 onSelectSongs = target.browseId?.takeIf { !target.fromCard }?.let { id ->
                     {
                         browseActions = null
@@ -6333,6 +6343,14 @@ private fun BitChordAudioDialogs(viewModel: MainViewModel, controller: MediaCont
         com.music.bitchord.ui.components.MetadataEditorDialog(
             songs = editSongs,
             onDismiss = { com.music.bitchord.ui.components.MetadataEditor.close() },
+        )
+    }
+    // BitChord Audio: a release linked to your pCloud folder.
+    val linkRequest by com.music.bitchord.ui.components.AlbumFileLinker.request.collectAsStateWithLifecycle()
+    linkRequest?.let { request ->
+        com.music.bitchord.ui.components.AlbumFileLinkDialog(
+            request = request,
+            onDismiss = { com.music.bitchord.ui.components.AlbumFileLinker.close() },
         )
     }
     // BitChord Audio: the cover picker, raised from the player.

@@ -1723,4 +1723,13 @@
     <string name="size_medium">Mediano</string>
     <string name="size_large">Grande</string>
     <string name="size_extra_large">Muy grande</string>
+    <string name="album_link_files">Vincular a mis archivos de pCloud</string>
+    <string name="album_link_files_title">Vincular a mis archivos de pCloud</string>
+    <string name="album_link_search_folder">Buscar en tus carpetas</string>
+    <string name="album_link_no_library">Tu biblioteca de pCloud aún no se ha cargado.</string>
+    <string name="album_link_no_folder">Ninguna carpeta parece tener estas canciones. Búscala por nombre.</string>
+    <string name="album_link_folder_counts">%1$d archivos · %2$d de %3$d canciones coinciden</string>
+    <string name="album_link_no_file">Sin archivo (se reproduce como siempre)</string>
+    <string name="album_link_confirm">Vincular %1$d canciones</string>
+    <string name="album_link_unlink">Desvincular</string>
 </resources>

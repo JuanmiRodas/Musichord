@@ -245,3 +245,6 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 - NetEase removed as an audio source (wrong versions); its lyrics, covers and Japanese-name lookups stay.
 - `YouTubeRefusals` (prefs `bitchord_youtube_refused`, backed up): ids YouTube refused for good. For them your pCloud file plays at any quality (also on mobile data), a "keep YouTube" pin / YouTube choice no longer holds, and own-first swaps the file into the queue ahead of time. Cleared when YouTube serves the id again.
 - Order when YouTube refuses: your file → other YouTube upload → bilibili/SoundCloud. The pinned direct-YouTube path falls through to it instead of skipping.
+
+## Link a release to a pCloud folder
+- Album/playlist ⋮ → "Link to my pCloud files" (`AlbumFileLinkDialog`, `AlbumFileLink`): folders ranked by how many of the songs they hold (or searched by name); songs paired with files by names in both scripts, romaji sound keys, containment, edit-distance, track number and length; each pair editable; saved as `PreferredSource.chooseFile` per song (synced choices). "Unlink" clears them.
