@@ -46,7 +46,7 @@ object SourceResolver {
      * releases with different audio — JioSaavn, NetEase, SoundCloud. With no
      * album to tell them apart, a match there is refused rather than guessed.
      */
-    private val CATALOGUE_KINDS = setOf(SourceKind.JIOSAAVN, SourceKind.NETEASE, SourceKind.SOUNDCLOUD)
+    private val CATALOGUE_KINDS = setOf(SourceKind.JIOSAAVN, SourceKind.SOUNDCLOUD, SourceKind.BILIBILI)
 
 
     private const val TAG = "BitChord"
@@ -410,6 +410,35 @@ object SourceResolver {
     }
 
     private val mappedScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
+    /**
+     * BitChord Audio: the last rung for a YouTube-queued track YouTube won't
+     * serve and no source above it has — the catalogues ranked below YouTube
+     * (bilibili, SoundCloud), held to the strictest match: a known runtime,
+     * a shared artist, the file's own length checked.
+     */
+    suspend fun lastResortFor(target: TrackMatcher.Target): SourceStream? {
+        if (target.title.isBlank() || target.isVideo || target.durationSec == null) return null
+        val active = SourceRegistry.activeForPlayback()
+        val youtube = active.indexOfFirst { it.kind == SourceKind.YOUTUBE }
+        val below = active.drop(youtube + 1).filter { it.kind == SourceKind.BILIBILI || it.kind == SourceKind.SOUNDCLOUD }
+        for (source in below) {
+            val stream = runCatching {
+                matchAndStream(
+                    source = source,
+                    target = target,
+                    request = StreamRequest.Best,
+                    strictLength = true,
+                    requireSharedArtist = true,
+                    driftSec = 3,
+                    checkFileLength = true,
+                )
+            }.onFailure { if (it is CancellationException) throw it }.getOrNull() ?: continue
+            TrackLog.i(TAG, "last resort: '${target.title}' from ${source.displayName} at ${stream.format.summary}")
+            return stream.copy(sourceConfigId = stream.sourceConfigId ?: source.configId)
+        }
+        return null
+    }
 
     suspend fun substituteForYouTube(target: TrackMatcher.Target): SourceStream? {
         // Video rows always use YouTube's own stream unless the listener

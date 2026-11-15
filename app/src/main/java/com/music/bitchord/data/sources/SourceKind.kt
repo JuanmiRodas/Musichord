@@ -156,21 +156,6 @@ enum class SourceKind(
     ),
 
     /**
-     * NetEase Cloud Music: MP3 up to 320 kbps, strongest on Japanese, Chinese
-     * and Korean releases. Only tracks free to play in full are offered.
-     */
-    NETEASE(
-        label = "NetEase Cloud Music",
-        detail = "MP3 up to 320kbps, strongest on Japanese, Chinese and Korean music. " +
-            "VIP-only tracks are skipped. Catalogue matching can select the wrong song.",
-        labels = listOf("High Quality", "320kbps", "J-pop / C-pop"),
-        needsServer = false,
-        canServeLossless = false,
-        worthPrefetching = true,
-        rank = 2,
-    ),
-
-    /**
      * The source the app was built on, listed here so it always has a fixed
      * place: second, behind the module source. It cannot be removed — see
      * [SourceRegistry]. Nothing else in the app can supply a home feed, a
@@ -199,6 +184,22 @@ enum class SourceKind(
         needsServer = false,
         canServeLossless = false,
         rank = 4,
+    ),
+
+    /**
+     * BitChord Audio: bilibili's uploads, for songs YouTube Music won't play
+     * here and no other catalogue carries — Japanese and Chinese releases
+     * especially. Used only then, and only for an upload with the same
+     * title, artist and runtime (covers, live takes and karaoke left out).
+     */
+    BILIBILI(
+        label = "bilibili",
+        detail = "Uploads of songs YouTube can't play here, matched by title, artist and exact " +
+            "length; AAC around 130-190kbps. Used only when nothing else has the song.",
+        labels = listOf("J-pop / C-pop", "Last resort", "AAC"),
+        needsServer = false,
+        canServeLossless = false,
+        rank = 5,
     ),
     ;
 

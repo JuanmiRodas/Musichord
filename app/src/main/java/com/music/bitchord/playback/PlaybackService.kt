@@ -5875,7 +5875,14 @@ class PlaybackService : MediaLibraryService() {
         val first = fallback.await()
         val url = first.getOrNull()
             ?: YouTubeTwin.stream(this, videoId, target)
-            ?: first.getOrThrow()
+            ?: run {
+                // Not on YouTube at all here: bilibili or SoundCloud, matched strictly.
+                SourceResolver.lastResortFor(target)?.let {
+                    NerdStats.onLosslessRaceEnd(videoId)
+                    return Resolved.Module(it)
+                }
+                first.getOrThrow()
+            }
         // Marked pending only here, with the fallback's own bitrate in hand:
         // that figure is the answer to "better than what?" the second look
         // measures candidates against, and it isn't known until the client
@@ -5936,7 +5943,8 @@ class PlaybackService : MediaLibraryService() {
             // YouTube cannot serve it, so a lookup still running is all that
             // is left, and there is nothing playing for it to swap into.
             running?.await()?.let { return Resolved.Module(it) }
-            return Resolved.YouTube(YouTubeTwin.stream(this, videoId, target) ?: throw e)
+            YouTubeTwin.stream(this, videoId, target)?.let { return Resolved.YouTube(it) }
+            return Resolved.Module(SourceResolver.lastResortFor(target) ?: throw e)
         }
         DirectSourceGate.startedOnYouTube(videoId, target)
         return Resolved.YouTube(url)

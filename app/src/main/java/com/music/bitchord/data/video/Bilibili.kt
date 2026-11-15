@@ -98,6 +98,28 @@ object Bilibili {
         Stream(url, mapOf("Referer" to "https://www.bilibili.com/", "User-Agent" to UA), w, h)
     }
 
+    /** BitChord Audio: the best audio-only rendition of [bvid] — an fMP4 AAC file, served without an account. */
+    data class Audio(val url: String, val headers: Map<String, String>, val kbps: Int, val durationSec: Int?)
+
+    suspend fun audio(bvid: String): Audio? = withContext(Dispatchers.IO) {
+        val view = get("https://api.bilibili.com/x/web-interface/view?bvid=$bvid") ?: return@withContext null
+        val data = runCatching { obj(obj(json.parseToJsonElement(view))?.get("data")) }.getOrNull() ?: return@withContext null
+        val cid = data["cid"]?.jsonPrimitive?.longOrNull ?: return@withContext null
+        val length = data["duration"]?.jsonPrimitive?.intOrNull
+        val play = get("https://api.bilibili.com/x/player/playurl?bvid=$bvid&cid=$cid&fnval=16&fnver=0&fourk=0")
+            ?: return@withContext null
+        val dash = runCatching { obj(obj(obj(json.parseToJsonElement(play))?.get("data"))?.get("dash")) }.getOrNull()
+            ?: return@withContext null
+        val tracks = (dash["audio"] as? JsonArray).orEmpty().mapNotNull { obj(it) }
+        val best = tracks.maxByOrNull { it["bandwidth"]?.jsonPrimitive?.longOrNull ?: 0L } ?: return@withContext null
+        val url = str(best["base_url"]) ?: str(best["baseUrl"])
+            ?: (best["backup_url"] as? JsonArray)?.firstOrNull()?.let { str(it) }
+            ?: return@withContext null
+        val kbps = ((best["bandwidth"]?.jsonPrimitive?.longOrNull ?: 0L) / 1000).toInt()
+        TrackLog.d(TAG, "bilibili: audio for $bvid at ~${kbps}kbps")
+        Audio(url, mapOf("Referer" to "https://www.bilibili.com/", "User-Agent" to UA), kbps, length)
+    }
+
     private fun obj(e: JsonElement?): JsonObject? = e as? JsonObject
     private fun str(e: JsonElement?): String? = runCatching { e?.jsonPrimitive?.content }.getOrNull()?.takeIf { it != "null" }
 }

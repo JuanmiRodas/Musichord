@@ -237,3 +237,9 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 - Result (`looks:<song>` in bitchord_video_mode prefs, so backed up to pCloud) is reused next time without measuring.
 - Square/edge framings zoom smoothly past the bars; lyrics shade goes to 0.95 when the video has its own text (player and fullscreen).
 - ±0.5 s lyric offset chips at the video's bottom corners while its controls show.
+
+## Songs YouTube won't play here (region/Premium/no client)
+- `YouTubeTwin`: another YouTube upload of the same recording (songs shelf, or a video within 4 s), never karaoke/covers; pairing kept in `bitchord_youtube_twins` (backed up).
+- Then `SourceResolver.lastResortFor`: sources ranked below YouTube (bilibili, SoundCloud) with strict runtime, shared artist and file-length check.
+- New built-in `BilibiliSource` (search API + DASH audio, no account); uploads tagged cover/live/piano/karaoke/etc. filtered out.
+- NetEase removed as an audio source (wrong versions); its lyrics, covers and Japanese-name lookups stay.

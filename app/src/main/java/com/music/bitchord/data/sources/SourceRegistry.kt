@@ -596,8 +596,8 @@ object SourceRegistry {
         SourceKind.CUSTOM_MODULE -> ModuleSource(config)
         SourceKind.MODULE -> ModuleSource(config)
         SourceKind.JIOSAAVN -> JioSaavnSource(config)
-        SourceKind.NETEASE -> NetEaseSource(config)
         SourceKind.SOUNDCLOUD -> SoundCloudSource(config)
+        SourceKind.BILIBILI -> BilibiliSource(config)
         SourceKind.YOUTUBE -> YouTubeSource(config)
         SourceKind.MY_LIBRARY -> RemoteLibrarySource(config)
     }
@@ -643,7 +643,7 @@ object SourceRegistry {
             .build()
             .toString()
 
-    private val BUILT_IN_KINDS = listOf(SourceKind.MY_LIBRARY, SourceKind.JIOSAAVN, SourceKind.NETEASE, SourceKind.YOUTUBE, SourceKind.SOUNDCLOUD)
+    private val BUILT_IN_KINDS = listOf(SourceKind.MY_LIBRARY, SourceKind.JIOSAAVN, SourceKind.YOUTUBE, SourceKind.SOUNDCLOUD, SourceKind.BILIBILI)
 
     private const val KEY_SOURCES = "sources"
     /** One-shot migration: existing users must explicitly opt in again. */
