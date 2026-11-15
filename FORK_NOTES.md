@@ -243,3 +243,5 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 - Then `SourceResolver.lastResortFor`: sources ranked below YouTube (bilibili, SoundCloud) with strict runtime, shared artist and file-length check.
 - New built-in `BilibiliSource` (search API + DASH audio, no account); uploads tagged cover/live/piano/karaoke/etc. filtered out.
 - NetEase removed as an audio source (wrong versions); its lyrics, covers and Japanese-name lookups stay.
+- `YouTubeRefusals` (prefs `bitchord_youtube_refused`, backed up): ids YouTube refused for good. For them your pCloud file plays at any quality (also on mobile data), a "keep YouTube" pin / YouTube choice no longer holds, and own-first swaps the file into the queue ahead of time. Cleared when YouTube serves the id again.
+- Order when YouTube refuses: your file → other YouTube upload → bilibili/SoundCloud. The pinned direct-YouTube path falls through to it instead of skipping.

@@ -207,6 +207,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         // by [Song.toMediaItem], so it has to be open before the restart
         // snapshot below is turned back into queue items.
         OriginalVersion.init(this)
+        com.music.bitchord.playback.YouTubeRefusals.init(this)
         com.music.bitchord.data.sync.SettingsSync.start(this)
         // What's already saved to Downloads, so the song menu can say so
         // without a media-store query per row.

@@ -78,7 +78,8 @@ internal class OwnFirst(
                 } else {
                     null
                 }
-            com.music.bitchord.data.sources.PreferredSource.YouTube -> return null
+            com.music.bitchord.data.sources.PreferredSource.YouTube ->
+                if (!YouTubeRefusals.has(song.videoId)) return null else return if (enabled) fileFor(song) else null
             is com.music.bitchord.data.sources.PreferredSource.File -> return if (enabled) fileFor(song) else null
             null -> Unit
         }
@@ -112,12 +113,13 @@ internal class OwnFirst(
             !WebDavConfig.isWebDavId(song.videoId) &&
             SourceRegistry.parseTrackKey(song.videoId) == null &&
             song.localUri == null &&
-            !OriginalVersion.isPinned(song.videoId)
+            (!OriginalVersion.isPinned(song.videoId) || YouTubeRefusals.has(song.videoId))
 
     private suspend fun fileFor(song: Song): Song? {
         val seconds = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
             ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
-        fun decide() = runCatching { OwnFileMatcher.decide(song.title, song.artist, seconds, song.albumName, song.videoId) }.getOrNull()
+        val refused = YouTubeRefusals.has(song.videoId)
+        fun decide() = runCatching { OwnFileMatcher.decide(song.title, song.artist, seconds, song.albumName, song.videoId, youTubeRefused = refused) }.getOrNull()
         var verdict = decide()
         // BitChord Audio: a lossy file below JioSaavn's 320 kbps is only chosen
         // once JioSaavn has been asked for the song — the background lookup may

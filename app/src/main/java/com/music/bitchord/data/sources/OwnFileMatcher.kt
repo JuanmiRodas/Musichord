@@ -377,7 +377,15 @@ object OwnFileMatcher {
     data class Play(val file: Song) : Verdict
     data class Keep(val reason: String) : Verdict
 
-    fun decide(title: String, artist: String, durationSec: Int?, album: String? = null, videoId: String? = null): Verdict {
+    fun decide(
+        title: String,
+        artist: String,
+        durationSec: Int?,
+        album: String? = null,
+        videoId: String? = null,
+        // BitChord Audio: YouTube won't play this song here — your file is the copy.
+        youTubeRefused: Boolean = false,
+    ): Verdict {
         // A copy picked by hand from another source holds without pCloud.
         (PreferredSource.get(title, artist) as? PreferredSource.Chosen)
             ?.takeUnless { NotSame.blocked(videoId, it.song.videoId) }?.let { return Play(it.song) }
@@ -385,15 +393,17 @@ object OwnFileMatcher {
         val library = WebDavRepository.library()
         if (library.isEmpty()) return Keep("pCloud library not loaded yet")
         when (val choice = PreferredSource.get(title, artist)) {
-            PreferredSource.YouTube -> return Keep("you chose YouTube for this song")
+            PreferredSource.YouTube -> if (!youTubeRefused) return Keep("you chose YouTube for this song")
             is PreferredSource.Chosen -> if (!NotSame.blocked(videoId, choice.song.videoId)) return Play(choice.song)
             is PreferredSource.File -> library.firstOrNull { it.videoId == choice.id }?.let { return Play(it) }
             null -> Unit
         }
         val pref = com.music.bitchord.data.settings.AppSettings.sourcePreference.value
-        if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return Keep("Settings: YouTube first")
+        if (!youTubeRefused && pref == com.music.bitchord.data.settings.AppSettings.SOURCE_YOUTUBE_FIRST) return Keep("Settings: YouTube first")
         // Worked out before for this song (see SourceMap): no matching again.
         val known = videoId?.let(SourceMap::lookup)?.takeUnless { NotSame.blocked(videoId, it.file) }
+            // A remembered "no file" is asked again when YouTube refuses the song.
+            ?.takeUnless { youTubeRefused && it.file == null }
         val best = if (known != null) {
             known.file?.let(SourceMap::fileSong)
                 ?: return Keep("no file of yours matches (${library.size} songs in your library)")
@@ -403,7 +413,7 @@ object OwnFileMatcher {
                 .also { found -> videoId?.let { SourceMap.record(it, found) } }
                 ?: return Keep("no file of yours matches (${library.size} songs in your library)")
         }
-        if (pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return Play(best)
+        if (youTubeRefused || pref == com.music.bitchord.data.settings.AppSettings.SOURCE_OWN_FIRST) return Play(best)
         val rank = qualityRank(best, durationSec)
         // A better copy than your file, where one plays: JioSaavn's 320 kbps,
         // when it's on for playback and the map knows it has the song.

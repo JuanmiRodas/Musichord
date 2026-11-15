@@ -314,17 +314,19 @@ object SourceResolver {
      * no time — and playing it from the start means no YouTube start and no
      * swap a few seconds in.
      */
-    suspend fun ownFileFor(target: TrackMatcher.Target): SourceStream? {
+    suspend fun ownFileFor(target: TrackMatcher.Target, youTubeRefused: Boolean = false): SourceStream? {
         if (target.title.isBlank()) return null
         // A video row only when you picked your file for it by hand.
-        if (target.isVideo && PreferredSource.get(target.title, target.artist) !is PreferredSource.File) return null
-        // On mobile data only when the listener said so in Settings.
-        if (AppSettings.meteredConnection.value == true && !AppSettings.ownFilesOnMobileData.value) return null
+        if (!youTubeRefused && target.isVideo && PreferredSource.get(target.title, target.artist) !is PreferredSource.File) return null
+        // On mobile data only when the listener said so in Settings —
+        // BitChord Audio: unless YouTube won't play the song at all.
+        if (!youTubeRefused && AppSettings.meteredConnection.value == true && !AppSettings.ownFilesOnMobileData.value) return null
         val own = SourceRegistry.activeForPlayback().filter { it.kind == SourceKind.MY_LIBRARY }
         if (own.isEmpty()) return null
         // The listener's pick from the player comes before any rule.
         when (val choice = PreferredSource.get(target.title, target.artist)) {
-            PreferredSource.YouTube -> return null
+            // BitChord Audio: "YouTube" stops meaning anything once YouTube refuses it.
+            PreferredSource.YouTube -> if (!youTubeRefused) return null
             // Another source's copy: it is put in the queue in the song's place
             // (see OwnFirst), not substituted here.
             is PreferredSource.Chosen -> return null
@@ -345,12 +347,13 @@ object SourceResolver {
         for (file in OwnFileMatcher.matches(target.title, target.artist, target.durationSec, target.album).take(3)) {
             val source = own.first()
             val found = runCatching { source.stream(file.videoId, request) }.getOrNull() ?: continue
-            if (!RemoteLibrarySource.qualifies(found, target.durationSec)) continue
+            // BitChord Audio: with YouTube refusing it, your file is the copy — any quality.
+            if (!youTubeRefused && !RemoteLibrarySource.qualifies(found, target.durationSec)) continue
             TrackLog.d(TAG, "own file: '${target.title}' plays '${file.title}' from your library at ${found.format.summary}")
             return found.copy(sourceConfigId = found.sourceConfigId ?: source.configId)
         }
         val (_, stream) = bestAcross(own, target, requestForNow(), timeoutMs = OWN_FILE_TIMEOUT_MS) { _, found ->
-            RemoteLibrarySource.qualifies(found, target.durationSec)
+            youTubeRefused || RemoteLibrarySource.qualifies(found, target.durationSec)
         } ?: return null
         TrackLog.d(TAG, "own file: '${target.title}' plays from your library at ${stream.format.summary}")
         return stream

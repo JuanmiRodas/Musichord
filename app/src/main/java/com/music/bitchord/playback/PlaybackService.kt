@@ -1533,13 +1533,22 @@ class PlaybackService : MediaLibraryService() {
                     }
                 } catch (e: TimeoutCancellationException) {
                     throw java.io.IOException("Direct YouTube resolution timed out for $videoId", e)
+                } catch (e: StreamResolver.PermanentlyUnplayableException) {
+                    // BitChord Audio: kept on YouTube by hand, but YouTube won't
+                    // play it here at all — your file or another copy instead,
+                    // through the ordinary path below, rather than a skip.
+                    YouTubeRefusals.record(videoId, e.message ?: "unplayable")
+                    TrackLog.w("BitChord", "kept on YouTube, which refuses it here; looking for another copy", about = videoId)
+                    null
                 }
-                val headers = StreamResolver.mediaHeadersFor(streamUrl)
-                TrackLog.d("BitChord", "serving original YouTube version for $videoId", about = videoId)
-                return@Resolver dataSpec.buildUpon()
-                    .setUri(Uri.parse(streamUrl))
-                    .setHttpRequestHeaders(headers)
-                    .build()
+                if (streamUrl != null) {
+                    val headers = StreamResolver.mediaHeadersFor(streamUrl)
+                    TrackLog.d("BitChord", "serving original YouTube version for $videoId", about = videoId)
+                    return@Resolver dataSpec.buildUpon()
+                        .setUri(Uri.parse(streamUrl))
+                        .setHttpRequestHeaders(headers)
+                        .build()
+                }
             }
             // Automix owns a base-cache Opus rendition. It must bypass the
             // playback race winner (JioSaavn, a module, or a lossless upgrade)
@@ -5741,8 +5750,15 @@ class PlaybackService : MediaLibraryService() {
         // that loses is handed to [QualityUpgrade] rather than dropped, and
         // handing over the search that just cost three attempts would only
         // schedule a fourth.
+        // BitChord Audio: YouTube has refused this song here before — your
+        // file (any quality) or another copy first, without the walk.
+        if (YouTubeRefusals.has(videoId)) standInFor(videoId, target, null)?.let { return it }
         if (StreamChoice.substitutesRefused(videoId)) {
-            return Resolved.YouTube(youTubeOrTwin(videoId, target))
+            val result = runCatching { StreamResolver.resolve(videoId) }
+            result.getOrNull()?.let { return Resolved.YouTube(it) }
+            val error = result.exceptionOrNull()
+            if (error is CancellationException) throw error
+            return standInFor(videoId, target, error) ?: throw error!!
         }
         // BitChord Audio: JioSaavn's copy the source map already matched,
         // when it beats your file — the best copy plays from the start.
@@ -5874,15 +5890,17 @@ class PlaybackService : MediaLibraryService() {
         // another YouTube upload of the same recording, before skipping it.
         val first = fallback.await()
         val url = first.getOrNull()
-            ?: YouTubeTwin.stream(this, videoId, target)
             ?: run {
-                // Not on YouTube at all here: bilibili or SoundCloud, matched strictly.
-                SourceResolver.lastResortFor(target)?.let {
+                // Not on YouTube here: your file, another upload, bilibili/SoundCloud.
+                val error = first.exceptionOrNull()
+                if (error is CancellationException) throw error
+                standInFor(videoId, target, error)?.let { found ->
                     NerdStats.onLosslessRaceEnd(videoId)
-                    return Resolved.Module(it)
+                    return found
                 }
                 first.getOrThrow()
             }
+        YouTubeRefusals.clear(videoId)
         // Marked pending only here, with the fallback's own bitrate in hand:
         // that figure is the answer to "better than what?" the second look
         // measures candidates against, and it isn't known until the client
@@ -5912,12 +5930,23 @@ class PlaybackService : MediaLibraryService() {
      * [replayAsManifest] re-prepares it with the type declared, which is a
      * short cut before the first note rather than a YouTube start and a seam.
      */
-    /** BitChord Audio: [videoId] from YouTube, or the same recording's other upload when it refuses. */
-    private suspend fun youTubeOrTwin(videoId: String, target: TrackMatcher.Target): String = try {
-        StreamResolver.resolve(videoId)
-    } catch (e: Exception) {
-        if (e is CancellationException) throw e
-        YouTubeTwin.stream(this, videoId, target) ?: throw e
+    /**
+     * BitChord Audio: a copy of [videoId] when YouTube won't serve it — your
+     * own file at any quality, then another YouTube upload of the same
+     * recording, then bilibili/SoundCloud held to a strict match.
+     */
+    private suspend fun standInFor(videoId: String, target: TrackMatcher.Target, error: Throwable?): Resolved? {
+        if (error is StreamResolver.PermanentlyUnplayableException) {
+            YouTubeRefusals.record(videoId, error.message ?: "unplayable")
+        }
+        SourceResolver.ownFileFor(target, youTubeRefused = true)?.let {
+            TrackLog.i("BitChord", "YouTube won't play '${target.title}' here; playing your file", about = videoId)
+            return Resolved.Module(it)
+        }
+        YouTubeTwin.stream(this, videoId, target)?.let { return Resolved.YouTube(it) }
+        SourceResolver.lastResortFor(target)?.let { return Resolved.Module(it) }
+        TrackLog.w("BitChord", "no other copy of '${target.title}' found (not in your files, nor elsewhere)", about = videoId)
+        return null
     }
 
     private suspend fun resolveDirect(videoId: String, target: TrackMatcher.Target): Resolved {
@@ -5943,8 +5972,7 @@ class PlaybackService : MediaLibraryService() {
             // YouTube cannot serve it, so a lookup still running is all that
             // is left, and there is nothing playing for it to swap into.
             running?.await()?.let { return Resolved.Module(it) }
-            YouTubeTwin.stream(this, videoId, target)?.let { return Resolved.YouTube(it) }
-            return Resolved.Module(SourceResolver.lastResortFor(target) ?: throw e)
+            return standInFor(videoId, target, e) ?: throw e
         }
         DirectSourceGate.startedOnYouTube(videoId, target)
         return Resolved.YouTube(url)
