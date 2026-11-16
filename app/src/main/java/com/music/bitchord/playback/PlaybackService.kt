@@ -3970,7 +3970,14 @@ class PlaybackService : MediaLibraryService() {
             SleepTimer.cancel()
         }
         if (exoPlayer.isPlaying) registerCurrentPlay()
-        savePlaybackState(exoPlayer)
+        // BitChord Audio: the saved queue follows the song now playing. Only
+        // the position used to be saved here, and both snapshots refuse a
+        // position for another song than the one they were written with — so
+        // a reopened app went back to the song playing when the queue was last
+        // edited (often the first one played), and the saved window ran out
+        // after 50 songs. Rewritten at each new song instead: a few dozen
+        // rows of JSON, once per track.
+        saveQueueSnapshot(exoPlayer)
         convertVideosAround(exoPlayer)
         prefetchAround(exoPlayer)
         // The second look belongs to the track it was started for; the
@@ -8223,6 +8230,8 @@ class PlaybackService : MediaLibraryService() {
             TrackLog.d("BitChordCast", "cast: app closed while casting; the cast carries on")
             return
         }
+        // BitChord Audio: where you were, written before anything stops.
+        player?.let(::saveQueueSnapshot)
         if (AppSettings.stopOnTaskRemoved.value) {
             // Both, or a swipe-away mid-crossfade leaves the outgoing track
             // playing on its own out of a service that is on its way out.
