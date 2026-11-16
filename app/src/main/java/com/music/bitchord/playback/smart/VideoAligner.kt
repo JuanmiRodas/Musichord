@@ -42,7 +42,7 @@ import kotlin.math.sqrt
  */
 object VideoAligner {
     private const val TAG = "VideoMode"
-    private const val RATE = 11025
+    internal const val RATE = 11025
     private const val FFT = 4096
     private const val HOP_SEC = 0.4
     private const val MAX_SECONDS = 720.0
@@ -280,7 +280,7 @@ object VideoAligner {
     // ── Chroma ──
 
     /** Twelve-note chroma every [HOP_SEC], centred and unit length (a silent frame is zero). */
-    private fun chroma(samples: FloatArray, sampleRate: Double): Array<FloatArray> {
+    internal fun chroma(samples: FloatArray, sampleRate: Double): Array<FloatArray> {
         // Down to ~11 kHz by averaging: plenty for the notes, and a quarter of the work.
         val step = max(1, (sampleRate / RATE).toInt())
         val rate = sampleRate / step
@@ -352,7 +352,7 @@ object VideoAligner {
     }
 
     /** The rotation of [b]'s notes that best matches [a]'s overall harmony. */
-    private fun keyShift(a: Array<FloatArray>, b: Array<FloatArray>): Int {
+    internal fun keyShift(a: Array<FloatArray>, b: Array<FloatArray>): Int {
         fun profile(x: Array<FloatArray>) = FloatArray(12) { k -> x.sumOf { it[k].toDouble() }.toFloat() / x.size }
         val pa = profile(a)
         val pb = profile(b)

@@ -5029,6 +5029,56 @@ class PlaybackService : MediaLibraryService() {
         return StreamFormat(kbps = (bytes * 8 / seconds / 1000).toInt())
     }
 
+    /**
+     * BitChord Audio: an upgrade found by name is listened to before it may
+     * replace anything — the same recording (see [SameRecording]), and really
+     * better: a lossy copy under 160 kbps (a "320" file that holds 96) is no
+     * upgrade over YouTube's Opus. A catalogue copy that can't be compared is
+     * not taken; an addon's lossless stream that can't be (a manifest) is, as
+     * before. The song keeps playing throughout.
+     */
+    private suspend fun verifiedSameAndBetter(mediaId: String, stream: SourceStream, at: SwapPoint): Boolean {
+        val playing = withContext(Dispatchers.Main) {
+            player?.currentMediaItem?.takeIf { it.mediaId == mediaId }?.toSong()
+        } ?: return false
+        val kind = stream.sourceConfigId?.let { SourceRegistry.config(it)?.kind }
+        val catalogue = kind == SourceKind.JIOSAAVN || kind == SourceKind.SOUNDCLOUD || kind == SourceKind.BILIBILI
+        val seconds = (at.duration / 1000).toInt().takeIf { it > 0 }
+        val ytId = playing.videoId
+        if (VerifiedCopies.get(ytId, stream.sourceConfigId) == false) {
+            TrackLog.d("BitChord", "upgrade dropped: this copy was heard before and isn't the song", about = mediaId)
+            return false
+        }
+        val verdict = com.music.bitchord.playback.smart.SameRecording.check(this, playing, stream.url, stream.headers, seconds)
+        when (verdict) {
+            is com.music.bitchord.playback.smart.SameRecording.Verdict.Same -> VerifiedCopies.record(ytId, stream.sourceConfigId, true)
+            is com.music.bitchord.playback.smart.SameRecording.Verdict.Different -> VerifiedCopies.record(ytId, stream.sourceConfigId, false)
+            else -> Unit
+        }
+        val lossless = stream.format.isLossless == true
+        val realKbps = verdict.kbps?.takeIf { it > 0 }
+        if (!lossless && realKbps != null && realKbps < MIN_UPGRADE_KBPS) {
+            TrackLog.w("BitChord", "upgrade dropped: ${stream.format.summary} really holds ~${realKbps}kbps", about = mediaId)
+            return false
+        }
+        if (!lossless && (stream.format.kbps ?: 0) in 1 until MIN_UPGRADE_KBPS) {
+            TrackLog.w("BitChord", "upgrade dropped: ${stream.format.summary} is no better than YouTube", about = mediaId)
+            return false
+        }
+        return when (verdict) {
+            is com.music.bitchord.playback.smart.SameRecording.Verdict.Same -> true
+            is com.music.bitchord.playback.smart.SameRecording.Verdict.Different -> {
+                TrackLog.w("BitChord", "upgrade dropped: not the same recording (${"%.2f".format(verdict.score)})", about = mediaId)
+                false
+            }
+            is com.music.bitchord.playback.smart.SameRecording.Verdict.Unknown -> {
+                val take = !catalogue && lossless
+                TrackLog.d("BitChord", "upgrade ${if (take) "kept" else "dropped"}: couldn't compare (${verdict.why})", about = mediaId)
+                take
+            }
+        }
+    }
+
     /** Where the playing track stands, read off the player in one hop. */
     private class SwapPoint(
         val item: MediaItem,
@@ -5070,6 +5120,7 @@ class PlaybackService : MediaLibraryService() {
             TrackLog.d("BitChord", "upgrade abandoned: only ${at.duration - at.position}ms of the track left")
             return
         }
+        if (!verifiedSameAndBetter(mediaId, stream, at)) return
 
         val upgradedUri = QualityUpgrade.upgradedUri(at.uri)
         // Whether the rendition entry already holds *this* stream's bytes,
@@ -5766,10 +5817,19 @@ class PlaybackService : MediaLibraryService() {
             .onFailure { if (it is CancellationException) throw it }
             .getOrNull()
             ?.let { return Resolved.Module(it) }
+        // BitChord Audio: a JioSaavn row mapped by name starts the song only
+        // once it has been heard to be the same recording; until then YouTube
+        // starts it and the copy is checked under the music (see [swapIn]).
+        var unheard: SourceStream? = null
         runCatching { SourceResolver.mappedSaavnFor(videoId, target) }
             .onFailure { if (it is CancellationException) throw it }
             .getOrNull()
-            ?.let { return Resolved.Module(it) }
+            ?.let { mapped ->
+                when {
+                    VerifiedCopies.mayStartWith(videoId, mapped) -> return Resolved.Module(mapped)
+                    VerifiedCopies.get(videoId, mapped.sourceConfigId) == null -> unheard = mapped
+                }
+            }
         // BitChord Audio: your own file, when it qualifies, plays from the
         // start — no race against YouTube, nothing to swap later.
         runCatching { SourceResolver.ownFileFor(target) }
@@ -5861,6 +5921,26 @@ class PlaybackService : MediaLibraryService() {
             return Resolved.Module(quick)
         }
 
+        // BitChord Audio: a catalogue copy nobody has compared with the song
+        // yet doesn't start it — YouTube does, and the copy is listened to
+        // while it plays; one already heard to be different is not used.
+        if (quick != null && !VerifiedCopies.mayStartWith(videoId, quick)) {
+            val url = runCatching { fallback.await().getOrThrow() }.getOrNull()
+            if (url != null) {
+                val untried = VerifiedCopies.get(videoId, quick.sourceConfigId) == null
+                TrackLog.d("BitChord", "'${target.title}': ${quick.format.summary} not yet heard to be the same; starting on YouTube", about = videoId)
+                val handed = untried && QualityUpgrade.settledForLess(
+                    mediaId = videoId,
+                    target = target,
+                    inFlight = CompletableDeferred(quick),
+                    playing = NerdStats.pickedBitrateKbps(videoId)?.let { StreamFormat(kbps = it) },
+                )
+                if (!handed) NerdStats.onLosslessRaceEnd(videoId)
+                YouTubeRefusals.clear(videoId)
+                return Resolved.YouTube(url)
+            }
+        }
+
         if (quick != null) {
             // The modules got there first, so the YouTube walk is genuinely
             // spare work now. Cancelling drops only this service's wait on it;
@@ -5910,7 +5990,7 @@ class PlaybackService : MediaLibraryService() {
         val pending = QualityUpgrade.settledForLess(
             mediaId = videoId,
             target = target,
-            inFlight = lookup.takeIf { lookup.isActive },
+            inFlight = lookup.takeIf { lookup.isActive } ?: unheard?.let { CompletableDeferred(it) },
             playing = NerdStats.pickedBitrateKbps(videoId)?.let { StreamFormat(kbps = it) },
         )
         if (!pending) NerdStats.onLosslessRaceEnd(videoId)
@@ -10012,6 +10092,8 @@ class PlaybackService : MediaLibraryService() {
          * be worth the break in the audio it costs.
          */
         const val UPGRADE_MIN_REMAINING_MS = 20_000L
+        /** BitChord Audio: a lossy copy below this is no upgrade over YouTube's ~135-160 kbps Opus. */
+        const val MIN_UPGRADE_KBPS = 160
 
         /** Minimum interval between accepted listener-requested quality retries. */
         const val MANUAL_UPGRADE_COOLDOWN_MS = 30_000L

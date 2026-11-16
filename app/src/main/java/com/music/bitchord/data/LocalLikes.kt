@@ -30,6 +30,7 @@ object LocalLikes {
     private const val PREFS = "bitchord_local_likes"
     private const val LINK = "link:"
     private const val LIKED = "liked:"
+    private const val GONE = "gone:"
 
     private var prefs: SharedPreferences? = null
 
@@ -76,6 +77,7 @@ object LocalLikes {
         if (_links.value[replacement.videoId] == original.videoId) return
         _links.value = _links.value + (replacement.videoId to original.videoId)
         prefs?.edit()?.putString(LINK + replacement.videoId, original.videoId)?.apply()
+        CloudBackup.soon(PREFS)
     }
 
     fun youTubeOf(id: String): String? = _links.value[id]
@@ -155,11 +157,14 @@ object LocalLikes {
             val anchor = LikedMusicCache.likedSongs.value.firstOrNull { it.videoId != id }?.videoId ?: TOP
             anchors[id] = anchor
             _liked.value = _liked.value + (id to song)
-            prefs?.edit()?.putString(LIKED + id, songJson(song, anchor))?.apply()
+            prefs?.edit()?.putString(LIKED + id, songJson(song, anchor))?.remove(GONE + id)?.apply()
         } else {
             _liked.value = _liked.value - id
-            prefs?.edit()?.remove(LIKED + id)?.apply()
+            // Marked, so pCloud's copy doesn't bring it back.
+            prefs?.edit()?.remove(LIKED + id)?.putBoolean(GONE + id, true)?.apply()
         }
+        // BitChord Audio: these likes live nowhere else — to pCloud right away.
+        CloudBackup.soon(PREFS)
     }
 
     /** The YouTube song [song] is, by name, artist and length — or null. */

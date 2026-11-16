@@ -41,13 +41,41 @@ object CloudBackup {
         "bitchord_artist_links",
         "bitchord_youtube_twins",
         "bitchord_youtube_refused",
+        "bitchord_verified_copies",
     )
     private val FILES = listOf(com.music.bitchord.playback.smart.VideoAligner.FILE)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    @Volatile private var appContext: Context? = null
+    private val pending = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
+    /** Sets that are merged with pCloud's on every start, not only restored when empty. */
+    private val MERGED = setOf("bitchord_local_likes")
+
+    /**
+     * BitChord Audio: [name] sent to pCloud a few seconds after it changes —
+     * for what must not live only on the phone (likes YouTube doesn't hold),
+     * rather than waiting for the daily backup.
+     */
+    fun soon(name: String) {
+        val app = appContext ?: return
+        pending.remove(name)?.cancel()
+        pending[name] = scope.launch {
+            delay(8_000)
+            val dir = dir() ?: return@launch
+            runCatching {
+                WebDavClient.ensureCollection(WebDavConfig.normalizeUrl(AppSettings.webdavUrl.value).trimEnd('/') + "/.bitchord-audio/", user, pass)
+                WebDavClient.ensureCollection(dir, user, pass)
+                val prefs = app.getSharedPreferences(name, Context.MODE_PRIVATE)
+                if (put(dir + "$name.json", encode(prefs.all).toString())) TrackLog.d(TAG, "backup: $name sent to pCloud")
+            }.onFailure { TrackLog.w(TAG, "backup: $name not sent: ${it.message}") }
+        }
+    }
+
     fun init(context: Context) {
         val app = context.applicationContext
+        appContext = app
         scope.launch {
             // After start-up has settled, and only with pCloud set up.
             delay(20_000)
@@ -97,7 +125,30 @@ object CloudBackup {
     /** Whatever this phone has nothing of, taken back from pCloud. */
     private suspend fun restoreMissing(context: Context, dir: String) {
         var restored = 0
+        for (name in MERGED) {
+            // Added from pCloud: what another phone (or an old install) liked;
+            // a "gone:" mark here keeps an un-like from coming back.
+            val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+            val text = WebDavClient.readText(dir + "$name.json", user, pass, 16 * 1024 * 1024).getOrNull() ?: continue
+            val remote = runCatching { JSONObject(text) }.getOrNull() ?: continue
+            val local = prefs.all
+            val add = JSONObject()
+            remote.keys().forEach { k ->
+                val id = k.substringAfter(':')
+                if (k !in local && "gone:$id" !in local && !k.startsWith("gone:")) add.put(k, remote.getJSONObject(k))
+            }
+            if (add.length() > 0) {
+                runCatching { decodeInto(add, prefs) }.onSuccess {
+                    restored++
+                    TrackLog.d(TAG, "backup: ${add.length()} entries of $name taken from pCloud")
+                    if (name == "bitchord_local_likes") LocalLikes.init(context)
+                }
+            }
+            // And this phone's own, if pCloud lacks any.
+            if (local.keys.any { !remote.has(it) }) soon(name)
+        }
         for (name in PREFS) {
+            if (name in MERGED) continue
             val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
             if (prefs.all.isNotEmpty()) continue
             val text = WebDavClient.readText(dir + "$name.json", user, pass, 16 * 1024 * 1024).getOrNull() ?: continue

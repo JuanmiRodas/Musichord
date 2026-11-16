@@ -1416,7 +1416,11 @@ object SourceResolver {
             // [strictLength] — so with nothing to measure by, it is not strict.
             val strict = strictLength && matchOn.durationSec != null
             var matches = TrackMatcher.ranked(candidates, matchOn)
-            if (requireSharedArtist) {
+            // BitChord Audio: a public catalogue's row must share an artist,
+            // always — a same-titled, same-length song by another band
+            // ("Grip" by The Jerry Knives Band for Every Little Thing's) is
+            // not the song.
+            if (requireSharedArtist || source.kind in CATALOGUE_KINDS) {
                 matches = matches.filter { TrackMatcher.sharesArtist(matchOn.artist, it.artist) }
             }
             // JioSaavn can return different audio under the same title and

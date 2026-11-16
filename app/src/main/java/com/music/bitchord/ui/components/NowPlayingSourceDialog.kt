@@ -139,6 +139,30 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
     val defaultQuery = remember(song.videoId) { searchName(song) }
     var query by remember(song.videoId) { mutableStateOf(defaultQuery) }
     var searched by remember(song.videoId) { mutableStateOf<List<Pair<String, Song>>?>(null) }
+    // BitChord Audio: each result's real bitrate, asked of its source (the
+    // stream it would play), shown instead of a "LOW" / "HIGH" label.
+    val bitrates = remember(song.videoId) { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+    LaunchedEffect(searched) {
+        val hits = searched.orEmpty().map { it.second }
+            .filter { !WebDavConfig.isWebDavId(it.videoId) && it.videoId !in bitrates }
+        hits.map { hit ->
+            async(Dispatchers.IO) {
+                val (configId, trackId) = com.music.bitchord.data.sources.SourceRegistry.parseTrackKey(hit.videoId)
+                    ?: return@async
+                val source = com.music.bitchord.data.sources.SourceRegistry.instance(configId) ?: return@async
+                val stream = kotlinx.coroutines.withTimeoutOrNull(10_000) {
+                    runCatching { source.stream(trackId, com.music.bitchord.data.sources.StreamRequest.Best) }.getOrNull()
+                }
+                val f = stream?.format
+                bitrates[hit.videoId] = when {
+                    f == null -> "≤ 96 kbps"
+                    f.isLossless == true -> f.summary
+                    f.kbps != null -> "${f.kbps} kbps"
+                    else -> "? kbps"
+                }
+            }
+        }.forEach { runCatching { it.await() } }
+    }
     // The song's Japanese title and artist, when it goes by romaji — searched too.
     var japanese by remember(song.videoId) { mutableStateOf<com.music.bitchord.data.sources.JapaneseNames.Names?>(null) }
     LaunchedEffect(song.videoId) {
@@ -377,7 +401,9 @@ fun NowPlayingSourceDialog(song: Song, controller: MediaController?, onBrowse: (
                             SourceRow(
                                 label = "$place · ${hit.title} · ${hit.artist}",
                                 detail = listOfNotNull(
-                                    if (WebDavConfig.isWebDavId(hit.videoId)) qualityText(hit, hit.durationText?.let(::secondsIn)) else hit.sourceQuality,
+                                    if (WebDavConfig.isWebDavId(hit.videoId)) qualityText(hit, hit.durationText?.let(::secondsIn))
+                                    else bitrates[hit.videoId]
+                                        ?: if (com.music.bitchord.data.sources.SourceRegistry.parseTrackKey(hit.videoId) == null) hit.sourceQuality else "… kbps",
                                     hit.albumName,
                                     hit.durationText,
                                 ).joinToString(" · "),
