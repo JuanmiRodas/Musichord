@@ -100,6 +100,12 @@ interface PlayerHost {
     /** BitChord Audio: video mode's lyrics size, as a scale. */
     val videoModeLyricsScale: StateFlow<Float> get() = NoVideoScale
 
+    /** BitChord Audio: the sung line over the cover — its size, and its translation. */
+    val songLyricsScale: StateFlow<Float> get() = NoSongScale
+    fun setSongLyricsScale(value: Float) = Unit
+    val songLyricsTranslation: StateFlow<Boolean> get() = NoSongTranslation
+    fun setSongLyricsTranslation(on: Boolean) = Unit
+
     /** BitChord Audio: the music video's own sound in place of the song's. */
     val videoModeOriginalAudio: StateFlow<Boolean> get() = NoVideoMode
     fun setVideoModeOriginalAudio(on: Boolean) = Unit
@@ -590,3 +596,6 @@ internal fun AudioPipelineDialog(hazeState: HazeState, isPlaying: Boolean, onDis
     PlayerPlatform.host.AudioPipelineDialog(hazeState, isPlaying, onDismiss)
 
 private val NoVideoOver: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+private val NoSongScale: StateFlow<Float> = kotlinx.coroutines.flow.MutableStateFlow(1.35f)
+private val NoSongTranslation: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(true)

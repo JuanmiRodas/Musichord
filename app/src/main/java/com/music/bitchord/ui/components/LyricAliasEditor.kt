@@ -16,6 +16,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -181,6 +182,15 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
                     FilledTonalButton(onClick = { search() }) { Text(stringResource(R.string.lyric_search_all)) }
                     if (searching != null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 }
+                // BitChord Audio: lyrics an automatic upgrade replaced, back on a tap.
+                if (remember(song.videoId) { EditedLyrics.hasPrevious(song.videoId) }) {
+                    OutlinedButton(onClick = {
+                        searching?.cancel()
+                        EditedLyrics.restorePrevious(song)
+                        com.music.bitchord.data.lyrics.LyricsKeeper.notePicked(song.videoId)
+                        onDismiss()
+                    }) { Text(stringResource(R.string.lyric_restore_previous)) }
+                }
                 if (searched && searching == null && results.isEmpty()) {
                     Text(stringResource(R.string.lyric_search_none), style = MaterialTheme.typography.bodySmall)
                 }
@@ -195,6 +205,7 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
                                         searching?.cancel()
                                         saveNames()
                                         EditedLyrics.choose(song, r.lines)
+                                        com.music.bitchord.data.lyrics.LyricsKeeper.notePicked(song.videoId)
                                         onDismiss()
                                     }
                                     .padding(10.dp),

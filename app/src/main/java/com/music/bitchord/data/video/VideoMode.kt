@@ -92,6 +92,8 @@ object VideoMode {
         _lyrics.value = p.getBoolean("lyrics", true)
         _frame.value = if (p.contains("frame")) p.getInt("frame", 2) else if (p.getBoolean("square", false)) 0 else 2
         _lyricsScale.value = p.getFloat("lyrics_scale", 1f)
+        _songLyricsScale.value = p.getFloat("song_lyrics_scale", 1.35f)
+        _songTranslation.value = p.getBoolean("song_translation", true)
         _translation.value = p.getBoolean("translation", false)
     }
 
@@ -123,6 +125,20 @@ object VideoMode {
     private val _lyricsScale = MutableStateFlow(1f)
     val lyricsScale: StateFlow<Float> = _lyricsScale.asStateFlow()
     fun setLyricsScale(value: Float) { _lyricsScale.value = value; prefs?.edit()?.putFloat("lyrics_scale", value)?.apply() }
+
+    /** BitChord Audio: the size of the sung line over the cover (pinch, or A−/A+), as a scale. */
+    private val _songLyricsScale = MutableStateFlow(1.35f)
+    val songLyricsScale: StateFlow<Float> = _songLyricsScale.asStateFlow()
+    fun setSongLyricsScale(value: Float) {
+        val v = value.coerceIn(0.7f, 2.6f)
+        _songLyricsScale.value = v
+        prefs?.edit()?.putFloat("song_lyrics_scale", v)?.apply()
+    }
+
+    /** BitChord Audio: the translation over the sung line on the cover — on unless turned off. */
+    private val _songTranslation = MutableStateFlow(true)
+    val songTranslation: StateFlow<Boolean> = _songTranslation.asStateFlow()
+    fun setSongTranslation(on: Boolean) { _songTranslation.value = on; prefs?.edit()?.putBoolean("song_translation", on)?.apply() }
 
     private val _originalAudio = MutableStateFlow(false)
     /** The music video's own sound, in place of the song's (not remembered). */

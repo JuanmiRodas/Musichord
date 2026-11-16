@@ -477,7 +477,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val japanese = com.music.bitchord.data.lyrics.LyricsQuality.looksJapanese(mine)
                 val already = com.music.bitchord.data.lyrics.LyricsQuality.score(mine, japanese, durationMs) >=
                     com.music.bitchord.data.lyrics.LyricsQuality.WORD + (if (japanese) 300 else 0)
-                if (!com.music.bitchord.data.lyrics.LyricsKeeper.isAutoKept(videoId) || already || durationMs <= 0L) return@launch
+                // BitChord Audio: lyrics you picked from the search are looked over too —
+                // replaced only by word-by-word lyrics of the same song (and can be put back).
+                if (!com.music.bitchord.data.lyrics.LyricsKeeper.mayUpgrade(videoId) || already || durationMs <= 0L) return@launch
                 keptAuto = mine
             }
             val keptScore = keptAuto?.let {
@@ -587,7 +589,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
             if (keptAuto != null) {
                 // Only a strictly better version replaces what was kept.
-                if (best != null && best.score > keptScore && selectedLyricsSource == null) {
+                val pickedByYou = com.music.bitchord.data.lyrics.LyricsKeeper.isPicked(videoId)
+                val sameSong = best != null && sameLyrics(best.result.lines, keptAuto!!)
+                val wordByWord = best != null && best.result.lines.any { it.isWordSynced }
+                if (best != null && best.score > keptScore && selectedLyricsSource == null &&
+                    (!pickedByYou || (wordByWord && sameSong))
+                ) {
                     _lyrics.value = best.result.lines
                     _lyricsSource.value = best.result.source
                     com.music.bitchord.data.lyrics.LyricsKeeper.keep(
@@ -680,6 +687,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 onSourceCancelled = { provider -> providerCancelled(generation, provider) },
             )
         }
+    }
+
+    /**
+     * BitChord Audio: whether two sets of lyrics are the same song's — most of
+     * the letter pairs of one found in the other (spacing, punctuation and
+     * case ignored), so a different song under the same name isn't taken.
+     */
+    private fun sameLyrics(a: List<com.music.bitchord.data.lyrics.LyricLine>, b: List<com.music.bitchord.data.lyrics.LyricLine>): Boolean {
+        fun pairs(lines: List<com.music.bitchord.data.lyrics.LyricLine>): Set<String> {
+            val t = lines.joinToString("") { it.text }.lowercase().filter { it.isLetterOrDigit() }
+            return (0 until (t.length - 1).coerceAtLeast(0)).map { t.substring(it, it + 2) }.toSet()
+        }
+        val x = pairs(a)
+        val y = pairs(b)
+        if (x.isEmpty() || y.isEmpty()) return false
+        return x.count { it in y }.toDouble() / minOf(x.size, y.size) >= 0.6
     }
 
     private fun providerStarted(generation: Long, source: LyricsSource) {

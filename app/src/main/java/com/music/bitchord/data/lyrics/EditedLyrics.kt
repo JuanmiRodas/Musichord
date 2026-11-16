@@ -67,6 +67,30 @@ object EditedLyrics {
         return lines.takeIf { it.isNotEmpty() }
     }
 
+    /**
+     * BitChord Audio: the lyrics [videoId] had before a better version
+     * replaced them on its own — kept so they can be put back from the
+     * lyric search.
+     */
+    fun keepPrevious(videoId: String) {
+        val d = dir ?: return
+        val f = File(d, name(videoId)).takeIf { it.isFile } ?: return
+        runCatching { f.copyTo(File(d, name(videoId) + ".prev"), overwrite = true) }
+    }
+
+    fun hasPrevious(videoId: String): Boolean = dir?.let { File(it, name(videoId) + ".prev").isFile } == true
+
+    /** The lyrics from before the last automatic upgrade, back in place. */
+    fun restorePrevious(song: Song): Boolean {
+        val f = dir?.let { File(it, name(song.videoId) + ".prev") }?.takeIf { it.isFile } ?: return false
+        val text = f.readText()
+        val lines = (if (WORD_STAMP.containsMatchIn(text)) EnhancedLrc.parse(text) else LrcLib.parseLrc(text))
+            .takeIf { it.isNotEmpty() } ?: return false
+        f.delete()
+        save(song, lines, besideFile = false)
+        return true
+    }
+
     /** Whether lyrics were timed or picked for [videoId] on this phone. */
     fun has(videoId: String): Boolean = dir?.let { File(it, name(videoId)).isFile } == true
 

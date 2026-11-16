@@ -80,12 +80,20 @@ object LyricsKeeper {
     fun keep(song: Song, lines: List<LyricLine>, picked: Boolean = false, upgrade: Boolean = false) {
         if (lines.none { it.timeMs > 0 } || lines.count { it.text.isNotBlank() } < 2) return
         if (!picked && !upgrade && EditedLyrics.has(song.videoId)) return
-        if (upgrade && !isAutoKept(song.videoId)) return
-        EditedLyrics.save(song, lines, besideFile = false, quiet = !picked)
+        if (upgrade && !mayUpgrade(song.videoId)) return
+        // BitChord Audio: what an upgrade replaces can be put back (lyric search).
+        if (upgrade) EditedLyrics.keepPrevious(song.videoId)
+        val wasPicked = upgrade && isPicked(song.videoId)
+        EditedLyrics.save(song, lines, besideFile = false, quiet = !picked && !upgrade)
         // BitChord Audio: remembered as chosen by the app (may be upgraded later)
         // or by you (never replaced) — see [isAutoKept].
         prefs?.edit()?.remove(song.videoId)?.apply {
-            if (picked) remove(AUTO + song.videoId) else putLong(AUTO + song.videoId, System.currentTimeMillis())
+            when {
+                picked -> remove(AUTO + song.videoId)
+                // A pick upgraded stays a pick (so only word sync replaces it again).
+                wasPicked -> putLong(PICKED + song.videoId, System.currentTimeMillis())
+                else -> putLong(AUTO + song.videoId, System.currentTimeMillis())
+            }
         }?.apply()
         if (upgrade) forgetEmbedded(song)
         scope.launch { runCatching { writeToFolder(song, lines) } }
@@ -94,6 +102,26 @@ object LyricsKeeper {
     }
 
     private const val AUTO = "auto:"
+    private const val PICKED = "picked:"
+
+    /** BitChord Audio: lyrics you picked from the lyric search (not timed by hand). */
+    fun notePicked(videoId: String) {
+        prefs?.edit()?.putLong(PICKED + videoId, System.currentTimeMillis())?.remove(AUTO + videoId)?.apply()
+    }
+
+    fun isPicked(videoId: String): Boolean {
+        val at = prefs?.getLong(PICKED + videoId, 0L) ?: 0L
+        if (at <= 0L) return false
+        val saved = EditedLyrics.savedAt(videoId)
+        return saved == 0L || saved <= at + 5_000
+    }
+
+    /**
+     * BitChord Audio: whether a better version may replace the kept lyrics on
+     * its own — the app's choice, or one you picked from the search (then only
+     * by word-by-word lyrics of the same song). Lyrics you timed never.
+     */
+    fun mayUpgrade(videoId: String): Boolean = isAutoKept(videoId) || isPicked(videoId)
 
     /**
      * Whether the lyrics kept for [videoId] were chosen by the app (the best

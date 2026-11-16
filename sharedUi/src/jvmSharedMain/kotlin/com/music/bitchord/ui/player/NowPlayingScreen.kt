@@ -34,7 +34,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -762,7 +764,7 @@ private fun SlidingPlayerDeck(
  * queue along the bottom.
  */
 @Composable
-@OptIn(ExperimentalHazeApi::class, ExperimentalHazeMaterialsApi::class)
+@OptIn(ExperimentalHazeApi::class, ExperimentalHazeMaterialsApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun NowPlayingScreen(
     song: Song,
     /** Who selected this track in the active Listen Together session. */
@@ -984,6 +986,8 @@ fun NowPlayingScreen(
     val videoModeLyrics by PlayerPlatform.host.videoModeLyrics.collectAsStateWithLifecycle()
     val videoModeOriginalAudio by PlayerPlatform.host.videoModeOriginalAudio.collectAsStateWithLifecycle()
     val videoModeTranslation by PlayerPlatform.host.videoModeTranslation.collectAsStateWithLifecycle()
+    val songLyricsScale by PlayerPlatform.host.songLyricsScale.collectAsStateWithLifecycle()
+    val songLyricsTranslation by PlayerPlatform.host.songLyricsTranslation.collectAsStateWithLifecycle()
     // Square video thumbnails: the picture takes the sleeve's own slot, cropped
     // to it, in place of the full-width box at the video's shape. In video
     // mode, the player's own aspect button decides.
@@ -1160,8 +1164,10 @@ fun NowPlayingScreen(
     )
     // BitChord Audio: video mode's translation line stays on from song to
     // song: each song's translation is fetched as its lyrics arrive.
-    LaunchedEffect(song.videoId, lyrics, videoOverlay, videoModeTranslation) {
-        if (videoOverlay && videoModeTranslation && !lyrics.isNullOrEmpty() && lyricsTranslation.translatedLines == null) {
+    LaunchedEffect(song.videoId, lyrics, videoOverlay, videoModeTranslation, songLyricsTranslation) {
+        // And the cover's sung line: its translation is on unless turned off.
+        val wanted = if (videoOverlay) videoModeTranslation else songLyricsTranslation
+        if (wanted && !lyrics.isNullOrEmpty() && lyricsTranslation.translatedLines == null) {
             lyricsTranslation.ensureTranslation()
         }
     }
@@ -3960,7 +3966,18 @@ fun NowPlayingScreen(
                         val lyricsAboveCredits = !lyricsOpen && syncedLyricsEnabled && !videoOverlay &&
                             lyricsTranslation.displayedLyrics.any { it.timeMs > 0L }
                         if (lyricsAboveCredits) {
-                            val withTranslation = lyricsTranslation.showingTranslation && lyricsTranslation.translatedLines != null
+                            val withTranslation = songLyricsTranslation && lyricsTranslation.translatedLines != null
+                            // BitChord Audio: a long press shows A− / A+ and the translation
+                            // switch for a few seconds; two fingers pinch the size.
+                            var sizerShown by remember { mutableStateOf(false) }
+                            var sizerTouch by remember { mutableStateOf(0) }
+                            LaunchedEffect(sizerShown, sizerTouch) {
+                                if (sizerShown) {
+                                    delay(4_000)
+                                    sizerShown = false
+                                }
+                            }
+                            val liveScale by rememberUpdatedState(songLyricsScale)
                             var lyricBlockHeight by remember { mutableIntStateOf(0) }
                             Box(
                                 modifier = Modifier
@@ -3982,10 +3999,26 @@ fun NowPlayingScreen(
                                         layout(constraints.maxWidth, placeable.height) { placeable.placeRelative(start, 0) }
                                     }
                                     .graphicsLayer { alpha = (1f - p() * 3f).coerceIn(0f, 1f) * if (queueOpen) 0f else 1f }
-                                    .clickable(
+                                    .pointerInput(Unit) {
+                                        awaitEachGesture {
+                                            awaitFirstDown(requireUnconsumed = false)
+                                            do {
+                                                val event = awaitPointerEvent()
+                                                if (event.changes.count { it.pressed } >= 2) {
+                                                    val zoom = event.calculateZoom()
+                                                    if (zoom != 1f) {
+                                                        PlayerPlatform.host.setSongLyricsScale(liveScale * zoom)
+                                                        event.changes.forEach { it.consume() }
+                                                    }
+                                                }
+                                            } while (event.changes.any { it.pressed })
+                                        }
+                                    }
+                                    .combinedClickable(
                                         enabled = !queueOpen,
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
+                                        onLongClick = { sizerShown = true; sizerTouch++ },
                                         onClick = openLyrics,
                                     ),
                             ) {
@@ -3997,10 +4030,30 @@ fun NowPlayingScreen(
                                     durationMs = durationMs,
                                     compact = true,
                                     modifier = Modifier.fillMaxWidth(),
-                                    scale = videoLyricsScale * 1.35f,
+                                    scale = songLyricsScale,
                                     translation = if (withTranslation) lyricsTranslation.translatedLines else null,
                                     singleLine = true,
                                 )
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = sizerShown,
+                                    enter = androidx.compose.animation.fadeIn(tween(180)),
+                                    exit = androidx.compose.animation.fadeOut(tween(300)),
+                                    modifier = Modifier.align(Alignment.TopEnd),
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(Color.Black.copy(alpha = 0.55f))
+                                            .padding(horizontal = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        LyricSizeChip("A−") { PlayerPlatform.host.setSongLyricsScale(songLyricsScale - 0.15f); sizerTouch++ }
+                                        LyricSizeChip("A+") { PlayerPlatform.host.setSongLyricsScale(songLyricsScale + 0.15f); sizerTouch++ }
+                                        LyricSizeChip(if (songLyricsTranslation) "文A ✓" else "文A") {
+                                            PlayerPlatform.host.setSongLyricsTranslation(!songLyricsTranslation); sizerTouch++
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -4670,4 +4723,19 @@ private fun VideoNudgeButton(label: String, onClick: () -> Unit) {
     ) {
         Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
     }
+}
+
+
+/** BitChord Audio: one button of the cover lyric's size pill. */
+@Composable
+private fun LyricSizeChip(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = Color.White,
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
 }

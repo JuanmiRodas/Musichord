@@ -164,6 +164,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override val videoModeLooks: StateFlow<com.music.bitchord.ui.player.VideoLooksUi?> get() = looksUi
     override val videoModeOver: StateFlow<Boolean> get() = MusicVideoEngine.over
     override val videoModeLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.lyricsScale
+    override val songLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.songLyricsScale
+    override fun setSongLyricsScale(value: Float) = com.music.bitchord.data.video.VideoMode.setSongLyricsScale(value)
+    override val songLyricsTranslation: StateFlow<Boolean> get() = com.music.bitchord.data.video.VideoMode.songTranslation
+    override fun setSongLyricsTranslation(on: Boolean) = com.music.bitchord.data.video.VideoMode.setSongTranslation(on)
     override val videoModeOriginalAudio: StateFlow<Boolean> get() = com.music.bitchord.data.video.VideoMode.originalAudio
     override fun setVideoModeOriginalAudio(on: Boolean) = com.music.bitchord.data.video.VideoMode.setOriginalAudio(on)
 
