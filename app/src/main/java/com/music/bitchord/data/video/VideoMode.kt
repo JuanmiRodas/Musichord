@@ -319,8 +319,18 @@ object VideoMode {
                 if (core.length < 2) emptyList() else results.filter { norm(it.title).contains(core) }
             }
         }.getOrDefault(emptyList())
-        val all = (listOfNotNull(linked) + listOfNotNull(paired?.let { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) }) +
-            searched.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) })
+        // BitChord Audio: the official video first — "(Official Video)", a
+        // VEVO or the artist's own channel — over a lyric video, a visualizer
+        // or an upload that only happens to run the song's exact length.
+        val candidates = (listOfNotNull(paired) + searched).distinctBy { it.videoId }
+        val ordered = candidates.withIndex()
+            .sortedWith(compareByDescending<IndexedValue<Song>> { (i, v) ->
+                officialScore(v, song) + if (v.videoId == paired?.videoId) 10 else 0
+            }.thenBy { it.index })
+            .map { it.value }
+        if (ordered.isNotEmpty()) TrackLog.d(TAG, "videos for '${song.title}', best first: " +
+            ordered.take(4).joinToString { "'${it.title}' · ${it.artist} (${officialScore(it, song)})" })
+        val all = (listOfNotNull(linked) + ordered.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) })
             .distinctBy { it.key }
             .filterNot { it.key in unplayable || isWrong(song, it) }
         val first = all.firstOrNull() ?: return null
@@ -396,7 +406,36 @@ object VideoMode {
     }
 
     /** YouTube's videos for [query], karaoke and the like left out unless asked for. */
-    suspend fun youTube(query: String): List<Song> = withContext(Dispatchers.IO) {
+    private val OFFICIAL = Regex("(?i)official\\s*(music\\s*)?video|official\\s*mv|\\bm/?v\\b|\\bpv\\b|music\\s*video|ミュージックビデオ|官方")
+    private val NOT_THE_VIDEO = Regex(
+        "(?i)lyric|letra|歌詞|visuali[sz]er|official\\s*audio|\\(audio\\)|\\[audio\\]|slowed|sped\\s*up|reverb|nightcore|8\\s*bit|" +
+            "remix|cover|karaoke|instrumental|fan\\s*made|fanmade|\\bamv\\b|reaction|tutorial|piano|\\blive\\b|ライブ",
+    )
+
+    private fun loose(s: String) = s.lowercase().replace('$', 's').filter { it.isLetterOrDigit() }
+
+    /**
+     * BitChord Audio: how much a video looks like the song's official video:
+     * named so, or on a VEVO / the artist's own channel; a lyric video,
+     * visualizer, audio upload, edit or live take counts against it (unless
+     * the song itself is one).
+     */
+    fun officialScore(video: Song, song: Song?): Int {
+        val title = video.title
+        val channel = loose(video.artist)
+        val songTitle = song?.title.orEmpty()
+        var score = 0
+        if (OFFICIAL.containsMatchIn(title)) score += 50
+        if ("vevo" in channel || "official" in channel) score += 30
+        val artist = song?.artist?.split(',')?.firstOrNull()?.let(::loose).orEmpty()
+        if (artist.length >= 2 && (channel == artist || channel.startsWith(artist))) score += 25
+        NOT_THE_VIDEO.findAll(title).forEach { m ->
+            if (!songTitle.contains(m.value, ignoreCase = true)) score -= 60
+        }
+        return score
+    }
+
+    suspend fun youTube(query: String, song: Song? = null): List<Song> = withContext(Dispatchers.IO) {
         val wantsKaraoke = TrackMatcher.isKaraokeLike(query)
         YtMusicRepository.search(query, SearchFilter.VIDEOS).getOrNull().orEmpty()
             .mapNotNull {
@@ -407,6 +446,11 @@ object VideoMode {
                 }
             }
             .filter { wantsKaraoke || !TrackMatcher.isKaraokeLike(it.title, it.albumName) }
+            .let { list ->
+                // Official videos first, otherwise YouTube's order.
+                if (song == null) list
+                else list.withIndex().sortedWith(compareByDescending<IndexedValue<Song>> { officialScore(it.value, song) }.thenBy { it.index }).map { it.value }
+            }
     }
 
     private fun say(text: Int) {

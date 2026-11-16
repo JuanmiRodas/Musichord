@@ -78,7 +78,7 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
     LaunchedEffect(asked) {
         VideoMode.rememberQuery(song, asked)
         youtube = null
-        youtube = runCatching { VideoMode.youTube(asked) }.getOrDefault(emptyList()).map {
+        youtube = runCatching { VideoMode.youTube(asked, song) }.getOrDefault(emptyList()).map {
             VideoHit(VideoRef(VideoRef.Site.YOUTUBE, it.videoId), it.title, it.artist, it.durationText, it.thumbnailUrl)
         }
     }
