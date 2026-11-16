@@ -3785,7 +3785,13 @@ fun NowPlayingScreen(
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
                                                 .videoLyricsScrim(videoShade)
-                                                .padding(start = 14.dp, end = 14.dp, top = if (videoShade > 0.9f) 44.dp else 30.dp, bottom = 10.dp),
+                                                // BitChord Audio: a tap on the lyrics, their options.
+                                                .clickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null,
+                                                ) { showLyricsProviders = true }
+                                                // Above the ±0.5 s buttons, not over them.
+                                                .padding(start = 14.dp, end = 14.dp, top = if (videoShade > 0.9f) 44.dp else 30.dp, bottom = 46.dp),
                                         ) {
                                             // One line here — the sung one — with its
                                             // translation under it when that's on.
@@ -3921,6 +3927,54 @@ fun NowPlayingScreen(
                             )
                         }
 
+                        // BitChord Audio: the sung line (its translation above it, smaller)
+                        // sits at the foot of the cover, where the credits were; the
+                        // credits move down into the line's old place over the scrubber.
+                        val lyricsAboveCredits = !lyricsOpen && syncedLyricsEnabled && !videoOverlay &&
+                            lyricsTranslation.displayedLyrics.any { it.timeMs > 0L }
+                        if (lyricsAboveCredits) {
+                            val withTranslation = lyricsTranslation.showingTranslation && lyricsTranslation.translatedLines != null
+                            var lyricBlockHeight by remember { mutableIntStateOf(0) }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .offset {
+                                        val bottom = (currentTitleTop() + lyricSlotHeight * (1f - p())).roundToPx() +
+                                            (HEADER_HEIGHT.roundToPx() - 52.dp.roundToPx()) / 2
+                                        IntOffset(0, bottom - lyricBlockHeight)
+                                    }
+                                    .onSizeChanged { lyricBlockHeight = it.height }
+                                    .layout { measurable, constraints ->
+                                        val start = titleStart().roundToPx()
+                                        val end = 16.dp.roundToPx()
+                                        val placeable = measurable.measure(
+                                            constraints.copy(minWidth = 0, maxWidth = (constraints.maxWidth - start - end).coerceAtLeast(0)),
+                                        )
+                                        layout(constraints.maxWidth, placeable.height) { placeable.placeRelative(start, 0) }
+                                    }
+                                    .graphicsLayer { alpha = (1f - p() * 3f).coerceIn(0f, 1f) * if (queueOpen) 0f else 1f }
+                                    .clickable(
+                                        enabled = !queueOpen,
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = openLyrics,
+                                    ),
+                            ) {
+                                VideoKaraokeLyrics(
+                                    lines = if (withTranslation) lyricsTranslation.panelLines else lyricsTranslation.displayedLyrics,
+                                    trackKey = song.videoId,
+                                    playhead = lyricsPlayhead,
+                                    isPlaying = isPlaying && position.advancing,
+                                    durationMs = durationMs,
+                                    compact = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    scale = videoLyricsScale,
+                                    translation = if (withTranslation) lyricsTranslation.translatedLines else null,
+                                    singleLine = true,
+                                )
+                            }
+                        }
+
                         // ---- Title + menu ----
                         Row(
                             modifier = Modifier
@@ -3939,7 +3993,9 @@ fun NowPlayingScreen(
                                         x = 0,
                                         y = (
                                             currentTitleTop() -
-                                                lerp(0.dp, (HEADER_HEIGHT - THUMB_SIZE) / 2, p())
+                                                lerp(0.dp, (HEADER_HEIGHT - THUMB_SIZE) / 2, p()) +
+                                                // BitChord Audio: down into the lyric line's place.
+                                                (if (lyricsAboveCredits) lyricSlotHeight * (1f - p()) else 0.dp)
                                         ).roundToPx(),
                                     )
                                 }
@@ -4374,7 +4430,10 @@ fun NowPlayingScreen(
                             .height(lyricSlotHeight),
                         contentAlignment = Alignment.CenterStart,
                     ) {
-                    if (!lyricsOpen && syncedLyricsEnabled && !(videoOverlay && videoModeLyrics)) {
+                    // BitChord Audio: synced lyrics are shown above the credits instead.
+                    val lyricsMovedUp = !lyricsOpen && syncedLyricsEnabled && !videoOverlay &&
+                        lyricsTranslation.displayedLyrics.any { it.timeMs > 0L }
+                    if (!lyricsOpen && syncedLyricsEnabled && !(videoOverlay && videoModeLyrics) && !lyricsMovedUp) {
                         CurrentLyricStrip(
                             lines = lyricsTranslation.displayedLyrics,
                             trackKey = song.videoId,
