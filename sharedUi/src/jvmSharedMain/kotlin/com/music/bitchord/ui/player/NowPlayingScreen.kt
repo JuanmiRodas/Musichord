@@ -3697,7 +3697,9 @@ fun NowPlayingScreen(
                                         .offset {
                                             // BitChord Audio: out to the player's edges, at the square's height.
                                             if (videoEdge && playerBounds.width > 0) {
-                                                return@offset IntOffset(-(playerBounds.width - boxWidthPx) / 2, artTop().roundToPx())
+                                                // Laid out at the player's own width, the box is already
+                                                // centred on it: no gutter to take off.
+                                                return@offset IntOffset(0, artTop().roundToPx())
                                             }
                                             if (squareVideo) {
                                                 val side = artSize().roundToPx()
@@ -3940,7 +3942,9 @@ fun NowPlayingScreen(
                                     .fillMaxWidth()
                                     .offset {
                                         val bottom = (currentTitleTop() + lyricSlotHeight * (1f - p())).roundToPx() +
-                                            (HEADER_HEIGHT.roundToPx() - 52.dp.roundToPx()) / 2
+                                            (HEADER_HEIGHT.roundToPx() - 52.dp.roundToPx()) / 2 -
+                                            // A clear gap above the title.
+                                            22.dp.roundToPx()
                                         IntOffset(0, bottom - lyricBlockHeight)
                                     }
                                     .onSizeChanged { lyricBlockHeight = it.height }
@@ -3968,7 +3972,7 @@ fun NowPlayingScreen(
                                     durationMs = durationMs,
                                     compact = true,
                                     modifier = Modifier.fillMaxWidth(),
-                                    scale = videoLyricsScale,
+                                    scale = videoLyricsScale * 1.35f,
                                     translation = if (withTranslation) lyricsTranslation.translatedLines else null,
                                     singleLine = true,
                                 )
