@@ -127,8 +127,56 @@ object JapaneseRomanizer {
         }.takeIf { it.isNotEmpty() }
     }
 
+    /** Simplified (and a few traditional) forms whose Japanese form differs from a plain Hans→Hant swap. */
+    private val TO_JAPANESE = mapOf(
+        '谁' to '誰', '仆' to '僕', '们' to '達', '这' to '這', '说' to '説', '时' to '時', '爱' to '愛',
+        '见' to '見', '梦' to '夢', '现' to '現', '让' to '譲', '还' to '還', '问' to '問', '间' to '間',
+        '门' to '門', '会' to '会', '过' to '過', '对' to '対', '为' to '為', '么' to '麼', '远' to '遠',
+        '边' to '辺', '泪' to '涙', '声' to '声', '恋' to '恋', '风' to '風', '飞' to '飛', '乐' to '楽',
+        '车' to '車', '东' to '東', '长' to '長', '开' to '開', '关' to '関', '无' to '無', '语' to '語',
+        '话' to '話', '记' to '記', '忆' to '憶', '续' to '続', '实' to '実', '变' to '変', '样' to '様',
+        '还' to '還', '岁' to '歳', '处' to '処', '轻' to '軽', '颜' to '顔', '笔' to '筆', '红' to '紅',
+        '绿' to '緑', '蓝' to '藍', '鸟' to '鳥', '鱼' to '魚', '马' to '馬', '买' to '買', '卖' to '売',
+        '读' to '読', '写' to '写', '听' to '聴', '亲' to '親', '恶' to '悪', '错' to '錯', '经' to '経',
+        '结' to '結', '给' to '給', '终' to '終', '线' to '線', '纸' to '紙', '约' to '約', '级' to '級',
+        '热' to '熱', '烧' to '焼', '灯' to '灯', '饭' to '飯', '钟' to '鐘', '铁' to '鉄', '银' to '銀',
+        '钱' to '銭', '树' to '樹', '楼' to '楼', '桥' to '橋', '强' to '強', '胜' to '勝', '战' to '戦',
+        '单' to '単', '义' to '義', '学' to '学', '觉' to '覚', '运' to '運', '远' to '遠', '进' to '進',
+        '选' to '選', '连' to '連', '违' to '違', '择' to '択', '护' to '護', '认' to '認', '识' to '識',
+        '谢' to '謝', '请' to '請', '论' to '論', '证' to '証', '诗' to '詩', '谈' to '談', '调' to '調',
+        '负' to '負', '贵' to '貴', '费' to '費', '贴' to '貼', '弃' to '棄', '虽' to '雖', '气' to '気',
+        '归' to '帰', '发' to '発', '广' to '広', '欢' to '歓', '难' to '難', '杂' to '雑', '离' to '離',
+    )
+
+    private val formCache = java.util.concurrent.ConcurrentHashMap<Char, Char>()
+
+    private fun knows(tokenizer: com.atilika.kuromoji.ipadic.Tokenizer, ch: Char): Boolean =
+        runCatching { tokenizer.tokenize(ch.toString()).firstOrNull()?.reading }.getOrNull()
+            ?.let { it.isNotBlank() && it != "*" } == true
+
+    /** [line] with every Han character the dictionary can't read replaced by its Japanese form, when there is one. */
+    private fun japaneseForms(line: String, tokenizer: com.atilika.kuromoji.ipadic.Tokenizer): String {
+        if (line.none { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }) return line
+        return buildString(line.length) {
+            line.forEach { ch ->
+                if (Character.UnicodeScript.of(ch.code) != Character.UnicodeScript.HAN) {
+                    append(ch); return@forEach
+                }
+                append(formCache.getOrPut(ch) {
+                    if (knows(tokenizer, ch)) return@getOrPut ch
+                    TO_JAPANESE[ch]?.let { return@getOrPut it }
+                    // Otherwise its traditional form, which Japanese mostly shares.
+                    val hant = if (android.os.Build.VERSION.SDK_INT >= 29) runCatching {
+                        android.icu.text.Transliterator.getInstance("Hans-Hant").transliterate(ch.toString())
+                    }.getOrNull() else null
+                    hant?.singleOrNull()?.takeIf { it != ch && knows(tokenizer, it) } ?: ch
+                })
+            }
+        }
+    }
+
     private fun pieces(raw: String): List<Piece>? {
-        val (line, fromAt, toAt) = prepareMapped(raw)
+        val (prepared, fromAt, toAt) = prepareMapped(raw)
         // The dictionary loads in the background at start-up. Asked before it
         // is ready, this used to give up — and the lyrics went to the web
         // romanizer instead, which leaves kanji it can't place, and whose
@@ -142,6 +190,12 @@ object JapaneseRomanizer {
             }
             JapaneseReading.tokenizerNow()
         } ?: return null
+        // BitChord Audio: lyrics from Chinese services (KuGou above all) write
+        // Japanese with Chinese simplified characters — 谁 for 誰, 仆 for 僕 —
+        // which the Japanese dictionary can't read, so they stayed as kanji in
+        // the romaji. Each one is swapped for its Japanese form first, one
+        // character for one (so the timing map holds).
+        val line = japaneseForms(prepared, tokenizer)
         val tokens = runCatching { tokenizer.tokenize(line) }.getOrNull() ?: return null
         val out = ArrayList<Piece>()
         var gap = false
