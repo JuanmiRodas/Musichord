@@ -3243,9 +3243,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // BitChord Audio: songs liked here because YouTube doesn't have
                 // them — added after the merge, which would otherwise drop them.
                 val shown = (pageState as? UiState.Success)?.data ?: state.data
-                val mine = com.music.bitchord.data.LocalLikes.liked.value.values
+                // Each where it was liked (not all on top), with your file's cover.
+                val local = com.music.bitchord.data.LocalLikes
+                val mine = local.liked.value.values
                     .filter { m -> shown.none { it.videoId == m.videoId } }
-                if (mine.isNotEmpty()) pageState = UiState.Success(mine.toList() + shown)
+                    .map(local::withCover)
+                if (mine.isNotEmpty()) pageState = UiState.Success(local.placeAmong(mine, shown))
             }
             // Update by id — the user may have pushed another page meanwhile.
             // A page showing its downloaded copy takes only a real listing: a

@@ -54,6 +54,7 @@ object LikeLinker {
                 if (AppSettings.meteredConnection.value != false) break
                 val yt = runCatching { find(song) }.getOrNull()
                 if (yt == null) {
+                    TrackLog.d(TAG, "likes: '${song.title}' · ${song.artist} (${song.durationText ?: "?"}) still not found on YouTube Music")
                     prefs?.edit()?.putLong(song.videoId, System.currentTimeMillis())?.apply()
                 } else if (YtMusicRepository.rate(yt.videoId, LikeStatus.LIKE).isSuccess) {
                     LocalLikes.link(song, yt)

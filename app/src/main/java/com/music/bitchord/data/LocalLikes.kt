@@ -54,7 +54,11 @@ object LocalLikes {
         p.all.forEach { (k, v) ->
             when {
                 k.startsWith(LINK) && v is String -> links[k.removePrefix(LINK)] = v
-                k.startsWith(LIKED) && v is String -> songFrom(v)?.let { liked[k.removePrefix(LIKED)] = it }
+                k.startsWith(LIKED) && v is String -> songFrom(v)?.let {
+                    liked[k.removePrefix(LIKED)] = it
+                    runCatching { JSONObject(v).optString("anchor").takeIf(String::isNotEmpty) }.getOrNull()
+                        ?.let { a -> anchors[k.removePrefix(LIKED)] = a }
+                }
             }
         }
         _links.value = links
@@ -102,11 +106,56 @@ object LocalLikes {
     fun songFor(id: String): Song? =
         seen[id] ?: _liked.value[id] ?: WebDavRepository.library().firstOrNull { it.videoId == id }
 
+    /**
+     * BitChord Audio: where in Liked Music each song liked here belongs — the
+     * YouTube song that was newest when it was liked. It is shown just above
+     * that one, so later likes go above it instead of under it forever.
+     */
+    private val anchors = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    fun anchorOf(id: String): String? = anchors[id]
+
+    /**
+     * BitChord Audio: [mine] placed among [list] — each above the song that
+     * was newest when it was liked; one with no such song left (or liked
+     * before this was kept) goes at the end, not over every newer like.
+     */
+    fun placeAmong(mine: List<Song>, list: List<Song>): List<Song> {
+        if (mine.isEmpty()) return list
+        val byAnchor = mine.groupBy { anchors[it.videoId] }
+        val ids = list.mapTo(HashSet()) { it.videoId }
+        val out = ArrayList<Song>(list.size + mine.size)
+        // Liked here before anything was on YouTube's list at all.
+        byAnchor[TOP]?.let(out::addAll)
+        for (song in list) {
+            byAnchor[song.videoId]?.let(out::addAll)
+            out += song
+        }
+        byAnchor.forEach { (anchor, songs) -> if (anchor != TOP && (anchor == null || anchor !in ids)) out.addAll(songs) }
+        return out
+    }
+
+    /** BitChord Audio: the song's cover now — your file's folder art when the like saved none. */
+    fun withCover(song: Song): Song {
+        if (!song.thumbnailUrl.isNullOrBlank() || !WebDavConfig.isWebDavId(song.videoId)) return song
+        val library = WebDavRepository.library()
+        val own = library.firstOrNull { it.videoId == song.videoId }
+        val thumb = own?.thumbnailUrl
+            ?: WebDavConfig.fileUrlOf(song.videoId)?.substringBeforeLast('/')?.let { folder ->
+                library.firstOrNull { !it.thumbnailUrl.isNullOrBlank() && WebDavConfig.fileUrlOf(it.videoId)?.substringBeforeLast('/') == folder }?.thumbnailUrl
+            }
+        return if (thumb != null) song.copy(thumbnailUrl = thumb) else song
+    }
+
+    private const val TOP = "^"
+
     fun setLocal(song: Song, like: Boolean) {
         val id = song.videoId
         if (like) {
+            val anchor = LikedMusicCache.likedSongs.value.firstOrNull { it.videoId != id }?.videoId ?: TOP
+            anchors[id] = anchor
             _liked.value = _liked.value + (id to song)
-            prefs?.edit()?.putString(LIKED + id, songJson(song))?.apply()
+            prefs?.edit()?.putString(LIKED + id, songJson(song, anchor))?.apply()
         } else {
             _liked.value = _liked.value - id
             prefs?.edit()?.remove(LIKED + id)?.apply()
@@ -128,14 +177,18 @@ object LocalLikes {
             .filterNot { it.isVideo }
         val target = TrackMatcher.Target(title = song.title, artist = song.artist, album = song.albumName, durationSec = seconds)
         val keys = OwnFileMatcher.titleKeys(song.title)
-        return TrackMatcher.ranked(results, target).firstOrNull()
+        return (TrackMatcher.ranked(results, target).firstOrNull()
             ?: results.firstOrNull { r ->
                 OwnFileMatcher.titleKeys(r.title).any { it in keys } &&
                     OwnFileMatcher.sameArtist(song.artist, r.artist)
+            }).also { found ->
+                if (found == null) TrackLog.d("BitChord", "likes: no YouTube match for '${song.title}' among " +
+                    results.take(4).joinToString { "'${it.title}' · ${it.artist} ${it.durationText}" })
             }
     }
 
-    private fun songJson(s: Song): String = JSONObject().apply {
+    private fun songJson(s: Song, anchor: String? = null): String = JSONObject().apply {
+        anchor?.let { put("anchor", it) }
         put("id", s.videoId)
         put("title", s.title)
         put("artist", s.artist)
