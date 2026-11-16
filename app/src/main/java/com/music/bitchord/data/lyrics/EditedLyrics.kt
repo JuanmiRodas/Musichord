@@ -78,6 +78,9 @@ object EditedLyrics {
         runCatching { f.copyTo(File(d, name(videoId) + ".prev"), overwrite = true) }
     }
 
+    /** BitChord Audio: lyrics you timed yourself in the editor. */
+    fun isHandTimed(videoId: String): Boolean = dir?.let { File(it, name(videoId) + ".mine").isFile } == true
+
     fun hasPrevious(videoId: String): Boolean = dir?.let { File(it, name(videoId) + ".prev").isFile } == true
 
     /** The lyrics from before the last automatic upgrade, back in place. */
@@ -127,6 +130,11 @@ object EditedLyrics {
         val plain = SidecarLyrics.toLrc(lines, song.title, song.artist, 0)
         val text = if (lines.any { it.words.isNotEmpty() }) lines.toEnhancedLrc() else plain
         runCatching { dir?.let { File(it, name(song.videoId)).writeText(text) } }
+        // BitChord Audio: timed in the editor (the only save beside your file):
+        // marked yours, so no better version found later replaces them.
+        runCatching {
+            dir?.let { File(it, name(song.videoId) + ".mine") }?.let { mark -> if (besideFile) mark.writeText("1") else mark.delete() }
+        }
         misses -= song.videoId
         if (!quiet) {
             LyricOffsets.reset(song.videoId)

@@ -320,6 +320,11 @@ object LyricsTranslation {
         )
     }
 
+    private val INNER_SPACE = Regex("""(?<=[\p{IsHan}\p{IsHiragana}\p{IsKatakana}ー々])[\s\u00A0\u2000-\u200B\u3000\uFEFF]+(?=[\p{IsHan}\p{IsHiragana}\p{IsKatakana}ー々])""")
+
+    /** BitChord Audio: spaces between two Japanese (or Chinese) characters taken out. */
+    private fun closeUp(text: String): String = text.replace(INNER_SPACE, "")
+
     private fun flatten(lines: List<LyricLine>): List<TextSlot> = buildList {
         lines.forEachIndexed { index, line ->
             if (line.text.isNotBlank()) {
@@ -328,13 +333,16 @@ object LyricsTranslation {
                     TextSlot(
                         lineIndex = index,
                         background = false,
-                        text = if (header) line.text.removePrefix("[").removeSuffix("]").trim() else line.text,
+                        // BitChord Audio: a syllable-timed line spaced character by
+                        // character ("現 在 か ら 続 く") came back untranslated, and
+                        // showed as Japanese in the translation: closed up first.
+                        text = closeUp(if (header) line.text.removePrefix("[").removeSuffix("]").trim() else line.text),
                         sectionHeader = header,
                     ),
                 )
             }
             line.background?.takeIf { it.text.isNotBlank() }?.let { background ->
-                add(TextSlot(index, background = true, background.text, sectionHeader = false))
+                add(TextSlot(index, background = true, closeUp(background.text), sectionHeader = false))
             }
         }
     }

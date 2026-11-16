@@ -121,7 +121,7 @@ object LyricsKeeper {
      * its own — the app's choice, or one you picked from the search (then only
      * by word-by-word lyrics of the same song). Lyrics you timed never.
      */
-    fun mayUpgrade(videoId: String): Boolean = isAutoKept(videoId) || isPicked(videoId)
+    fun mayUpgrade(videoId: String): Boolean = !EditedLyrics.isHandTimed(videoId)
 
     /**
      * Whether the lyrics kept for [videoId] were chosen by the app (the best
@@ -357,7 +357,8 @@ object LyricsKeeper {
             ?.fold(0) { acc, p -> acc * 60 + p } ?: return null
         if (seconds <= 0) return null
         val flagged = BadLyrics.flagged(s.videoId)
-        val sources = AppSettings.lyricsSources.value.filterTo(LinkedHashSet()) { it.name !in flagged && !it.untimed }
+        // BitChord Audio: every source the lyric search offers, as the search does.
+        val sources = LyricsSource.offered.filterTo(LinkedHashSet()) { it.name !in flagged && !it.untimed }
         if (sources.isEmpty()) return null
         val artist = LyricNames.lookupArtist(s.videoId, s.title, s.artist)
         val spellings = runCatching { LyricNames.variants(s.title, artist, seconds * 1000L) }.getOrDefault(emptyList())

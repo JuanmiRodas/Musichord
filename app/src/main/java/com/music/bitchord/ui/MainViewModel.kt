@@ -420,7 +420,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // BitChord Audio: a source whose lyrics were flagged wrong for this song isn't asked.
         val flaggedLyrics = com.music.bitchord.data.lyrics.BadLyrics.flagged(videoId)
         val sources = if (AppSettings.syncedLyrics.value) {
-            AppSettings.lyricsSources.value.filterTo(LinkedHashSet()) { it.name !in flaggedLyrics }
+            // BitChord Audio: every source the lyric search offers — the automatic
+            // pick chooses among the same answers you see there (your order still
+            // breaks ties), not only the sources ticked in Settings.
+            com.music.bitchord.data.lyrics.LyricsSource.offered.filterTo(LinkedHashSet()) { it.name !in flaggedLyrics }
         } else {
             emptySet()
         }
@@ -479,7 +482,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     com.music.bitchord.data.lyrics.LyricsQuality.WORD + (if (japanese) 300 else 0)
                 // BitChord Audio: lyrics you picked from the search are looked over too —
                 // replaced only by word-by-word lyrics of the same song (and can be put back).
-                if (!com.music.bitchord.data.lyrics.LyricsKeeper.mayUpgrade(videoId) || already || durationMs <= 0L) return@launch
+                if (!com.music.bitchord.data.lyrics.LyricsKeeper.mayUpgrade(videoId) || already || durationMs <= 0L) {
+                    com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title': kept ones stay (" +
+                        (if (already) "already word by word" else if (durationMs <= 0L) "no length yet" else "timed by you") + ")")
+                    // Asked again once the length is known, so the better version is still looked for.
+                    if (durationMs <= 0L && !already) lyricsFor = null
+                    return@launch
+                }
                 keptAuto = mine
             }
             val keptScore = keptAuto?.let {
@@ -589,7 +598,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
             if (keptAuto != null) {
                 // Only a strictly better version replaces what was kept.
-                val pickedByYou = com.music.bitchord.data.lyrics.LyricsKeeper.isPicked(videoId)
+                // Anything not the app's own last choice (a pick, or kept before
+                // that was told apart) gives way only to word-by-word lyrics of the same song.
+                val pickedByYou = !com.music.bitchord.data.lyrics.LyricsKeeper.isAutoKept(videoId)
                 val sameSong = best != null && sameLyrics(best.result.lines, keptAuto!!)
                 val wordByWord = best != null && best.result.lines.any { it.isWordSynced }
                 if (best != null && best.score > keptScore && selectedLyricsSource == null &&

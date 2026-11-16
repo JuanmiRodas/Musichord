@@ -330,16 +330,18 @@ object VideoMode {
         // then the search's matches — so a video YouTube won't play here
         // gives way to the next rather than to nothing.
         val searched = runCatching {
-            val results = youTube("${song.title} ${song.artist.split(',').first().trim()}")
-            TrackMatcher.ranked(results, TrackMatcher.targetOf(song)).ifEmpty {
-                // Videos are credited to channels ("Hiroyuki Sawano" for
-                // SawanoHiroyuki[nZk]) and titled freely ("\"B-Cuz\" from …
-                // 10th Anniversary"): failing a full match, a video whose
-                // title carries the song's — the guest credit and asides
-                // left out — in the order YouTube ranked them.
-                val core = norm(com.music.bitchord.data.lyrics.LyricNames.cleanTitles(song.title).lastOrNull() ?: song.title)
-                if (core.length < 2) emptyList() else results.filter { norm(it.title).contains(core) }
-            }
+            // BitChord Audio: asked under each name the song goes by ("扉の向こうへ",
+            // "Tobira no Mukou e"), and kept when its title carries the song's name
+            // even where the strict matcher says no — a fan's upload of the real
+            // video titled "Artist Title" was being left out for a cover that matched.
+            val artistName = song.artist.split(',').first().trim()
+            val names = (listOf(song.title) + com.music.bitchord.data.lyrics.LyricNames.cleanTitles(song.title)).distinct()
+            val queries = (listOf("${song.title} $artistName") + names.drop(1).take(2).map { "$it $artistName" }).distinct()
+            val results = queries.flatMap { q -> runCatching { youTube(q) }.getOrDefault(emptyList()) }.distinctBy { it.videoId }
+            val ranked = TrackMatcher.ranked(results, TrackMatcher.targetOf(song))
+            val cores = names.map(::norm).filter { it.length >= 2 }
+            val carried = results.filter { r -> val t = norm(r.title); cores.any { it in t } }
+            (ranked + carried).distinctBy { it.videoId }
         }.getOrDefault(emptyList())
         // BitChord Audio: the official video first — "(Official Video)", a
         // VEVO or the artist's own channel — over a lyric video, a visualizer
@@ -451,6 +453,12 @@ object VideoMode {
         if ("vevo" in channel || "official" in channel) score += 30
         val artist = song?.artist?.split(',')?.firstOrNull()?.let(::loose).orEmpty()
         if (artist.length >= 2 && (channel == artist || channel.startsWith(artist))) score += 25
+        // The artist named in the title or as the channel: the song as they
+        // sing it. Named nowhere: likely someone else's take (a cover, an
+        // UTAU or Vocaloid version, a fan edit).
+        if (artist.length >= 3) {
+            score += if (artist in loose(title) || artist in channel) 40 else -20
+        }
         NOT_THE_VIDEO.findAll(title).forEach { m ->
             if (!songTitle.contains(m.value, ignoreCase = true)) score -= 60
         }
