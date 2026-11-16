@@ -28,6 +28,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -955,7 +956,21 @@ fun NowPlayingScreen(
     val videoModeLooking by PlayerPlatform.host.videoModeLooking.collectAsStateWithLifecycle()
     // BitChord Audio: a video shorter than the song hands back to the cover (or visualizer) once it ends.
     val videoOver by PlayerPlatform.host.videoModeOver.collectAsStateWithLifecycle()
-    val videoOverlay = videoModeOn && song.videoId in videoModeReady && !videoOver
+    // BitChord Audio: while the new song's video is still being found, the
+    // player stays in video form (its cover in the video's frame) rather than
+    // flicking back to the plain cover view for a few seconds.
+    val videoOverlayNow = videoModeOn && (song.videoId in videoModeReady || videoModeLooking == song.videoId) && !videoOver
+    // And for the moment between the change and the lookup starting.
+    var overlayFor by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    val cameFromVideo = remember(song.videoId) { overlayFor?.let { it.first != song.videoId && it.second } == true }
+    var holdExpired by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(song.videoId) {
+        delay(2_000)
+        holdExpired = song.videoId
+    }
+    SideEffect { overlayFor = song.videoId to videoOverlayNow }
+    val videoOverlay = videoOverlayNow ||
+        (videoModeOn && cameFromVideo && holdExpired != song.videoId)
     val videoMode = showsMusicVideo(song) || videoOverlay
     val videoModeFrame by PlayerPlatform.host.videoModeFrame.collectAsStateWithLifecycle()
     val videoModeSquare = videoModeFrame == 0
@@ -3781,6 +3796,16 @@ fun NowPlayingScreen(
                                     )
                                     // BitChord Audio: video mode's lyrics, over the bottom of the picture.
                                     if (videoOverlay && syncedLyricsEnabled && videoModeLyrics) {
+                                        // BitChord Audio: rests at the foot of the picture and rises
+                                        // over the ±0.5 s buttons while they show, and back.
+                                        val lyricLift by animateDpAsState(
+                                            targetValue = if (cornerShown && videoRendered) 46.dp else 12.dp,
+                                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                                            label = "videoLyricLift",
+                                        )
+                                        // Out to the screen's edges, the lyric lines up with the title.
+                                        val gutterDp = with(LocalDensity.current) { ((playerBounds.width - boxWidthPx) / 2).coerceAtLeast(0).toDp() }
+                                        val lyricInset = if (videoEdge && playerBounds.width > 0) gutterDp else 14.dp
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
@@ -3793,7 +3818,7 @@ fun NowPlayingScreen(
                                                     indication = null,
                                                 ) { showLyricsProviders = true }
                                                 // Above the ±0.5 s buttons, not over them.
-                                                .padding(start = 14.dp, end = 14.dp, top = if (videoShade > 0.9f) 44.dp else 30.dp, bottom = 46.dp),
+                                                .padding(start = lyricInset, end = lyricInset, top = if (videoShade > 0.9f) 44.dp else 30.dp, bottom = lyricLift),
                                         ) {
                                             // One line here — the sung one — with its
                                             // translation under it when that's on.
@@ -3806,7 +3831,7 @@ fun NowPlayingScreen(
                                                 durationMs = durationMs,
                                                 compact = true,
                                                 modifier = Modifier.fillMaxWidth(),
-                                                scale = videoLyricsScale,
+                                                scale = if (videoEdge) videoLyricsScale * 1.3f else videoLyricsScale,
                                                 translation = if (withTranslation) lyricsTranslation.translatedLines else null,
                                                 singleLine = true,
                                             )

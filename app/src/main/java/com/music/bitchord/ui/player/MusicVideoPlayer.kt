@@ -396,8 +396,12 @@ object MusicVideoEngine {
     /** BitChord Audio: in video mode, the playing track's video is looked up as it starts. */
     private fun askVideoMode() {
         if (!com.music.bitchord.data.video.VideoMode.on.value) return
-        val song = controller?.currentMediaItem?.toSong() ?: return
+        val audio = controller ?: return
+        val song = audio.currentMediaItem?.toSong() ?: return
         com.music.bitchord.data.video.VideoMode.request(song)
+        audio.nextMediaItemIndex.takeIf { it != androidx.media3.common.C.INDEX_UNSET }
+            ?.let { runCatching { audio.getMediaItemAt(it) }.getOrNull()?.toSong() }
+            ?.let { com.music.bitchord.data.video.VideoMode.request(it, ahead = true) }
     }
 
     private fun refresh() {

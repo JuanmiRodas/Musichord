@@ -257,14 +257,20 @@ object VideoMode {
     }
 
     /** Looks [song]'s video up, unless known, missing, or already being looked up. */
-    fun request(song: Song, sayIfMissing: Boolean = false) {
+    fun request(song: Song, sayIfMissing: Boolean = false, ahead: Boolean = false) {
         if (cached(song.videoId) != null) return
         if (song.videoId in missing) {
             if (sayIfMissing) say(R.string.video_mode_none)
             return
         }
-        if (!inFlight.add(song.videoId)) return
-        _looking.value = song.videoId
+        if (!inFlight.add(song.videoId)) {
+            // Being looked up ahead already: now it's the playing one.
+            if (!ahead) _looking.value = song.videoId
+            return
+        }
+        // BitChord Audio: the next song's video is looked up while this one
+        // plays, so the player stays a video player across the change.
+        if (!ahead) _looking.value = song.videoId
         scope.launch {
             try {
                 val ref = runCatching { resolve(song) }.getOrNull()
