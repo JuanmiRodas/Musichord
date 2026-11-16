@@ -3363,10 +3363,13 @@ private fun BitChordApp(
                                 } else {
                                     null
                                 }
+                                // fork (ayhamo, fixes upstream): Next follows the page's sort.
+                                val forkSort = detailSongSorts[page.browseId]?.takeIf { it != SongSort.DEFAULT }
                                 val latestSongs = latestPage
                                     ?.let { (it.songs as? UiState.Success)?.data.orEmpty() }
                                     ?.map(withAlbum)
                                     ?.takeIf { it.isNotEmpty() }
+                                    ?.let { list -> forkSort?.let(list::sortedForDetail) ?: list }
                                 val queue = latestSongs ?: songs.map(withAlbum)
                                 if (queue.isEmpty()) return
                                 val queueIndex = selected?.let { tapped ->
@@ -3377,7 +3380,8 @@ private fun BitChordApp(
                                     queueIndex.coerceIn(queue.indices),
                                     source,
                                     boundedContext = useBounded,
-                                    continuationToken = latestPage?.continuation ?: page.continuation,
+                                    // A sorted page has no "next page" to continue into.
+                                    continuationToken = (latestPage?.continuation ?: page.continuation).takeUnless { forkSort != null },
                                 )
                             }
                             // This page's songs being rearranged, drawn in place of its list.

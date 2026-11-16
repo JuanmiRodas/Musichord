@@ -50,7 +50,7 @@ data class CanvasArtwork(
      */
     fun matches(wantTitle: String, wantArtist: String, wantAlbum: String?): Boolean {
         val titleOk = title == null || wantTitle.isBlank() ||
-            title.normalizeForMatch() == wantTitle.normalizeForMatch()
+            titlesMatch(title, wantTitle) // fork (ayhamo)
 
         val titleArtists = splitArtists(wantArtist)
         val ourArtists = splitArtists(artist.orEmpty())

@@ -92,7 +92,7 @@ object DownloadStore {
             title.isEmpty() -> artist
             else -> "$artist - $title"
         }.ifEmpty { song.videoId }
-        return "${stem.take(MAX_STEM_CHARS).trimEnd()}.$extension"
+        return "${forkTakeUtf8(stem.take(MAX_STEM_CHARS), FORK_MAX_STEM_BYTES).trimEnd()}.$extension" // fork: + the byte cut (ForkDownloadHelpers.kt)
     }
 
     /**
@@ -237,16 +237,22 @@ object DownloadStore {
         /** @return the uri the finished file can be reached at. */
         fun commit(): Uri {
             if (part != null && target != null) {
-                if (!part.renameTo(target)) error("Could not finish writing $name")
+                // fork: never over a file already there (another worker's track of the same name)
+                val landed = synchronized(DownloadStore) {
+                    val folder = target.parentFile ?: error("No download folder")
+                    val free = File(folder, DownloadStore.forkFreeName(target.name) { File(folder, it).exists() })
+                    if (!part.renameTo(free)) error("Could not finish writing $name")
+                    free
+                }
                 // Nothing indexes a file that simply appeared; without this it
                 // is on disk and invisible to every app that lists media.
                 MediaScannerConnection.scanFile(
                     context,
-                    arrayOf(target.absolutePath),
+                    arrayOf(landed.absolutePath), // fork: was target
                     null,
                     null,
                 )
-                return Uri.fromFile(target)
+                return Uri.fromFile(landed) // fork: was target
             }
             context.contentResolver.update(
                 uri,
@@ -275,8 +281,7 @@ object DownloadStore {
             val target = privateFile(context, name, folder)
             val folder = target.parentFile ?: error("No download folder")
             if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
-            val part = File(folder, ".$name.part")
-            part.delete()
+            val part = forkPartFile(folder, ".$name") // fork: was File(folder, ".$name.part") + delete()
             return Pending(context, Uri.fromFile(target), name, part = part, target = target)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -305,8 +310,7 @@ object DownloadStore {
         val target = legacyFile(name, folder)
         val dir = target.parentFile ?: error("No Music folder on this device")
         if (!dir.exists() && !dir.mkdirs()) error("Could not create ${dir.path}")
-        val part = File(dir, "$name.part")
-        part.delete()
+        val part = forkPartFile(dir, name) // fork (ayhamo): was File(dir, "$name.part") + delete()
         return Pending(context, Uri.fromFile(target), name, part = part, target = target)
     }
 

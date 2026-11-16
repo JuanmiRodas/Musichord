@@ -40,7 +40,7 @@ object CommunityCanvas {
     fun search(title: String, artist: String, album: String?): CanvasArtwork? {
         val index = manifest().ifEmpty { return null }
 
-        val wantTitle = title.normalizeForMatch()
+        val wantTitle = title.normalizeTitleForMatch().ifEmpty { return null } // fork (ayhamo): non-Latin titles folded to ""
         val wantArtist = artist.normalizeForMatch()
         val wantAlbum = album?.normalizeForMatch()
 
@@ -49,7 +49,7 @@ object CommunityCanvas {
         // equality. That is looser than the catalogue providers get, and the
         // album check is what keeps it honest when we know one.
         val hit = index.firstOrNull { entry ->
-            val song = entry.song.normalizeForMatch()
+            val song = entry.song.normalizeTitleForMatch()
             val credited = entry.artist.normalizeForMatch()
             val listed = entry.album.normalizeForMatch()
             val titleOk = song.isNotBlank() &&

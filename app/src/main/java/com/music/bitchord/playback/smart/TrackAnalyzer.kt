@@ -197,6 +197,8 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
      */
     private val shortDecodes = ConcurrentHashMap<String, Int>()
 
+    private val oomRetry = ForkOomRetry { SystemClock.elapsedRealtime() } // fork (ayhamo): an OOM is retried, not written off
+
     /** Tracks already looked for on disk this session; see [restoreOnce]. */
     private val restoreAttempted = ConcurrentHashMap.newKeySet<String>()
 
@@ -395,6 +397,7 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         // The strike count belongs to the attempt that was given up on, not to
         // the track for the rest of the session; a reopened track starts level.
         if (recorded != null && !recorded.isUsable) shortDecodes.remove(trackId)
+        if (recorded != null && !recorded.isUsable) oomRetry.reset(trackId) // fork (ayhamo)
         // One head attempt per track: a partial container that will not parse
         // now is unlikely to parse ten ticks later, and retrying a decode every
         // 250ms would cost more than the analysis it is trying to bring
@@ -411,6 +414,7 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
             cache.requestAnalysisHead(analysisUri)
             return
         }
+        if (usableComplete && !oomRetry.mayRun(trackId)) return // fork (ayhamo): waiting after an OOM
         if (!running.add(trackId)) return
 
         executor.execute {
@@ -445,6 +449,7 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
                         results[trackId] = whole
                         provisional.remove(trackId)
                         shortDecodes.remove(trackId)
+                        oomRetry.reset(trackId) // fork (ayhamo)
                         // Only the whole-track pass is persisted. A head result
                         // is missing everything past its window — the outro, the
                         // mix-out anchor, the energy curve — and storing one
@@ -488,7 +493,10 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
                 // a different, complete file and deserves its own attempt.
                 // [headWorthTrying] has already made sure the head is not tried
                 // twice, so this cannot spin.
-                if (usableComplete) {
+                // fork (ayhamo): an OutOfMemoryError is about the heap at that moment, not the track;
+                // below the cap nothing is recorded and the next request after the wait tries again.
+                val oomRetrying = usableComplete && ForkOomRetry.isOom(error) && oomRetry.retryLater(trackId)
+                if (usableComplete && !oomRetrying) {
                     // Recorded as ready-but-empty so a track that cannot be
                     // analysed is not retried on every tick for the rest of the
                     // session.
@@ -1566,6 +1574,7 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         provisional.clear()
         restoreAttempted.clear()
         shortDecodes.clear()
+        oomRetry.clear() // fork (ayhamo)
         badRenditions.clear()
         triedRenditions.clear()
         discarded.clear()

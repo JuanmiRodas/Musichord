@@ -1732,4 +1732,5 @@
     <string name="album_link_no_file">Sin archivo (se reproduce como siempre)</string>
     <string name="album_link_confirm">Vincular %1$d canciones</string>
     <string name="album_link_unlink">Desvincular</string>
+    <string name="fork_download_stopped">Detenido por Android; toca para reintentar</string>
 </resources>

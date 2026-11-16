@@ -135,7 +135,7 @@ class DownloadService : Service() {
             val job = scope.launch { Downloads.run(this@DownloadService, song) }
             Downloads.onRunning(song.videoId, job)
             job.join()
-            Downloads.onIdle(song.videoId)
+            Downloads.onIdle(song.videoId, job) // fork: + job, only this job's claim
         }
     }
 
@@ -158,7 +158,7 @@ class DownloadService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
-        Downloads.onStopped()
+        Downloads.onStopped(getString(R.string.fork_download_stopped)) // fork: + the reason the rows show
         super.onDestroy()
     }
 
@@ -166,15 +166,24 @@ class DownloadService : Service() {
 
     private fun promote() {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try { // fork: refused once the day's data-sync budget is used up (Android 15+), which keeping albums shares; a crash otherwise
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: IllegalStateException) {
+            stopSelf()
         }
+    }
+
+    /** fork: the budget ran out mid-queue. The default does nothing, and the system then calls the app not responding. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        shutdown(stopWork = true)
     }
 
     private fun postNotification() {

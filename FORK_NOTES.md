@@ -248,3 +248,11 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 
 ## Link a release to a pCloud folder
 - Album/playlist ⋮ → "Link to my pCloud files" (`AlbumFileLinkDialog`, `AlbumFileLink`): folders ranked by how many of the songs they hold (or searched by name); songs paired with files by names in both scripts, romaji sound keys, containment, edit-distance, track number and length; each pair editable; saved as `PreferredSource.chooseFile` per song (synced choices). "Unlink" clears them.
+
+## Same-recording check, real kbps, likes to pCloud, ayhamo fixes (v1.9.157+)
+- `smart/SameRecording`: chroma of the playing song's cached opening vs a candidate's first 2 MB (best lag ±8 s, ≥0.82 same, <0.70 different, key shift = different) + real kbps from Content-Range. `PlaybackService.verifiedSameAndBetter` gates `swapIn`: lossy < 160 kbps (declared or real) dropped; Different dropped; Unknown kept only for non-catalogue lossless (manifests).
+- `VerifiedCopies` (prefs `bitchord_verified_copies`, backed up): `yt|configId` → same?; catalogue copies (JioSaavn/SoundCloud/bilibili, incl. SourceMap's mapped JioSaavn) start a song only when verified, else YouTube starts and the copy goes to `QualityUpgrade.settledForLess` to be checked under the music.
+- Catalogue matches always require a shared artist (`matchAndStream`).
+- Source dialog: real bitrate per result (asks each source's stream).
+- `CloudBackup.soon(name)`: local likes uploaded ~8 s after a change; merged (not only restored-when-empty) at start; un-likes leave `gone:` marks.
+- Ported from ayhamo/BitChord (fixes upstream): download name byte cut / unique .part / no overwrite on same name / delete cancels in-flight / Android-stopped fails with "tap to retry" / onIdle job claim; FGS budget catch + onTimeout; PlaylistSync per-playlist approval, 6 h catch-up, failed read keeps ask; sorted album/playlist taps queue in page order; read-ahead skips pCloud/SMB/local ids; canvas title matching keeps non-Latin letters (`ForkCanvasTitles`); Automix OOM retried ×3 after 30 s (`ForkOomRetry`).

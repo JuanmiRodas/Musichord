@@ -1381,6 +1381,8 @@ object AudioCache {
         // typically a good deal closer than googlevideo anyway.
         //
         val videoIds = mediaIds.filter { SourceRegistry.parseTrackKey(it) == null }
+            // fork (ayhamo, fixes upstream): a pCloud/SMB/local file isn't a YouTube id.
+            .filterNot(::notYouTube)
             // A track already on disk needs no reading ahead, and read-ahead
             // speaks only to googlevideo: warming one would spend mobile data
             // fetching a second copy of a file the listener deliberately saved,
@@ -1493,12 +1495,17 @@ object AudioCache {
      * filled entry — see [StreamChoice]. It reaches the track as an upgrade
      * instead, see [DirectSourceGate.startedOnYouTube].
      */
+    /** fork (ayhamo): ids read-ahead must not hand to YouTube's resolver. */
+    private fun notYouTube(id: String): Boolean =
+        com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(id) ||
+            id.startsWith("smb:") || id.startsWith("content://") || id.startsWith("file://") || id.startsWith("local:")
+
     fun prefetchDirect(upcoming: Upcoming) {
         directJob?.cancel()
         val id = upcoming.mediaId
         // A source-backed row resolves through its own source when opened, and
         // a downloaded or reverted track never reads this entry at all.
-        if (SourceRegistry.parseTrackKey(id) != null || id in Downloads.saved.value || OriginalVersion.isPinned(id)) {
+        if (SourceRegistry.parseTrackKey(id) != null || id in Downloads.saved.value || OriginalVersion.isPinned(id) || notYouTube(id)) {
             directJob = null
             return
         }

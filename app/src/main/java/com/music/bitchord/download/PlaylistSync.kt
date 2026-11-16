@@ -59,8 +59,11 @@ object PlaylistSync {
     private const val ONE_OFF_WORK = "playlist_sync_now"
     private const val PREFS = "bitchord_playlist_sync"
     private const val KEY_LAST_CHECK = "last_complete_check"
+    private const val KEY_LAST_ATTEMPT = "last_attempt" // fork
     private const val CHANNEL_ID = "playlist_updates"
     internal const val KEY_APPROVED = "approved"
+    /** Fork: the record a "New songs in X" tap approves; only that one fetches its big batch. */
+    internal const val KEY_APPROVED_ID = "approved_id"
 
     /** Android batches this with whatever else is waking the phone in the last [FLEX_HOURS]. */
     private const val PERIOD_HOURS = 12L
@@ -111,22 +114,26 @@ object PlaylistSync {
     /**
      * Queues a check to run as soon as its conditions allow.
      *
-     * @param approved also fetches the batches over [ASK_ABOVE], and replaces a
+     * @param approvedId the playlist whose batch over [ASK_ABOVE] is fetched (only that one), replacing a
      *   check still waiting so that the answer is not lost to one that won't.
      */
-    fun checkNow(context: Context, approved: Boolean = false) {
+    fun checkNow(context: Context, approvedId: String? = null) { // fork: was approved: Boolean, which approved every playlist's batch
+        val approved = approvedId != null
         val request = OneTimeWorkRequestBuilder<PlaylistSyncWorker>()
             .setConstraints(constraints(AppSettings.wifiOnlyDownloads.value))
-            .setInputData(workDataOf(KEY_APPROVED to approved))
+            .setInputData(workDataOf(KEY_APPROVED to approved, KEY_APPROVED_ID to approvedId))
+            .addTag(ONE_OFF_WORK) // fork: approvals are unique per playlist; cancel() reaches them by tag
             .build()
         val policy = if (approved) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
-        WorkManager.getInstance(context).enqueueUniqueWork(ONE_OFF_WORK, policy, request)
+        // fork: one unique work per approved playlist, so a second tap doesn't replace the first one's
+        WorkManager.getInstance(context).enqueueUniqueWork(if (approved) "${ONE_OFF_WORK}_$approvedId" else ONE_OFF_WORK, policy, request)
     }
 
     internal fun cancel(context: Context) {
         val work = WorkManager.getInstance(context)
         work.cancelUniqueWork(PERIODIC_WORK)
         work.cancelUniqueWork(ONE_OFF_WORK)
+        work.cancelAllWorkByTag(ONE_OFF_WORK) // fork: the per-playlist approvals
     }
 
     private fun schedule(context: Context, wifiOnly: Boolean, replace: Boolean) {
@@ -149,8 +156,19 @@ object PlaylistSync {
         .setRequiresStorageNotLow(true)
         .build()
 
-    private fun catchUpDue(context: Context): Boolean =
-        System.currentTimeMillis() - prefs(context).getLong(KEY_LAST_CHECK, 0L) >= CATCH_UP_MILLIS
+    private fun catchUpDue(context: Context): Boolean = catchUpDue( // fork: the last attempt counts too
+        System.currentTimeMillis(),
+        prefs(context).getLong(KEY_LAST_CHECK, 0L),
+        prefs(context).getLong(KEY_LAST_ATTEMPT, 0L),
+    )
+
+    /**
+     * Fork: a catch-up is due when the last complete check and the last attempt are both
+     * [CATCH_UP_MILLIS] old. One playlist that always fails (deleted online, private) kept every
+     * check incomplete, so every app open re-read every followed playlist.
+     */
+    internal fun catchUpDue(now: Long, lastComplete: Long, lastAttempt: Long): Boolean =
+        now - lastComplete >= CATCH_UP_MILLIS && now - lastAttempt >= CATCH_UP_MILLIS
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -162,14 +180,17 @@ object PlaylistSync {
      * Only a check that read every playlist to its end is stamped as done, so
      * one that failed partway is due again the next time the app is opened.
      */
-    internal suspend fun check(context: Context, approved: Boolean) {
+    internal suspend fun check(context: Context, approvedId: String?) { // fork: was approved: Boolean
+        val approved = approvedId != null
         // An approval waits its turn. Anything else would only repeat the check
         // already running.
         if (approved) running.lock() else if (!running.tryLock()) return
         try {
             if (!storageWritable(context)) return
+            if (!approved) prefs(context).edit().putLong(KEY_LAST_ATTEMPT, System.currentTimeMillis()).apply() // fork
             var whole = true
-            Downloads.collections.value.keys.forEach { id ->
+            // fork: an approval checks its own playlist only; it used to check them all, approved
+            (approvedId?.let { listOf(it) } ?: Downloads.collections.value.keys.toList()).forEach { id ->
                 if (!AppSettings.syncDownloadedPlaylists.value || !AppSettings.downloadsAllowedNow) return
                 val record = Downloads.collections.value[id] ?: return@forEach
                 val browseId = syncableBrowseId(record) ?: return@forEach
@@ -178,10 +199,10 @@ object PlaylistSync {
                     more = { YtMusicRepository.moreSongs(it) },
                 )
                 if (!listing.complete) whole = false
-                update(context, record, listing, approved)
+                update(context, record, listing, approved = record.id == approvedId) // fork: was approved
                 delay(PAUSE_MILLIS)
             }
-            if (whole) prefs(context).edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
+            if (whole && !approved) prefs(context).edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply() // fork: one playlist read isn't a complete check
         } finally {
             running.unlock()
         }
@@ -191,11 +212,12 @@ object PlaylistSync {
         val fresh = newTracks(listing.songs, record)
         val notification = record.id.hashCode()
         if (fresh.isEmpty()) {
-            notifications(context)?.cancel(notification)
+            // fork: only a listing read whole answers an ask; a failed read (no songs) used to clear it
+            if (listing.complete) notifications(context)?.cancel(notification)
             return
         }
         if (fresh.size > ASK_ABOVE && !approved) {
-            post(context, notification, askNotification(context, notification, record.title, fresh.size))
+            post(context, notification, askNotification(context, notification, record.id, record.title, fresh.size)) // fork: + record.id
             return
         }
         // Already on the device for some other reason: joins the playlist
@@ -326,11 +348,11 @@ object PlaylistSync {
             .onFailure { Log.w(TAG, "playlist update not posted: ${it.message}") }
     }
 
-    private fun askNotification(context: Context, id: Int, playlist: String, count: Int): Notification {
+    private fun askNotification(context: Context, id: Int, recordId: String, playlist: String, count: Int): Notification {
         val approve = PendingIntent.getBroadcast(
             context,
             id,
-            Intent(context, PlaylistSyncApproval::class.java),
+            Intent(context, PlaylistSyncApproval::class.java).putExtra(KEY_APPROVED_ID, recordId), // fork: which playlist the tap approves
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return builder(context)
@@ -363,7 +385,7 @@ class PlaylistSyncWorker(context: Context, params: WorkerParameters) : Coroutine
             PlaylistSync.cancel(applicationContext)
             return Result.success()
         }
-        PlaylistSync.check(applicationContext, inputData.getBoolean(PlaylistSync.KEY_APPROVED, false))
+        PlaylistSync.check(applicationContext, inputData.getString(PlaylistSync.KEY_APPROVED_ID)) // fork: the approved playlist only
         // Never a retry: an incomplete check is due again when the app next
         // opens, and a playlist that has been deleted online would otherwise
         // have WorkManager retrying it for as long as the setting stays on.
@@ -374,6 +396,8 @@ class PlaylistSyncWorker(context: Context, params: WorkerParameters) : Coroutine
 /** The tap on a "new songs in this playlist" notification. */
 class PlaylistSyncApproval : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        PlaylistSync.checkNow(context, approved = true)
+        // fork: an old notification without the id approves nothing; the next check asks again
+        val id = intent.getStringExtra(PlaylistSync.KEY_APPROVED_ID) ?: return
+        PlaylistSync.checkNow(context, approvedId = id)
     }
 }
