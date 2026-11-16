@@ -467,6 +467,7 @@ object MusicVideoEngine {
             val tops = ArrayList<Float>()
             val bottoms = ArrayList<Float>()
             var busy = 0
+            var dense = 0f
             var seen = 0
             var tries = 0
             while (seen < 14 && tries < 60 && loadedId == key) {
@@ -481,11 +482,15 @@ object MusicVideoEngine {
                 tops += sample.barTop
                 bottoms += sample.barBottom
                 if (sample.text) busy++
+                dense += sample.density
                 if (seen >= 6) {
                     val looks = com.music.bitchord.data.video.VideoMode.Looks(
                         barTop = tops.sorted()[tops.size / 2],
                         barBottom = bottoms.sorted()[bottoms.size / 2],
-                        busyBottom = busy * 3 >= seen,
+                        busyBottom = busy * 4 >= seen,
+                        // How much: share of frames with text times how thick it is
+                        // (0.04 of edge pixels is a lot), to 1.
+                        textLevel = ((busy.toFloat() / seen) * ((dense / seen) / 0.04f)).coerceIn(0f, 1f),
                     )
                     com.music.bitchord.data.video.VideoMode.showLooks(looks)
                     if (seen >= 14) com.music.bitchord.data.video.VideoMode.saveLooks(key, looks)
@@ -494,7 +499,7 @@ object MusicVideoEngine {
         }
     }
 
-    private class FrameRead(val barTop: Float, val barBottom: Float, val text: Boolean)
+    private class FrameRead(val barTop: Float, val barBottom: Float, val text: Boolean, val density: Float)
 
     /** One frame: its black rows at the top and bottom, and white-on-dark edges in its bottom third. */
     private fun readFrame(b: android.graphics.Bitmap): FrameRead? {
@@ -506,15 +511,17 @@ object MusicVideoEngine {
         var total = 0L
         for (c in px) total += lum(c)
         if (total / px.size < 14) return null // a fade to black says nothing
+        // A letterbox row: almost all of it black — titles or credits written
+        // on the bar (white letters) don't stop it counting as the bar.
         fun rowBlack(y: Int): Boolean {
             var sum = 0
-            var max = 0
+            var dark = 0
             for (x in 0 until w) {
                 val l = lum(px[y * w + x])
                 sum += l
-                if (l > max) max = l
+                if (l < 30) dark++
             }
-            return sum / w < 20 && max < 48
+            return sum / w < 45 && dark * 100 >= w * 85
         }
         var top = 0
         while (top < h / 3 && rowBlack(top)) top++
@@ -529,8 +536,8 @@ object MusicVideoEngine {
             count++
             if (l > 200 && (lum(px[y * w + x + 1]) < 90 || lum(px[(y + 1) * w + x]) < 90)) edges++
         }
-        val text = count > 0 && edges.toFloat() / count > 0.012f
-        return FrameRead(top.toFloat() / h, bottom.toFloat() / h, text)
+        val density = if (count > 0) edges.toFloat() / count else 0f
+        return FrameRead(top.toFloat() / h, bottom.toFloat() / h, density > 0.012f, density)
     }
 
     /** BitChord Audio: the sync measurement waiting for the picture to be up — see [VideoAligner]. */

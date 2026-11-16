@@ -3611,6 +3611,18 @@ internal fun Modifier.videoLyricsScrim(strength: Float = 0.78f): Modifier = this
     val w = size.width
     val h = size.height
     val stretch = (w / h).coerceAtLeast(1f)
+    // BitChord Audio: over a picture full of text the shade reaches the
+    // corners too — a band across the whole width under the soft ellipse,
+    // so letters at the edges don't show through.
+    if (strength > 0.9f) {
+        drawRect(
+            brush = Brush.verticalGradient(
+                0f to Color.Transparent,
+                0.35f to Color.Black.copy(alpha = strength * 0.8f),
+                1f to Color.Black.copy(alpha = strength),
+            ),
+        )
+    }
     withTransform({
         scale(scaleX = stretch, scaleY = 1f, pivot = Offset(w / 2f, h))
     }) {

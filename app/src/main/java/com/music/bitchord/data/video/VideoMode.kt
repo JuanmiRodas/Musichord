@@ -148,20 +148,22 @@ object VideoMode {
     // ── How a video looks: letterbox bars, text burnt into its bottom ─────
 
     /** Fractions of the picture's height that are black bars, and whether its bottom carries text. */
-    data class Looks(val barTop: Float, val barBottom: Float, val busyBottom: Boolean)
+    /** [textLevel]: how much text the picture's lower part carries, 0 (none) to 1 (a lot). */
+    data class Looks(val barTop: Float, val barBottom: Float, val busyBottom: Boolean, val textLevel: Float = 0f)
 
     private val _currentLooks = MutableStateFlow<Looks?>(null)
     /** The looks of the video on screen now, once known. */
     val currentLooks: StateFlow<Looks?> = _currentLooks.asStateFlow()
 
     /** Measured once per video, kept (and backed up with the rest of video mode). */
-    fun looksOf(key: String): Looks? = prefs?.getString("looks:$key", null)?.split(',')?.takeIf { it.size == 3 }?.let {
-        Looks(it[0].toFloatOrNull() ?: 0f, it[1].toFloatOrNull() ?: 0f, it[2] == "1")
+    // Kept with four fields; an older three-field reading is measured again (it has no text level).
+    fun looksOf(key: String): Looks? = prefs?.getString("looks:$key", null)?.split(',')?.takeIf { it.size == 4 }?.let {
+        Looks(it[0].toFloatOrNull() ?: 0f, it[1].toFloatOrNull() ?: 0f, it[2] == "1", it[3].toFloatOrNull() ?: 0f)
     }
 
     fun saveLooks(key: String, looks: Looks) {
-        prefs?.edit()?.putString("looks:$key", "${looks.barTop},${looks.barBottom},${if (looks.busyBottom) 1 else 0}")?.apply()
-        TrackLog.d(TAG, "video $key looks: bars ${"%.2f".format(looks.barTop)}/${"%.2f".format(looks.barBottom)}, text at the bottom: ${looks.busyBottom}")
+        prefs?.edit()?.putString("looks:$key", "${looks.barTop},${looks.barBottom},${if (looks.busyBottom) 1 else 0},${looks.textLevel}")?.apply()
+        TrackLog.d(TAG, "video $key looks: bars ${"%.2f".format(looks.barTop)}/${"%.2f".format(looks.barBottom)}, text at the bottom: ${looks.busyBottom} (level ${"%.2f".format(looks.textLevel)})")
     }
 
     fun showLooks(looks: Looks?) { _currentLooks.value = looks }

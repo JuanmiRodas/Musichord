@@ -982,7 +982,13 @@ fun NowPlayingScreen(
     val videoLooks by PlayerPlatform.host.videoModeLooks.collectAsStateWithLifecycle()
     // BitChord Audio: text burnt into the video's bottom (its own subtitles,
     // credits) — the lyrics' shade goes much darker over it.
-    val videoShade = if (videoLooks?.busyBottom == true) 0.95f else 0.72f
+    // BitChord Audio: the more text the picture carries, the darker (and taller) the shade.
+    val videoTextLevel = videoLooks?.let { if (it.busyBottom) maxOf(it.textLevel, 0.4f) else it.textLevel } ?: 0f
+    val videoShade = when {
+        videoTextLevel >= 0.6f -> 0.99f
+        videoTextLevel >= 0.3f || videoLooks?.busyBottom == true -> 0.95f
+        else -> 0.72f
+    }
     val videoModeLyrics by PlayerPlatform.host.videoModeLyrics.collectAsStateWithLifecycle()
     val videoModeOriginalAudio by PlayerPlatform.host.videoModeOriginalAudio.collectAsStateWithLifecycle()
     val videoModeTranslation by PlayerPlatform.host.videoModeTranslation.collectAsStateWithLifecycle()
@@ -2109,7 +2115,7 @@ fun NowPlayingScreen(
                         null
                     },
                     lyricsOn = videoModeLyrics,
-                    lyricsShade = if (videoLooks?.busyBottom == true) 0.95f else 0.78f,
+                    lyricsShade = if (videoShade > 0.9f) videoShade else 0.78f,
                     onToggleLyrics = if (videoOverlay) {
                         { PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics) }
                     } else {
@@ -3824,7 +3830,7 @@ fun NowPlayingScreen(
                                                     indication = null,
                                                 ) { showLyricsProviders = true }
                                                 // Above the ±0.5 s buttons, not over them.
-                                                .padding(start = lyricInset, end = lyricInset, top = if (videoShade > 0.9f) 44.dp else 30.dp, bottom = lyricLift),
+                                                .padding(start = lyricInset, end = lyricInset, top = when { videoShade > 0.98f -> 72.dp; videoShade > 0.9f -> 44.dp; else -> 30.dp }, bottom = lyricLift),
                                         ) {
                                             // One line here — the sung one — with its
                                             // translation under it when that's on.

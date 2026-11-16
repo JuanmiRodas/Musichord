@@ -291,7 +291,7 @@ private val NoVideoScale = MutableStateFlow(1f)
 private val NoVideoLooks = MutableStateFlow<VideoLooksUi?>(null)
 
 /** BitChord Audio: fractions of a video's height that are black bars, and whether its bottom carries text. */
-data class VideoLooksUi(val barTop: Float, val barBottom: Float, val busyBottom: Boolean)
+data class VideoLooksUi(val barTop: Float, val barBottom: Float, val busyBottom: Boolean, val textLevel: Float = 0f)
 private val NoVideoReady = MutableStateFlow<Set<String>>(emptySet())
 private val NoVideoLooking = MutableStateFlow<String?>(null)
 
