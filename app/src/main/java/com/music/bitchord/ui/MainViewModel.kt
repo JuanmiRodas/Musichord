@@ -3221,7 +3221,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // tracks already on the device, and showed an error with no
             // connection at all. Its downloaded copy goes up first; the
             // online listing replaces it if and when that arrives.
-            val onDevice = if (localPlaylist == null && remote == null && !browseId.startsWith("local:")) {
+            // BitChord Audio: not Liked Music, which has its own saved copy (all
+            // of it, in order) — a downloaded Liked Music used to take this path
+            // instead, skip that copy and walk all 4,000 songs again on every open.
+            val onDevice = if (localPlaylist == null && remote == null && !browseId.startsWith("local:") && browseId !in LikedMusicCache.IDS) {
                 downloadedCopyOf(browseId)
             } else {
                 emptyList()
