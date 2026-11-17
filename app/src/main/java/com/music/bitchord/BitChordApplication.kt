@@ -176,6 +176,8 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         }
         AppSettings.init(this, authStore)
         com.music.bitchord.data.LikedMusicCache.init(this)
+        com.music.bitchord.data.PlaylistPageCache.init(this)
+        com.music.bitchord.data.SongVersions.init(this)
         com.music.bitchord.data.NoRecommend.init(filesDir)
         com.music.bitchord.data.sources.SongOrigins.init(this)
         com.music.bitchord.data.video.VideoMode.init(this)
@@ -214,6 +216,8 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         // What's already saved to Downloads, so the song menu can say so
         // without a media-store query per row.
         Downloads.init(this)
+        Downloads.exportExisting(this) // BitChord Audio: finishes moving downloads out to Music/BitChord
+        Downloads.backfillArtwork(this) // BitChord Audio: covers for downloads saved without one
         // After both of the things a check reads: the setting and the record.
         PlaylistSync.init(this)
         // The device's own listening record. Opened here rather than in

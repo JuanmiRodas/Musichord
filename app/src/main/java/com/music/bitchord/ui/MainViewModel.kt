@@ -1072,6 +1072,80 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return ok
     }
 
+    /**
+     * BitChord Audio: a liked music video swapped for its song version — the
+     * song liked, the video un-liked, in the video's place in Liked Music. See
+     * [com.music.bitchord.data.SongVersions]. Returns the song version, or null
+     * when there is none (or YouTube refused).
+     */
+    private suspend fun swapLikeForSong(video: Song): Song? {
+        if (!com.music.bitchord.data.LocalLikes.isYouTubeId(video.videoId)) return null
+        val song = runCatching { YtMusicRepository.resolveAudio(video.copy(isVideo = true)) }.getOrNull()
+            ?.takeIf { it.videoId != video.videoId && !it.isVideo }
+            ?: return null
+        if (YtMusicRepository.rate(song.videoId, LikeStatus.LIKE).isFailure) return null
+        LikeState.set(song.videoId, LikeStatus.LIKE)
+        if (YtMusicRepository.rate(video.videoId, LikeStatus.INDIFFERENT).isSuccess) {
+            LikeState.set(video.videoId, LikeStatus.INDIFFERENT)
+        }
+        android.util.Log.i("BitChord", "song version: liked '${song.title}' (${song.videoId}) in place of the video '${video.title}' (${video.videoId})")
+        // In the video's place, wherever Liked Music is shown or kept.
+        fun swapIn(list: List<Song>): List<Song> {
+            val at = list.indexOfFirst { it.videoId == video.videoId }
+            val without = list.filterNot { it.videoId == song.videoId }
+            if (at < 0) return list
+            return without.map { if (it.videoId == video.videoId) song else it }
+        }
+        val profile = _activeProfileId.value
+        LikedMusicCache.load(profile)?.let { LikedMusicCache.save(profile, swapIn(it.songs)) }
+        (_library.value as? UiState.Success)?.data?.let { library ->
+            _library.value = UiState.Success(library.copy(likedSongs = swapIn(library.likedSongs)))
+        }
+        _detailStack.value = _detailStack.value.map { page ->
+            val songs = (page.songs as? UiState.Success)?.data
+            if (page.browseId !in LikedMusicCache.IDS || songs == null) page else page.copy(songs = UiState.Success(swapIn(songs)))
+        }
+        libraryStale = true
+        return song
+    }
+
+    /** BitChord Audio: the song menu's "Use the song version", for any liked song. */
+    fun useSongVersion(video: Song) {
+        if (!requireSignIn()) return
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val song = swapLikeForSong(video)
+            com.music.bitchord.data.SongVersions.markTried(video.videoId)
+            android.widget.Toast.makeText(
+                app,
+                if (song != null) app.getString(R.string.song_version_done, song.title) else app.getString(R.string.song_version_none),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    private var songVersionPass: kotlinx.coroutines.Job? = null
+
+    /**
+     * BitChord Audio: liked songs that are music videos swapped on their own —
+     * likes made here, or on YouTube and seen when Liked Music refreshes. Each
+     * video is looked at once; a few seconds apart, so YouTube isn't hurried.
+     */
+    private fun swapLikedVideos(liked: List<Song>) {
+        if (!_signedIn.value || songVersionPass?.isActive == true) return
+        val versions = com.music.bitchord.data.SongVersions
+        val todo = liked.filter { versions.looksLikeVideo(it) && !versions.tried(it.videoId) && com.music.bitchord.data.LocalLikes.isYouTubeId(it.videoId) }
+        if (todo.isEmpty()) return
+        songVersionPass = viewModelScope.launch {
+            for (video in todo.take(30)) {
+                if (!_signedIn.value) break
+                runCatching { swapLikeForSong(video) }
+                versions.markTried(video.videoId)
+                kotlinx.coroutines.delay(3_000)
+            }
+        }
+    }
+
     /** The heart: liked becomes neutral, anything else becomes liked. */
     fun toggleLike(videoId: String) = setLike(
         videoId,
@@ -1755,6 +1829,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // BitChord Audio: liked music videos become their songs, on their own and by hand.
+        com.music.bitchord.data.SongVersions.manual = { useSongVersion(it) }
+        viewModelScope.launch {
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            LikedMusicCache.likedSongs.debounce(8_000).collect { swapLikedVideos(it) }
+        }
         // BitChord Audio: the lyrics shown here go to the LG TV too, when the music is on it.
         viewModelScope.launch {
             _lyrics.collect { lines -> com.music.bitchord.playback.tv.TvLink.offerLyrics(currentLyricsRequest?.videoId, lines) }
@@ -3164,6 +3244,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (it.browseId == browseId && it.songs is UiState.Loading) it.copy(songs = UiState.Success(likedSaved.songs)) else it
                 }
             }
+            // BitChord Audio: any other playlist or album as last seen goes up at
+            // once (and is what shows offline); the listing below replaces it.
+            val pageSaved = if (
+                (resolved == BrowseType.PLAYLIST || resolved == BrowseType.ALBUM) &&
+                browseId !in LikedMusicCache.IDS && onDevice.isEmpty() && localPlaylist == null &&
+                !browseId.startsWith("local:")
+            ) {
+                withContext(Dispatchers.IO) { com.music.bitchord.data.PlaylistPageCache.load(browseId) }
+            } else {
+                null
+            }
+            if (pageSaved != null) {
+                _detailStack.value = _detailStack.value.map {
+                    if (it.browseId == browseId && it.songs is UiState.Loading) it.copy(songs = UiState.Success(pageSaved)) else it
+                }
+            }
             // BitChord Audio: the WebDAV/pCloud library as last listed goes up
             // at once; the server is listed again behind it.
             val remoteSaved = if (browseId == com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID) {
@@ -3288,13 +3384,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     .map(local::withCover)
                 if (mine.isNotEmpty()) pageState = UiState.Success(local.placeAmong(mine, shown))
             }
+            if (pageSaved != null || resolved == BrowseType.PLAYLIST || resolved == BrowseType.ALBUM) {
+                if (browseId !in LikedMusicCache.IDS && !browseId.startsWith("local:") && localPlaylist == null) {
+                    (pageState as? UiState.Success)?.data?.takeIf { more == null || pageSaved == null || it.size >= pageSaved.size }?.let { songs ->
+                        launch(Dispatchers.IO) { com.music.bitchord.data.PlaylistPageCache.save(browseId, songs) }
+                    }
+                }
+            }
             // Update by id — the user may have pushed another page meanwhile.
             // A page showing its downloaded copy takes only a real listing: a
             // failed or empty fetch leaves the downloaded tracks up.
             _detailStack.value = _detailStack.value.map {
                 if (it.browseId == browseId &&
                     (it.songs is UiState.Loading ||
-                        ((onDevice.isNotEmpty() || likedSaved != null || remoteSaved != null) &&
+                        ((onDevice.isNotEmpty() || likedSaved != null || remoteSaved != null || pageSaved != null) &&
                             pageState is UiState.Success))
                 ) {
                     it.copy(
@@ -3605,6 +3708,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (!progressed) break
                 _detailStack.value = updated
                 next = fetched.continuation
+            }
+            // BitChord Audio: a complete walk of any other playlist is kept too.
+            val walked = _detailStack.value.lastOrNull { it.browseId == browseId }
+            if (walked != null && browseId !in LikedMusicCache.IDS && (walked.type == BrowseType.PLAYLIST || walked.type == BrowseType.ALBUM)) {
+                (walked.songs as? UiState.Success)?.data?.let { songs ->
+                    withContext(Dispatchers.IO) { com.music.bitchord.data.PlaylistPageCache.save(browseId, songs) }
+                }
             }
             // BitChord Audio: a complete walk of Liked Music is what gets saved.
             if (browseId in LikedMusicCache.IDS) {

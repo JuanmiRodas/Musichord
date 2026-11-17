@@ -744,7 +744,7 @@ fun Song.toMediaItem(): MediaItem {
             // Sized here rather than left as stored: this is what the lock
             // screen, the notification and Android Auto draw, all of them
             // large, and none of them go back for a better copy later.
-            .setArtworkUri(artworkAt(NOTIFICATION_ART_PX)?.toUri())
+            .setArtworkUri((com.music.bitchord.data.model.ArtworkOverrides.lookup?.invoke(title, artist)?.let { artworkAt(NOTIFICATION_ART_PX) } ?: Downloads.savedArtwork(videoId) ?: artworkAt(NOTIFICATION_ART_PX))?.toUri()) // BitChord Audio: the saved cover first, so it shows offline
             // System media surfaces (One UI's Now Bar, Android Auto, Assistant)
             // classify a session by its media type; untyped sessions get treated
             // as generic audio and lose the music-specific card.

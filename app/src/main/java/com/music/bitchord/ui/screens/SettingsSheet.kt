@@ -761,7 +761,11 @@ fun SettingsScreen(
                 SettingsSubRow(
                     title = exportDownloadsTitle,
                     checked = exportDownloads,
-                    onCheckedChange = AppSettings::setExportDownloads,
+                    onCheckedChange = { on ->
+                        AppSettings.setExportDownloads(on)
+                        // BitChord Audio: what was downloaded before moves out too.
+                        if (on) com.music.bitchord.download.Downloads.exportExisting(context)
+                    },
                     subtitle = "Music/BitChord".takeIf { exportDownloads },
                 )
             }

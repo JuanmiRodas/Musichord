@@ -247,6 +247,19 @@ fun SongActionsMenu(
             }
         }
 
+        // BitChord Audio: a liked music video (or any liked song, by hand) traded for its song version.
+        val songVersion = com.music.bitchord.data.SongVersions.manual
+        if (liked && signedIn && songVersion != null && com.music.bitchord.data.LocalLikes.isYouTubeId(song.videoId)) {
+            if (startsGroup()) IosMenuSeparator()
+            ActionRow(
+                icon = SfIcons.MusicNote,
+                label = stringResource(R.string.song_version_use),
+                value = stringResource(R.string.song_version_hint).takeIf { com.music.bitchord.data.SongVersions.looksLikeVideo(song) },
+                accent = palette.accent,
+                onClick = { songVersion(song) },
+            )
+        }
+
         // Leads the list whenever it's available: which recording is playing
         // is the one question that has to be answered before any of the rows
         // below mean anything — there is no point rating, queueing or

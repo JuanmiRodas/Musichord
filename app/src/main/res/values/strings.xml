@@ -1662,4 +1662,8 @@
     <string name="tv_forget">Forget this TV</string>
     <string name="tv_unreachable">The TV isn\'t answering. Is the BitChord app open on it?</string>
     <string name="tv_unpaired">The TV forgot this phone: pair again</string>
+    <string name="song_version_use">Like the song version instead</string>
+    <string name="song_version_hint">Music video</string>
+    <string name="song_version_done">Liked “%1$s” in place of the video</string>
+    <string name="song_version_none">No song version of this found on YouTube</string>
 </resources>

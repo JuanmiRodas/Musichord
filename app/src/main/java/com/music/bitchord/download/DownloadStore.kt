@@ -362,6 +362,57 @@ object DownloadStore {
         if (context.contentResolver.update(uri, values, null, null) > 0) uri else null
     }.onFailure { Log.w(TAG, "could not move $uri: ${it.message}") }.getOrNull()
 
+    /**
+     * BitChord Audio: a download kept inside the app (export off) copied out to
+     * `Music/BitChord/<folder>/`, where a file manager and other players see it,
+     * and the private copy deleted. Null when it can't be — it stays where it was.
+     */
+    fun export(context: Context, uri: Uri): Uri? = runCatching {
+        if (uri.scheme != "file") return null
+        val from = File(uri.path ?: return null)
+        val root = File(context.filesDir, "downloads")
+        if (!from.absolutePath.startsWith(root.absolutePath) || !from.isFile || from.name == "playlist.m3u8") return null
+        val folder = from.parentFile?.absolutePath?.removePrefix(root.absolutePath)?.trim('/').orEmpty()
+        val mime = when (from.extension.lowercase(Locale.ROOT)) {
+            "mp3" -> "audio/mpeg"
+            "flac" -> "audio/flac"
+            "opus", "ogg" -> "audio/ogg"
+            "wav" -> "audio/x-wav"
+            "webm" -> "audio/webm"
+            "aac" -> "audio/aac"
+            else -> "audio/mp4"
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, from.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, pathFor(folder))
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val to = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+            try {
+                resolver.openOutputStream(to)?.use { out -> from.inputStream().use { it.copyTo(out) } } ?: error("no stream")
+                resolver.update(to, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            } catch (e: Exception) {
+                runCatching { resolver.delete(to, null, null) }
+                throw e
+            }
+            from.delete()
+            from.parentFile?.takeIf { it.listFiles()?.isEmpty() == true && it != root }?.delete()
+            return to
+        }
+        @Suppress("DEPRECATION")
+        val dir = File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER), folder)
+        dir.mkdirs()
+        val to = File(dir, from.name)
+        if (to.exists()) return null
+        from.copyTo(to)
+        from.delete()
+        MediaScannerConnection.scanFile(context, arrayOf(to.absolutePath), null, null)
+        Uri.fromFile(to)
+    }.onFailure { Log.w(TAG, "could not export $uri: ${it.message}") }.getOrNull()
+
     /** BitChord Audio: where a saved download is now — folder under BitChord and name. */
     fun placeOf(context: Context, uri: Uri): Pair<String, String>? = runCatching {
         if (uri.scheme == "file") {

@@ -1750,4 +1750,8 @@
     <string name="tv_forget">Olvidar esta TV</string>
     <string name="tv_unreachable">La TV no responde. ¿Está abierta la app BitChord en ella?</string>
     <string name="tv_unpaired">La TV ha olvidado este teléfono: vincula de nuevo</string>
+    <string name="song_version_use">Dar me gusta a la versión canción</string>
+    <string name="song_version_hint">Videoclip</string>
+    <string name="song_version_done">Me gusta en «%1$s» en lugar del vídeo</string>
+    <string name="song_version_none">No se ha encontrado la versión canción en YouTube</string>
 </resources>

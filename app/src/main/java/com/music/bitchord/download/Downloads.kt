@@ -771,6 +771,78 @@ object Downloads {
     /** BitChord Audio: the saved downloads' details, for [DownloadLayout]. */
     internal fun savedMetadataSnapshot(): Map<String, SavedSongMetadata> = _savedMetadata.value
 
+    @Volatile private var exporting: Job? = null
+
+    /**
+     * BitChord Audio: with "Export compatible downloads" on, the downloads kept
+     * inside the app move out to Music/BitChord. Turning the setting on used to
+     * apply to new downloads only, so everything already downloaded stayed
+     * where no file manager can see it. Run when the setting is turned on, and
+     * at start while it is on (picks up where a closed app left off).
+     */
+    fun exportExisting(context: Context) {
+        if (!AppSettings.exportDownloads.value) return
+        val app = context.applicationContext
+        synchronized(recordLock) {
+            if (exporting?.isActive == true) return
+            exporting = ownScope.launch(Dispatchers.IO) {
+                val uris = _saved.value.values.filter { it.startsWith("file:") && "/files/downloads/" in it }.distinct()
+                if (uris.isEmpty()) return@launch
+                var moved = 0
+                for (from in uris) {
+                    if (!AppSettings.exportDownloads.value) break
+                    val to = DownloadStore.export(app, from.toUri()) ?: continue
+                    relocate(from, to.toString())
+                    moved++
+                }
+                Log.i(TAG, "downloads: moved $moved of ${uris.size} to Music/${DownloadStore.FOLDER}")
+            }
+        }
+    }
+
+    /** BitChord Audio: the cover saved beside the download of [videoId], when there is one. */
+    fun savedArtwork(videoId: String): String? =
+        _savedMetadata.value[videoId]?.thumbnailUrl?.takeIf { it.startsWith("file:") }
+
+    @Volatile private var backfilling: Job? = null
+
+    /**
+     * BitChord Audio: covers for downloads saved without one (copies of your own
+     * files, adopted files, older versions), fetched once while online so they
+     * show with the phone offline too.
+     */
+    fun backfillArtwork(context: Context) {
+        val app = context.applicationContext
+        synchronized(recordLock) {
+            if (backfilling?.isActive == true) return
+            backfilling = ownScope.launch(Dispatchers.IO) {
+                kotlinx.coroutines.delay(20_000)
+                val missing = _savedMetadata.value.values
+                    .filter { it.thumbnailUrl?.startsWith("http") == true }
+                    .groupBy { it.thumbnailUrl!! }
+                var done = 0
+                val found = HashMap<String, String>()
+                fun flush() {
+                    if (found.isEmpty()) return
+                    val batch = HashMap(found)
+                    found.clear()
+                    record(
+                        saved = { it },
+                        meta = { m -> m.mapValues { (_, v) -> batch[v.thumbnailUrl]?.let { v.copy(thumbnailUrl = it) } ?: v } },
+                    )
+                }
+                for (url in missing.keys) {
+                    val local = runCatching { MediaTagger.cacheArtwork(app, url) }.getOrNull() ?: continue
+                    found[url] = local
+                    done++
+                    if (found.size >= 25) flush()
+                }
+                flush()
+                if (missing.isNotEmpty()) Log.i(TAG, "downloads: saved $done of ${missing.size} missing covers")
+            }
+        }
+    }
+
     /** BitChord Audio: a saved file moved to [to] (see [DownloadLayout.reorganise]). */
     fun relocate(from: String, to: String) {
         record(
@@ -1243,10 +1315,13 @@ object Downloads {
                 // download it was only meant to decorate.
                 // HLS has no tag container, but its private offline package has
                 // sidecars for exactly the same lyrics and full-resolution cover.
-                if (route.taggable && (route.offlineHls != null || MediaTagger.carriesTags(route.extension))) {
+                val tagging = route.taggable && (route.offlineHls != null || MediaTagger.carriesTags(route.extension))
+                if (tagging) {
                     lyrics = async { LyricsTag.forTrack(track) }
-                    artwork = async { MediaTagger.artworkFor(context, track) }
                 }
+                // BitChord Audio: the cover is kept beside every download, tagged or not (a copy
+                // of your own pCloud file isn't retagged), so it shows with the phone offline.
+                artwork = async { MediaTagger.artworkFor(context, track) }
 
                 // BitChord Audio: Artist[/Album]/N. Title - Artist - Album.ext
                 DownloadLayout.lookUpTrackNumber(track)
@@ -1256,7 +1331,7 @@ object Downloads {
                     ?: DownloadStore.existing(context, DownloadStore.fileNameFor(track, route.extension))
                 if (alreadyThere != null) {
                     Log.d(TAG, "$name is already in Music; adopting it")
-                    remember(song, track, alreadyThere)
+                    remember(song, track, alreadyThere, artworkUri = MediaTagger.persistArtwork(context, track.thumbnailUrl, artwork?.await()))
                     DownloadSession.done(id)
                     clear(id)
                     return@coroutineScope
@@ -1310,7 +1385,7 @@ object Downloads {
                 val cover = artwork?.await()
                 // Publish only after metadata is part of the file. This keeps
                 // concurrent album workers from exposing untagged tracks.
-                MediaTagger.embed(context, destination.tagUri, track, route.extension, words, cover)
+                if (tagging) MediaTagger.embed(context, destination.tagUri, track, route.extension, words, cover)
                 val artworkUri = MediaTagger.persistArtwork(context, track.thumbnailUrl, cover)
                 val savedUri = destination.commit()
                 pending = null
