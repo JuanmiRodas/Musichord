@@ -226,9 +226,9 @@ object Downloads {
             // Refused only when the app has no window and no exemption, which
             // means the queue has nothing to drain it and would sit there
             // looking accepted forever.
+            // fork: refused (no window, or the day's data-sync time used up): the app drains it itself.
             Log.w(TAG, "could not start the download service: ${it.message}")
-            synchronized(lock) { pending.remove(id) }
-            fail(id, "Downloads can't start right now")
+            drainInApp(app)
         }
     }
 
@@ -965,6 +965,89 @@ object Downloads {
             all
         }
         left.forEach { fail(it, reason) }
+    }
+
+    // ---- fork: draining without the service ----------------------------------------
+
+    private val ownScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
+
+    @Volatile private var inApp: Job? = null
+
+    /**
+     * fork: the queue drained by the app itself, for when [DownloadService] can't run.
+     *
+     * Android 15+ gives data-sync services six hours a day. A day of keeping
+     * albums and playlists uses that up, and then every download was refused
+     * with "Stopped by Android": tapping again started the service, Android
+     * refused it again, and nothing ever downloaded. The work itself needs no
+     * service — it runs in this process like any other request — the service
+     * only kept the process alive with the screen off. So when it can't, the
+     * same four workers run here: downloads go on while the app is open or
+     * music is playing, which keeps the process up regardless.
+     */
+    internal fun drainInApp(context: Context) {
+        val app = context.applicationContext
+        synchronized(lock) {
+            if (inApp?.isActive == true) return
+            inApp = ownScope.launch {
+                Log.i(TAG, "downloads: the download service can't run; draining the queue in the app")
+                coroutineScope {
+                    repeat(DownloadService.WORKERS) {
+                        launch {
+                            var idleFor = 0L
+                            while (true) {
+                                val song = takeNext()
+                                if (song == null) {
+                                    if (idleFor >= DownloadService.IDLE_GRACE_MS && !busy()) return@launch
+                                    kotlinx.coroutines.delay(DownloadService.IDLE_POLL_MS)
+                                    idleFor += DownloadService.IDLE_POLL_MS
+                                    continue
+                                }
+                                idleFor = 0L
+                                val job = ownScope.launch { run(app, song) }
+                                onRunning(song.videoId, job)
+                                job.join()
+                                onIdle(song.videoId, job)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * fork: the service is being ended mid-queue (its time ran out): what it was
+     * fetching goes back to the front of the queue, still Queued, and the app
+     * carries on with it — see [drainInApp].
+     */
+    internal fun handOver(context: Context, inFlight: List<Song>) {
+        val jobs = synchronized(lock) {
+            val again = LinkedHashMap<String, Song>()
+            val jobs = inFlight.mapNotNull { song ->
+                val id = song.videoId
+                if (id !in running || id in batchClaims) return@mapNotNull null
+                again[id] = song
+                running.remove(id)
+            }
+            again.putAll(pending)
+            pending.clear()
+            pending.putAll(again)
+            again.keys.forEach { id -> _active.update { it + (id to DownloadState.Queued) } }
+            jobs
+        }
+        // Queued is set first, so the cancelled jobs leave the rows as they are.
+        jobs.forEach { it.cancel() }
+        drainInApp(context)
+    }
+
+    /** fork: songs asked for together, queued off the main thread (4,000 likes at once was an ANR). */
+    fun enqueueAll(context: Context, songs: List<Song>, from: String?, then: () -> Unit = {}) {
+        val app = context.applicationContext
+        ownScope.launch(Dispatchers.Default) {
+            songs.forEach { enqueue(app, it, from) }
+            withContext(Dispatchers.Main) { then() }
+        }
     }
 
     /** fork: [onStopped]'s reason when no context is at hand to read the translated one. */

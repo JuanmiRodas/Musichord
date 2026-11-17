@@ -40,6 +40,12 @@ class DownloadService : Service() {
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
 
     private var drain: Job? = null
+
+    /** fork: the queue went to [Downloads.drainInApp]; nothing here is "stopped". */
+    private var handedOver = false
+
+    /** fork: what the workers are fetching right now, to hand over if Android ends this. */
+    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, Song>()
     private var notifier: Job? = null
 
     /** What the notification is currently about. */
@@ -58,7 +64,20 @@ class DownloadService : Service() {
         // intent turns out to be, the cancel below included — a service started
         // with startForegroundService and never promoted takes the app down
         // with it.
-        promote()
+        if (!promote()) {
+            if (intent?.action == ACTION_CANCEL_ALL) {
+                Downloads.active.value.keys.toList().forEach(Downloads::cancel)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            // fork: Android won't let this run (the day's data-sync time is used up): the app
+            // drains the queue itself instead of every row ending "Stopped by Android".
+            handedOver = true
+            Downloads.drainInApp(this)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        handedOver = false
 
         if (intent?.action == ACTION_CANCEL_ALL) {
             Downloads.active.value.keys.toList().forEach(Downloads::cancel)
@@ -133,8 +152,9 @@ class DownloadService : Service() {
             // Its own job, so one track can be cancelled out from under the
             // loop without taking the rest of the queue with it.
             val job = scope.launch { Downloads.run(this@DownloadService, song) }
+            inFlight[song.videoId] = song
             Downloads.onRunning(song.videoId, job)
-            job.join()
+            try { job.join() } finally { inFlight.remove(song.videoId) }
             Downloads.onIdle(song.videoId, job) // fork: + job, only this job's claim
         }
     }
@@ -158,13 +178,14 @@ class DownloadService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
-        Downloads.onStopped(getString(R.string.fork_download_stopped)) // fork: + the reason the rows show
+        if (!handedOver) Downloads.onStopped(getString(R.string.fork_download_stopped)) // fork: + the reason the rows show
         super.onDestroy()
     }
 
     // ---- Notification -------------------------------------------------------
 
-    private fun promote() {
+    /** fork: false when Android refused to make this a foreground service. */
+    private fun promote(): Boolean {
         val notification = buildNotification()
         try { // fork: refused once the day's data-sync budget is used up (Android 15+), which keeping albums shares; a crash otherwise
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -177,12 +198,18 @@ class DownloadService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: IllegalStateException) {
-            stopSelf()
+            android.util.Log.w("BitChord", "download service refused by Android: ${e.message}")
+            return false
         }
+        return true
     }
 
     /** fork: the budget ran out mid-queue. The default does nothing, and the system then calls the app not responding. */
     override fun onTimeout(startId: Int, fgsType: Int) {
+        // fork: what was being fetched goes back on the queue, and the app carries on with it.
+        android.util.Log.w("BitChord", "download service: Android's data-sync time ran out; handing the queue to the app")
+        handedOver = true
+        Downloads.handOver(this, inFlight.values.toList())
         shutdown(stopWork = true)
     }
 
@@ -256,7 +283,7 @@ class DownloadService : Service() {
         )
     }
 
-    private companion object {
+    internal companion object {
         const val CHANNEL_ID = "downloads"
 
         /** Distinct from playback's, which Media3 owns. */
