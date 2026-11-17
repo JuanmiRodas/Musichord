@@ -125,7 +125,9 @@ object Http {
                 return@Interceptor proceedWebDav(chain, request.newBuilder().header("Authorization", header).build())
             }
         }
-        if (com.music.bitchord.data.webdav.WebDavAuth.shouldAuthorize(request.url.host)) {
+        if (com.music.bitchord.data.webdav.WebDavAuth.shouldAuthorize(request.url.host) ||
+            com.music.bitchord.data.webdav.PcloudApiBridge.isPcloudHost(request.url.host)
+        ) {
             return@Interceptor proceedWebDav(chain, request)
         }
         chain.proceed(request)
@@ -145,6 +147,25 @@ object Http {
      * answer is remembered per folder, so only the first file pays the miss.
      */
     private fun proceedWebDav(chain: okhttp3.Interceptor.Chain, original: okhttp3.Request): okhttp3.Response {
+        val bridge = com.music.bitchord.data.webdav.PcloudApiBridge
+        // BitChord Audio: pCloud's WebDAV refusing everything — its API answers instead.
+        if (bridge.isPcloudHost(original.url.host) && bridge.webdavDown()) {
+            bridge.answer(chain, original)?.let { return it }
+        }
+        val response = proceedWebDavDirect(chain, original)
+        if (bridge.isPcloudHost(original.url.host) && bridge.refusal(response.code)) {
+            val viaApi = bridge.answer(chain, original)
+            if (viaApi != null && viaApi.code != 404) {
+                response.close()
+                bridge.markWebdavDown()
+                return viaApi
+            }
+            viaApi?.close()
+        }
+        return response
+    }
+
+    private fun proceedWebDavDirect(chain: okhttp3.Interceptor.Chain, original: okhttp3.Request): okhttp3.Response {
         var request = original
         val url = request.url.toString()
         renamedPrefixes.entries.firstOrNull { url.startsWith(it.key) }?.let { (from, to) ->

@@ -61,7 +61,10 @@ object WebDavClient {
                 val request = propfindRequest(target, depth = "0", username, password)
                 Http.client.newCall(request).execute().use { response ->
                     if (response.code !in 200..299 && response.code != 207) {
-                        throw WebDavException("Server answered ${response.code}")
+                        // BitChord Audio: what pCloud's API said too, when it was asked in WebDAV's place.
+                        val api = com.music.bitchord.data.webdav.PcloudApiBridge.lastError
+                            ?.takeIf { com.music.bitchord.data.webdav.PcloudApiBridge.isPcloudHost(response.request.url.host) }
+                        throw WebDavException("Server answered ${response.code}" + (api?.let { " · $it" } ?: ""))
                     }
                 }
             }
