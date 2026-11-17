@@ -1763,4 +1763,5 @@
     <string name="pcloud_oauth_sign_out">Cerrar sesión</string>
     <string name="pcloud_oauth_failed">pCloud no ha iniciado sesión: %1$s</string>
     <string name="pcloud_email_code">Código del email de pCloud (si lo pide)</string>
+    <string name="pcloud_code_sent_email">pCloud te ha enviado un código (por email, o por SMS/app si usas verificación en dos pasos): escríbelo en el último campo y pulsa Probar otra vez</string>
 </resources>

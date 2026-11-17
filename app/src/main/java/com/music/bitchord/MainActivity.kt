@@ -5871,6 +5871,7 @@ private fun BitChordApp(
                 )
             }
             var pcloudResolvedUrl by remember { mutableStateOf<String?>(null) }
+            val pcloudCodeSent = stringResource(R.string.pcloud_code_sent_email)
             ServerEditorHost(
                 hazeState = hazeState,
                 title = stringResource(R.string.pcloud),
@@ -5901,13 +5902,18 @@ private fun BitChordApp(
                 canSubmit = { it[0].isNotBlank() && it[1].isNotBlank() },
                 testFailedRes = R.string.webdav_test_failed,
                 onTest = { (email, password, folder, code) ->
-                    if (code.isNotBlank()) {
-                        val signed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            com.music.bitchord.data.webdav.PcloudApiBridge.signInWithCode(
-                                com.music.bitchord.data.Http.client, email.trim(), password, code,
-                            )
+                    // BitChord Audio: pCloud's own sign-in (login → code by email → tfa_login);
+                    // the session it opens is kept, and the library goes through pCloud's API.
+                    val bridge = com.music.bitchord.data.webdav.PcloudApiBridge
+                    val signed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        if (code.isNotBlank()) {
+                            bridge.finishLogin(com.music.bitchord.data.Http.client, email.trim(), password, code)
+                        } else {
+                            bridge.startLogin(com.music.bitchord.data.Http.client, email.trim(), password)
                         }
-                        if (signed.isFailure) return@ServerEditorHost Result.failure(signed.exceptionOrNull()!!)
+                    }
+                    if (signed.getOrElse { return@ServerEditorHost Result.failure(it) } is com.music.bitchord.data.webdav.PcloudApiBridge.Login.NeedsCode) {
+                        return@ServerEditorHost Result.failure(IllegalStateException(pcloudCodeSent))
                     }
                     // Each region in turn; the folder is found level by level
                     // (accents, spaces and case as pCloud has them). The error

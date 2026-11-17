@@ -129,40 +129,89 @@ object PcloudApiBridge {
         }.onFailure { lastError = it.message }.getOrNull()
     }
 
-    /** Set by the app: keeps a token from [signInWithCode] (stored encrypted, "auth:<token>"). */
+    /** Set by the app: keeps a session from [finishLogin] (stored encrypted, "auth:<token>"). */
     @Volatile var onToken: ((token: String, apiHost: String) -> Unit)? = null
 
-    /**
-     * pCloud now asks for the code it emails (1022 "Please provide 'code'") before
-     * it gives an app a session with email and password — as its website does.
-     * Signs in once with [code] on either region's API host; the session token
-     * that comes back is kept, so no further password sign-ins are needed.
-     */
-    fun signInWithCode(client: okhttp3.OkHttpClient, username: String, password: String, code: String): Result<String> {
-        var last = "pCloud sign-in failed"
-        for (api in listOf(preferredApi ?: "eapi.pcloud.com", "api.pcloud.com", "eapi.pcloud.com").distinct()) {
-            val url = "https://$api/userinfo?getauth=1&username=" + enc(username) + "&password=" + enc(password) + "&code=" + enc(code.trim())
-            val result = runCatching {
-                client.newCall(Request.Builder().url(url).build()).execute().use { r ->
-                    json.parseToJsonElement(r.body?.string().orEmpty()).jsonObject
-                }
-            }.getOrNull() ?: continue
-            val c = result["result"]?.jsonPrimitive?.intOrNull ?: -1
-            if (c == 0) {
-                val t = result["auth"]?.jsonPrimitive?.content ?: continue
-                preferredApi = api
-                refusedUntil.clear()
-                onToken?.invoke("auth:$t", api)
-                oauthToken = "auth:$t"
-                oauthApi = api
-                return Result.success(t)
+    /** The challenge pCloud answered the last [startLogin] with: its token and API host. */
+    @Volatile private var pendingTfa: Pair<String, String>? = null
+
+    sealed interface Login {
+        object Done : Login
+        /** pCloud has sent a code (by email, or SMS/app for 2FA accounts): give it to [finishLogin]. */
+        data class NeedsCode(val tfaType: Int?) : Login
+    }
+
+    private fun post(client: okhttp3.OkHttpClient, api: String, method: String, params: Map<String, String>): JsonObject? {
+        val body = okhttp3.FormBody.Builder().apply { params.forEach { (k, v) -> add(k, v) } }.build()
+        return runCatching {
+            client.newCall(Request.Builder().url("https://$api/$method").post(body).build()).execute().use { r ->
+                json.parseToJsonElement(r.body?.string().orEmpty()).jsonObject
             }
-            last = "pCloud sign-in refused ($c: ${result["error"]?.jsonPrimitive?.content})"
-            if (c == 2321) continue
-            if (c != 2000) break
+        }.getOrNull()
+    }
+
+    private fun deviceParams() = mapOf(
+        "deviceid" to "bitchord-audio-android",
+        "device" to "BitChord Audio",
+        "os" to "4",
+        // A year, renewed by use; revocable from pcloud.com → Settings → Devices.
+        "authexpire" to (365 * 24 * 3600).toString(),
+        "authinactiveexpire" to (90 * 24 * 3600).toString(),
+    )
+
+    private fun keep(api: String, result: JsonObject): Boolean {
+        val t = result["auth"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return false
+        val host = result["apiserver"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: api
+        preferredApi = host
+        refusedUntil.clear()
+        pendingTfa = null
+        oauthToken = "auth:$t"
+        oauthApi = host
+        onToken?.invoke("auth:$t", host)
+        return true
+    }
+
+    /**
+     * Signing in the way pCloud's own apps do since it stopped taking a bare
+     * email and password from the API (April 2026): `login` with a device, and
+     * when pCloud wants a code it sends one and answers with a token for it —
+     * [finishLogin] trades token and code for a session. The session is kept
+     * (encrypted, by the app), so this happens once.
+     */
+    fun startLogin(client: okhttp3.OkHttpClient, username: String, password: String): Result<Login> {
+        var last = "pCloud sign-in failed"
+        for (api in listOf(preferredApi ?: "eapi.pcloud.com", "eapi.pcloud.com", "api.pcloud.com").distinct()) {
+            val result = post(client, api, "login", mapOf("getauth" to "1", "username" to username, "password" to password) + deviceParams())
+                ?: continue
+            val code = result["result"]?.jsonPrimitive?.intOrNull ?: -1
+            if (code == 0 && keep(api, result)) return Result.success(Login.Done)
+            val token = result["token"]?.jsonPrimitive?.content
+            if (!token.isNullOrBlank()) {
+                pendingTfa = token to (result["apiserver"]?.jsonPrimitive?.content ?: api)
+                return Result.success(Login.NeedsCode(result["tfatype"]?.jsonPrimitive?.intOrNull))
+            }
+            last = "pCloud sign-in refused ($code: ${result["error"]?.jsonPrimitive?.content})"
+            if (code == 2321) continue
+            if (code != 2000 && code != 1022) break
         }
         lastError = last
         return Result.failure(IllegalStateException(last))
+    }
+
+    /** The code pCloud sent, for the challenge [startLogin] got (started again when there is none). */
+    fun finishLogin(client: okhttp3.OkHttpClient, username: String, password: String, code: String): Result<Login> {
+        val (token, api) = pendingTfa ?: run {
+            val started = startLogin(client, username, password).getOrElse { return Result.failure(it) }
+            if (started == Login.Done) return Result.success(Login.Done)
+            pendingTfa ?: return Result.failure(IllegalStateException("pCloud sent no code"))
+        }
+        val result = post(client, api, "tfa_login", mapOf("getauth" to "1", "token" to token, "code" to code.trim(), "trustdevice" to "1") + deviceParams())
+            ?: return Result.failure(IllegalStateException("pCloud didn't answer"))
+        val c = result["result"]?.jsonPrimitive?.intOrNull ?: -1
+        if (c == 0 && keep(api, result)) return Result.success(Login.Done)
+        val why = "pCloud refused the code ($c: ${result["error"]?.jsonPrimitive?.content})"
+        lastError = why
+        return Result.failure(IllegalStateException(why))
     }
 
     // ---- sign-in ---------------------------------------------------------------------
