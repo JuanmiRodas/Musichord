@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -72,25 +73,86 @@ object DownloadUpgrader {
         TrackLog.d(TAG, "download upgrade: checking ${songs.size} downloads for a better copy")
         for (song in songs) {
             if (!scope.isActive || AppSettings.meteredConnection.value != false || !AppSettings.upgradeDownloads.value) return
+            if (song.videoId in upgradingNow) continue
             prefs?.edit()?.putLong(song.videoId, now)?.apply()
-            val seconds = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
-                ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
-            val target = TrackMatcher.Target(title = song.title, artist = song.artist, album = song.albumName, durationSec = seconds)
-            val found = runCatching { SourceResolver.forDownload(target, videoId = song.videoId) }.getOrNull() ?: continue
-            val had = savedKbps(song.downloadFormat) ?: 0
-            val better = found.format.isLossless == true || (found.format.kbps ?: 0) >= had + MIN_GAIN_KBPS
-            if (!better) continue
-            val oldUri = song.localUri ?: continue
-            TrackLog.d(TAG, "download upgrade: '${song.title}' ${song.downloadFormat ?: "?"} → ${found.format.summary}")
-            Downloads.enqueue(context, song.copy(localUri = null, downloadFormat = null))
-            // The new file is saved under the same id; the old one goes once it is.
-            val newUri = withTimeoutOrNull(SAVE_TIMEOUT_MS) {
-                Downloads.saved.first { (it[song.videoId] ?: oldUri) != oldUri }[song.videoId]
-            }
-            if (newUri != null && newUri != oldUri) {
-                runCatching { DownloadStore.delete(context, oldUri.toUri()) }
-            }
-            delay(PAUSE_MS)
+            if (upgrade(context, song)) delay(PAUSE_MS)
         }
+    }
+
+    // ---- BitChord Audio: the download playing now --------------------------------------
+
+    private val upgradingNow: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** Old files of upgraded downloads, kept until their song stops playing. */
+    private val retired = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Set by the playback service: what is playing, and a cross-fade to the saved file. */
+    @Volatile var playing: String? = null
+    @Volatile var swapToSaved: ((videoId: String) -> Unit)? = null
+
+    /**
+     * A download that starts playing at less than 256 kbps: it plays as it is,
+     * at once, while a better copy is looked for and downloaded beside it.
+     * Once saved, the song cross-fades to the new file where it is; the old
+     * file is deleted when the song is over, never under it.
+     */
+    fun onPlaying(context: Context, videoId: String) {
+        if (prefs == null) prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!AppSettings.upgradeDownloads.value || AppSettings.meteredConnection.value != false) return
+        if (!LocalLikes.isYouTubeId(videoId)) return
+        val (uri, format) = Downloads.savedEntry(videoId) ?: return
+        if ((savedKbps(format) ?: 0) >= 256) return
+        val now = System.currentTimeMillis()
+        if (now - (prefs?.getLong(videoId, 0L) ?: 0L) <= RECHECK_MS) return
+        if (!upgradingNow.add(videoId)) return
+        val app = context.applicationContext
+        scope.launch {
+            try {
+                prefs?.edit()?.putLong(videoId, now)?.apply()
+                val song = Downloads.getDownloadedSongs(app).firstOrNull { it.videoId == videoId && it.localUri == uri } ?: return@launch
+                upgrade(app, song)
+            } finally {
+                upgradingNow -= videoId
+            }
+        }
+    }
+
+    /** The song moved on: old files of songs no longer playing go now. */
+    fun onTrackChanged(context: Context) {
+        val playing = playing
+        for ((videoId, oldUri) in retired.entries.toList()) {
+            if (videoId == playing) continue
+            retired.remove(videoId)
+            runCatching { DownloadStore.delete(context, oldUri.toUri()) }
+            TrackLog.d(TAG, "download upgrade: removed the old file of $videoId")
+        }
+    }
+
+    /** A better copy of [song] found, saved, and put in place. True when one was. */
+    private suspend fun upgrade(context: Context, song: com.music.bitchord.data.model.Song): Boolean {
+        val seconds = song.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+            ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+        val target = TrackMatcher.Target(title = song.title, artist = song.artist, album = song.albumName, durationSec = seconds)
+        val found = runCatching { SourceResolver.forDownload(target, videoId = song.videoId) }.getOrNull() ?: return false
+        val had = savedKbps(song.downloadFormat) ?: 0
+        val better = found.format.isLossless == true || (found.format.kbps ?: 0) >= had + MIN_GAIN_KBPS
+        if (!better) return false
+        val oldUri = song.localUri ?: return false
+        TrackLog.d(TAG, "download upgrade: '${song.title}' ${song.downloadFormat ?: "?"} → ${found.format.summary}")
+        Downloads.enqueue(context, song.copy(localUri = null, downloadFormat = null))
+        // The new file is saved under the same id.
+        val newUri = withTimeoutOrNull(SAVE_TIMEOUT_MS) {
+            Downloads.saved.first { (it[song.videoId] ?: oldUri) != oldUri }[song.videoId]
+        }
+        if (newUri == null || newUri == oldUri) return false
+        if (playing == song.videoId) {
+            // Under the music: cross-faded to the new file; the old one goes when the song does.
+            retired[song.videoId] = oldUri
+            withContext(Dispatchers.Main) { swapToSaved?.invoke(song.videoId) }
+            TrackLog.d(TAG, "download upgrade: '${song.title}' now plays from its new file")
+        } else {
+            runCatching { DownloadStore.delete(context, oldUri.toUri()) }
+        }
+        return true
     }
 }

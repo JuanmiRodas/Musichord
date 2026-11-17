@@ -1052,6 +1052,15 @@ class PlaybackService : MediaLibraryService() {
                 audioFirst.onBecameCurrent(mediaItem)
                 ownFirst.onBecameCurrent(mediaItem)
             }
+            // BitChord Audio: a download plays at once as it is, while a better copy is
+            // fetched beside it and cross-faded in; old files go once their song is over.
+            com.music.bitchord.download.DownloadUpgrader.playing = mediaItem?.mediaId
+            com.music.bitchord.download.DownloadUpgrader.onTrackChanged(this@PlaybackService)
+            mediaItem?.localConfiguration?.uri?.scheme?.let { scheme ->
+                if (scheme == "content" || scheme == "file") {
+                    com.music.bitchord.download.DownloadUpgrader.onPlaying(this@PlaybackService, mediaItem.mediaId)
+                }
+            }
 
             // A receiver, if it is the speaker, is put on whatever became
             // current — or it is the one that moved, and this is the phone
@@ -1332,6 +1341,14 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        // BitChord Audio: see [com.music.bitchord.download.DownloadUpgrader.onPlaying].
+        com.music.bitchord.download.DownloadUpgrader.swapToSaved = swap@{ id ->
+            val live = player ?: return@swap
+            val current = live.currentMediaItem ?: return@swap
+            if (current.mediaId != id || crossfade?.isTransitioning() == true) return@swap
+            val newUri = com.music.bitchord.download.Downloads.saved.value[id] ?: return@swap
+            smoothSwapCurrentTrackVersion(current.toSong().copy(localUri = newUri).toMediaItem())
+        }
         // BitChord Audio: screen off while playing → the always-on music screen.
         runCatching {
             com.music.bitchord.aod.AodTrigger.attach(this) {
@@ -4080,6 +4097,12 @@ class PlaybackService : MediaLibraryService() {
             var depth = 0
             while (cause != null && depth++ < CAUSE_DEPTH) {
                 if (cause is StreamResolver.PermanentlyUnplayableException) return true
+                // BitChord Audio: the same URL asked again gets the same 404/403/410 — retried
+                // three times per open at 1-2-3 s, it held songs silent for up to 44 s before the
+                // app's own recovery (a fresh resolve, or YouTube) could step in.
+                if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException &&
+                    cause.responseCode in 400..499 && cause.responseCode != 408 && cause.responseCode != 429
+                ) return true
                 cause = cause.cause?.takeIf { it !== cause }
             }
             return false
@@ -5803,8 +5826,10 @@ class PlaybackService : MediaLibraryService() {
         // carry it — without one, a catalogue holding the song on two
         // releases is refused as ambiguous and the song stays on YouTube.
         val target = if (!asked.album.isNullOrBlank()) asked else asked.copy(
-            album = com.music.bitchord.data.LikedMusicCache.load(com.music.bitchord.data.LikedMusicCache.lastProfile)
-                ?.songs?.firstOrNull { it.videoId == videoId }?.albumName?.takeIf { it.isNotBlank() },
+            // BitChord Audio: the list already in memory — reading and parsing all of Liked
+            // Music from disk here held up the start of every song.
+            album = com.music.bitchord.data.LikedMusicCache.likedSongs.value
+                .firstOrNull { it.videoId == videoId }?.albumName?.takeIf { it.isNotBlank() },
         )
         // A substitute already broke this track once — see
         // [StreamChoice.refuseSubstitutes]. Racing the modules again would find
@@ -5826,45 +5851,48 @@ class PlaybackService : MediaLibraryService() {
         }
         // BitChord Audio: JioSaavn's copy the source map already matched,
         // when it beats your file — the best copy plays from the start.
-        runCatching { SourceResolver.chosenFor(target) }
-            .onFailure { if (it is CancellationException) throw it }
-            .getOrNull()
-            ?.let { return Resolved.Module(it) }
-        // BitChord Audio: a JioSaavn row mapped by name starts the song only
-        // once it has been heard to be the same recording; until then YouTube
-        // starts it and the copy is checked under the music (see [swapIn]).
-        var unheard: SourceStream? = null
-        runCatching { SourceResolver.mappedSaavnFor(videoId, target) }
-            .onFailure { if (it is CancellationException) throw it }
-            .getOrNull()
-            ?.let { mapped ->
-                when {
-                    VerifiedCopies.mayStartWith(videoId, mapped) -> return Resolved.Module(mapped)
-                    VerifiedCopies.get(videoId, mapped.sourceConfigId) == null -> unheard = mapped
-                }
-            }
-        // BitChord Audio: your own file, when it qualifies, plays from the
-        // start — no race against YouTube, nothing to swap later.
-        runCatching { SourceResolver.ownFileFor(target) }
-            .onFailure { if (it is CancellationException) throw it }
-            .getOrNull()
-            ?.let { return Resolved.Module(it) }
-        if (DirectSourceGate.isActive()) return resolveDirect(videoId, target)
-        NerdStats.onLosslessRaceStart(videoId)
-        // Both legs are parented to the service's scope rather than to the
-        // caller, so neither inherits whose track this is — see
-        // [TrackLog.about]. Without it the module walk and the client walk both
-        // log from a scope that knows nothing, which is most of what a resolve
-        // has to say about itself.
-        val lookup = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
-            withTimeoutOrNull(SUBSTITUTE_TIMEOUT_MS) { SourceResolver.substituteForYouTube(target) }
-        }
-        // Started now rather than after the modules have had their say, and
-        // wrapped rather than thrown from: it is awaited only on the paths
-        // that need it, and an async that fails without ever being awaited is
-        // an unhandled exception in this service's scope.
+        // BitChord Audio: the song comes first. YouTube's own stream is asked for straight
+        // away, alongside the checks for a better copy (your pick, JioSaavn's mapped copy,
+        // your file — each checked to answer), and those checks get [PRECHECK_MS] between
+        // them: past that the song starts on whatever is ready, and a better copy is
+        // swapped in under the music by the second look.
         val fallback = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
             runCatching { StreamResolver.resolve(videoId) }
+        }
+        // A JioSaavn row mapped by name starts the song only once it has been heard to be
+        // the same recording; until then YouTube starts it and the copy is checked under
+        // the music (see [swapIn]).
+        var unheard: SourceStream? = null
+        val early: SourceStream? = withTimeoutOrNull(PRECHECK_MS) {
+            runCatching { SourceResolver.chosenFor(target) }
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrNull()
+                ?.let { return@withTimeoutOrNull it }
+            runCatching { SourceResolver.mappedSaavnFor(videoId, target) }
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrNull()
+                ?.let { mapped ->
+                    when {
+                        VerifiedCopies.mayStartWith(videoId, mapped) -> return@withTimeoutOrNull mapped
+                        VerifiedCopies.get(videoId, mapped.sourceConfigId) == null -> unheard = mapped
+                    }
+                }
+            // Your own file, when it qualifies and answers, plays from the start.
+            runCatching { SourceResolver.ownFileFor(target) }
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrNull()
+        }
+        if (early != null) {
+            fallback.cancel()
+            return Resolved.Module(early)
+        }
+        if (DirectSourceGate.isActive()) {
+            fallback.cancel()
+            return resolveDirect(videoId, target)
+        }
+        NerdStats.onLosslessRaceStart(videoId)
+        val lookup = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
+            withTimeoutOrNull(SUBSTITUTE_TIMEOUT_MS) { SourceResolver.substituteForYouTube(target) }
         }
 
         // First past the post. A null because [lookup] won is a module miss; a
@@ -10103,6 +10131,9 @@ class PlaybackService : MediaLibraryService() {
          * enough that a dead server costs a pause rather than a stall.
          */
         const val SUBSTITUTE_TIMEOUT_MS = 20_000L
+
+        /** BitChord Audio: how long the better-copy checks may hold a song's start. */
+        const val PRECHECK_MS = 1_200L
 
         /**
          * How much of a track has to be left for a mid-track quality swap to

@@ -60,6 +60,54 @@ object SourceResolver {
      * off the same ceiling: below Lossless the addons are never reached, so a
      * [StreamRequest.Best] here never lands on one.
      */
+    private val reachableAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val unreachable: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
+     * BitChord Audio: whether [stream]'s server will actually hand over its
+     * first bytes, asked once (two bytes, [timeoutMs] at most) before a song
+     * is started on it.
+     *
+     * Your pCloud files are found in a library index that can be out of date:
+     * a file moved or renamed since answers 404, and the player used to keep
+     * asking — up to 44 s of silence before it fell back to YouTube. A copy
+     * that doesn't answer is left out for the session; YouTube plays instead.
+     */
+    suspend fun reachable(stream: SourceStream, timeoutMs: Long = 2_500): Boolean {
+        val url = stream.url
+        if (!url.startsWith("http")) return true
+        if (url in unreachable) return false
+        reachableAt[url]?.let { if (System.currentTimeMillis() - it < 10 * 60_000L) return true }
+        val ok = withTimeoutOrNull(timeoutMs) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val request = okhttp3.Request.Builder().url(url).apply {
+                        stream.headers.forEach { (k, v) -> header(k, v) }
+                        header("Range", "bytes=0-1")
+                    }.build()
+                    com.music.bitchord.data.Http.client.newCall(request).execute().use { it.code in 200..299 }
+                }.getOrDefault(false)
+            }
+        }
+        when (ok) {
+            true -> reachableAt[url] = System.currentTimeMillis()
+            false -> {
+                unreachable += url
+                TrackLog.w(TAG, "${Uri.parse(url).host} won't serve ${Uri.parse(url).lastPathSegment}; not starting on it")
+            }
+            // Slow, not refused: not started on now, asked again next time.
+            null -> TrackLog.d(TAG, "${Uri.parse(url).host} too slow to start ${Uri.parse(url).lastPathSegment} on")
+        }
+        return ok == true
+    }
+
+    /** BitChord Audio: your library file [fileId] (`webdav:`…) answers — see [reachable]. */
+    suspend fun ownFileReachable(fileId: String, timeoutMs: Long = 2_500): Boolean {
+        val source = SourceRegistry.activeForPlayback().firstOrNull { it.kind == SourceKind.MY_LIBRARY } ?: return true
+        val stream = runCatching { source.stream(fileId, requestForNow()) }.getOrNull() ?: return false
+        return reachable(stream, timeoutMs)
+    }
+
     fun requestForNow(): StreamRequest {
         val ceiling = AppSettings.effectiveAudioQuality
         // Always the best the sources can do, bounded only by the connection's
@@ -333,7 +381,7 @@ object SourceResolver {
             is PreferredSource.File -> {
                 val source = own.first()
                 val chosen = runCatching { source.stream(choice.id, requestForNow()) }.getOrNull()
-                if (chosen != null) {
+                if (chosen != null && reachable(chosen)) {
                     TrackLog.d(TAG, "own file: '${target.title}' plays the file you chose")
                     return chosen.copy(sourceConfigId = chosen.sourceConfigId ?: source.configId)
                 }
@@ -349,12 +397,14 @@ object SourceResolver {
             val found = runCatching { source.stream(file.videoId, request) }.getOrNull() ?: continue
             // BitChord Audio: with YouTube refusing it, your file is the copy — any quality.
             if (!youTubeRefused && !RemoteLibrarySource.qualifies(found, target.durationSec)) continue
+            if (!reachable(found)) continue
             TrackLog.d(TAG, "own file: '${target.title}' plays '${file.title}' from your library at ${found.format.summary}")
             return found.copy(sourceConfigId = found.sourceConfigId ?: source.configId)
         }
         val (_, stream) = bestAcross(own, target, requestForNow(), timeoutMs = OWN_FILE_TIMEOUT_MS) { _, found ->
             youTubeRefused || RemoteLibrarySource.qualifies(found, target.durationSec)
         } ?: return null
+        if (!reachable(stream)) return null
         TrackLog.d(TAG, "own file: '${target.title}' plays from your library at ${stream.format.summary}")
         return stream
     }

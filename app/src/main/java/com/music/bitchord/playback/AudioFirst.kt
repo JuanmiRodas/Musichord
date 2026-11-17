@@ -190,7 +190,7 @@ internal class AudioFirst(
          * starting on the video's own sound. Short: a cache hit is instant,
          * and a slow lookup carries on in [onBecameCurrent] while it plays.
          */
-        const val START_TIMEOUT_MS = 1_500L
+        const val START_TIMEOUT_MS = 800L
         const val SWAP_ATTEMPTS = 6
         const val SWAP_RETRY_MS = 2_000L
         const val FALLBACK_TIMEOUT_MS = 15_000L

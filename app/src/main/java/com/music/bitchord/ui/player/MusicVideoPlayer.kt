@@ -673,6 +673,19 @@ object MusicVideoEngine {
             return
         }
         loadJob = scope.launch {
+            // BitChord Audio: the song first. The picture's resolve and its first megabytes
+            // used to race the song's own start for the connection; it now waits until the
+            // song is playing (at most [AUDIO_FIRST_WAIT_MS]), then catches up to it.
+            if (cachedStream(videoId, cap) == null) {
+                kotlinx.coroutines.withTimeoutOrNull(AUDIO_FIRST_WAIT_MS) {
+                    while (true) {
+                        val c = controller
+                        if (c == null || c.isPlaying || !c.playWhenReady) break
+                        kotlinx.coroutines.delay(100)
+                    }
+                }
+                if (loadedId != videoId) return@launch
+            }
             val stream = try {
                 cachedStream(videoId, cap)
                     ?: resolve(videoId, cap)?.also { streams[videoId] = Triple(it, cap, System.currentTimeMillis()) }
@@ -915,6 +928,9 @@ object MusicVideoEngine {
 
     /** Where Auto opens, as on the web player: the top of YouTube's H.264 ladder. */
     private const val AUTO_HEIGHT = 1080
+
+    /** BitChord Audio: how long a picture waits for its song to start. */
+    private const val AUDIO_FIRST_WAIT_MS = 4_000L
     private const val METERED_HEIGHT = 480
     private const val KEY_QUALITY = "quality"
 

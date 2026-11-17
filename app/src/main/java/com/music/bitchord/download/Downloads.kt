@@ -800,6 +800,10 @@ object Downloads {
         }
     }
 
+    /** BitChord Audio: what was saved for [videoId] — its file, and the quality it was saved at. */
+    internal fun savedEntry(videoId: String): Pair<String, String?>? =
+        _savedMetadata.value[videoId]?.let { it.uri to it.downloadFormat }
+
     /** BitChord Audio: the cover saved beside the download of [videoId], when there is one. */
     fun savedArtwork(videoId: String): String? =
         _savedMetadata.value[videoId]?.thumbnailUrl?.takeIf { it.startsWith("file:") }

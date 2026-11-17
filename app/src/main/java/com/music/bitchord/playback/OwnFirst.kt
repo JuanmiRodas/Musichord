@@ -64,8 +64,16 @@ internal class OwnFirst(
             SourceMap.saavnPlayable()
 
     /** The best copy for [song]: your file when it is the best, else JioSaavn's when better than YouTube's. */
-    private suspend fun bestFor(song: Song): Song? =
-        bestForUnchecked(song)?.takeIf { it.videoId !in broken }
+    private suspend fun bestFor(song: Song): Song? {
+        val copy = bestForUnchecked(song)?.takeIf { it.videoId !in broken } ?: return null
+        // BitChord Audio: a library file that won't answer (moved or renamed on pCloud since
+        // it was indexed) isn't put in the song's place — it cost up to 44 s of retries.
+        if (WebDavConfig.isWebDavId(copy.videoId) && !com.music.bitchord.data.sources.SourceResolver.ownFileReachable(copy.videoId)) {
+            broken += copy.videoId
+            return null
+        }
+        return copy
+    }
 
     private suspend fun bestForUnchecked(song: Song): Song? {
         // A copy you picked by hand comes first, on any connection: it is
@@ -153,7 +161,11 @@ internal class OwnFirst(
         val item = items.getOrNull(startIndex) ?: return items
         val song = item.toSong()
         if (!wants(song)) return items
-        val file = withContext(Dispatchers.Default) { bestFor(song) } ?: return items
+        // BitChord Audio: the song isn't held for this — past a second it starts as queued
+        // and the copy is cross-faded in once found (see [onBecameCurrent]).
+        val file = kotlinx.coroutines.withTimeoutOrNull(START_WAIT_MS) {
+            withContext(Dispatchers.Default) { bestFor(song) }
+        } ?: return items
         TrackLog.d(TAG, "own-first: '${song.title}' starts from your file", about = song.videoId)
         return items.toMutableList().also { it[startIndex] = file.toMediaItem() }
     }
@@ -221,5 +233,6 @@ internal class OwnFirst(
         /** Copies that wouldn't play this session: not put back in a song's place. */
         val broken: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
         private const val LOOK_AHEAD = 3
+        private const val START_WAIT_MS = 700L
     }
 }
