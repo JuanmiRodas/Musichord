@@ -154,13 +154,19 @@ object Http {
         }
         val response = proceedWebDavDirect(chain, original)
         if (bridge.isPcloudHost(original.url.host) && bridge.refusal(response.code)) {
-            val viaApi = bridge.answer(chain, original)
+            // The refusal is read out and closed first: OkHttp lets an interceptor make a new
+            // request only once the previous response is closed.
+            val type = response.body?.contentType()
+            val bytes = runCatching { response.body?.bytes() }.getOrNull() ?: ByteArray(0)
+            response.close()
+            val refused = response.newBuilder().body(with(okhttp3.ResponseBody.Companion) { bytes.toResponseBody(type) }).build()
+            val viaApi = runCatching { bridge.answer(chain, original) }.getOrNull()
             if (viaApi != null && viaApi.code != 404) {
-                response.close()
                 bridge.markWebdavDown()
                 return viaApi
             }
             viaApi?.close()
+            return refused
         }
         return response
     }
