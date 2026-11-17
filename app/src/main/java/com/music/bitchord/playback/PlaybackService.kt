@@ -1889,6 +1889,7 @@ class PlaybackService : MediaLibraryService() {
         } else {
             restoreBoundedQueueOrLast(exoPlayer)
         }
+        if (restored) putBackOnResumePoint(exoPlayer)
         if (restored) {
             publishWidgetState()
         } else {
@@ -4001,6 +4002,7 @@ class PlaybackService : MediaLibraryService() {
         // after 50 songs. Rewritten at each new song instead: a few dozen
         // rows of JSON, once per track.
         saveQueueSnapshot(exoPlayer)
+        exoPlayer.currentMediaItem?.let { LastPlayed.saveResumeSong(it.toSong(), it.queueEntryId) }
         convertVideosAround(exoPlayer)
         prefetchAround(exoPlayer)
         // The second look belongs to the track it was started for; the
@@ -6577,6 +6579,36 @@ class PlaybackService : MediaLibraryService() {
             index = player.currentMediaItemIndex - persistedQueueStart,
             positionMs = player.currentPosition,
         )
+        LastPlayed.saveResumePosition(player.currentMediaItem?.mediaId, player.currentPosition)
+    }
+
+    /**
+     * BitChord Audio: the restored queue moved onto the exact song and second
+     * that were playing when the app went away ([LastPlayed.resume]) — found
+     * in the queue by its entry, else by its id; put in at the cursor when the
+     * saved window no longer holds it.
+     */
+    private fun putBackOnResumePoint(player: ExoPlayer) {
+        val resume = LastPlayed.resume() ?: return
+        val count = player.mediaItemCount
+        if (count == 0) return
+        val current = player.currentMediaItemIndex.coerceAtLeast(0)
+        val wanted = resume.song.videoId
+        val at = (0 until count).firstOrNull { resume.entryId != null && player.getMediaItemAt(it).queueEntryId == resume.entryId }
+            ?: (0 until count).minByOrNull { i ->
+                if (player.getMediaItemAt(i).mediaId == wanted) kotlin.math.abs(i - current) else Int.MAX_VALUE
+            }?.takeIf { player.getMediaItemAt(it).mediaId == wanted }
+        if (at == null) {
+            // Past the saved window: the song goes in after the restored cursor and plays from there.
+            player.addMediaItem(current + 1, resume.song.toMediaItem())
+            player.seekTo(current + 1, resume.positionMs)
+            TrackLog.d("BitChord", "resume: '${resume.song.title}' put back in the queue at ${resume.positionMs / 1000}s", about = wanted)
+            return
+        }
+        if (at != current || kotlin.math.abs(player.currentPosition - resume.positionMs) > 1_500) {
+            player.seekTo(at, resume.positionMs)
+            TrackLog.d("BitChord", "resume: '${resume.song.title}' at ${resume.positionMs / 1000}s (queue said ${current - at} songs off)", about = wanted)
+        }
     }
 
     /** Restore the bounded queue without preparing or resolving a stream. */

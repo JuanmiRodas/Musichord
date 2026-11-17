@@ -108,6 +108,41 @@ object LastPlayed {
         )
     }
 
+    // ---- BitChord Audio: the exact resume point --------------------------------------
+
+    /** What was playing and where, kept apart from the queue snapshots — see [resume]. */
+    class Resume(val song: Song, val entryId: String?, val positionMs: Long)
+
+    /** The song now playing: written once per track (a few hundred bytes), synchronously. */
+    fun saveResumeSong(song: Song, entryId: String?) {
+        if (!this::prefs.isInitialized) return
+        prefs.edit()
+            .putString(KEY_RESUME_SONG, songToJson(song))
+            .putString(KEY_RESUME_ENTRY, entryId)
+            .putLong(KEY_RESUME_POSITION, 0L)
+            .commit()
+    }
+
+    /** Where in it: every progress tick, a single long. */
+    fun saveResumePosition(mediaId: String?, positionMs: Long) {
+        if (!this::prefs.isInitialized || mediaId == null) return
+        val saved = prefs.getString(KEY_RESUME_SONG, null) ?: return
+        if (!saved.contains("\"" + mediaId.replace("\"", "\\\"") + "\"")) return
+        prefs.edit().putLong(KEY_RESUME_POSITION, positionMs.coerceAtLeast(0L)).apply()
+    }
+
+    /**
+     * The song that was playing when the app went away, and the place in it.
+     * The queue snapshots can lag (written on queue edits, refused for a list
+     * that changed shape), and a reopened app went back several songs; this is
+     * the one record kept exact, and what a restored queue is put back onto.
+     */
+    fun resume(): Resume? {
+        if (!this::prefs.isInitialized) return null
+        val song = prefs.getString(KEY_RESUME_SONG, null)?.let(::songFromJson) ?: return null
+        return Resume(song, prefs.getString(KEY_RESUME_ENTRY, null), prefs.getLong(KEY_RESUME_POSITION, 0L))
+    }
+
     fun clear() {
         prefs.edit().clear().apply()
     }
@@ -212,4 +247,7 @@ object LastPlayed {
     private const val KEY_QUEUE = "queue"
     private const val KEY_INDEX = "index"
     private const val KEY_POSITION = "position"
+    private const val KEY_RESUME_SONG = "resume_song"
+    private const val KEY_RESUME_ENTRY = "resume_entry"
+    private const val KEY_RESUME_POSITION = "resume_position"
 }
