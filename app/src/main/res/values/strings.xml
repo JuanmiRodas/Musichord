@@ -1674,4 +1674,5 @@
     <string name="pcloud_oauth_open">Sign in</string>
     <string name="pcloud_oauth_sign_out">Sign out</string>
     <string name="pcloud_oauth_failed">pCloud didn\'t sign in: %1$s</string>
+    <string name="pcloud_email_code">Code from pCloud\'s email (if it asks)</string>
 </resources>

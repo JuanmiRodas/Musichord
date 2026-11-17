@@ -129,6 +129,42 @@ object PcloudApiBridge {
         }.onFailure { lastError = it.message }.getOrNull()
     }
 
+    /** Set by the app: keeps a token from [signInWithCode] (stored encrypted, "auth:<token>"). */
+    @Volatile var onToken: ((token: String, apiHost: String) -> Unit)? = null
+
+    /**
+     * pCloud now asks for the code it emails (1022 "Please provide 'code'") before
+     * it gives an app a session with email and password — as its website does.
+     * Signs in once with [code] on either region's API host; the session token
+     * that comes back is kept, so no further password sign-ins are needed.
+     */
+    fun signInWithCode(client: okhttp3.OkHttpClient, username: String, password: String, code: String): Result<String> {
+        var last = "pCloud sign-in failed"
+        for (api in listOf(preferredApi ?: "eapi.pcloud.com", "api.pcloud.com", "eapi.pcloud.com").distinct()) {
+            val url = "https://$api/userinfo?getauth=1&username=" + enc(username) + "&password=" + enc(password) + "&code=" + enc(code.trim())
+            val result = runCatching {
+                client.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                    json.parseToJsonElement(r.body?.string().orEmpty()).jsonObject
+                }
+            }.getOrNull() ?: continue
+            val c = result["result"]?.jsonPrimitive?.intOrNull ?: -1
+            if (c == 0) {
+                val t = result["auth"]?.jsonPrimitive?.content ?: continue
+                preferredApi = api
+                refusedUntil.clear()
+                onToken?.invoke("auth:$t", api)
+                oauthToken = "auth:$t"
+                oauthApi = api
+                return Result.success(t)
+            }
+            last = "pCloud sign-in refused ($c: ${result["error"]?.jsonPrimitive?.content})"
+            if (c == 2321) continue
+            if (c != 2000) break
+        }
+        lastError = last
+        return Result.failure(IllegalStateException(last))
+    }
+
     // ---- sign-in ---------------------------------------------------------------------
 
     private fun credentials(header: String?): Pair<String, String>? {
@@ -157,6 +193,7 @@ object PcloudApiBridge {
         val code = result["result"]?.jsonPrimitive?.intOrNull ?: -1
         if (code != 0) {
             lastError = "pCloud sign-in refused (${code}: ${result["error"]?.jsonPrimitive?.content})"
+            if (code == 1022) lastError = "pCloud asks for the code it emails you (1022): write it in the code field and tap Test"
             refusedUntil[key] = (System.currentTimeMillis() + if (code == 4000) 60 * 60_000L else 15 * 60_000L) to lastError
             return null
         }
@@ -189,8 +226,11 @@ object PcloudApiBridge {
         return if (trimmed.isEmpty()) "/" else trimmed
     }
 
-    private fun authParam(auth: String, bearer: String?) =
-        if (bearer != null) "access_token=" + enc(bearer) else "auth=$auth"
+    private fun authParam(auth: String, bearer: String?) = when {
+        bearer == null -> "auth=$auth"
+        bearer.startsWith("auth:") -> "auth=" + enc(bearer.removePrefix("auth:"))
+        else -> "access_token=" + enc(bearer)
+    }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 

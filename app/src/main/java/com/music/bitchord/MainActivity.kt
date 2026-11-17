@@ -5891,10 +5891,24 @@ private fun BitChordApp(
                         initial = if (isPcloud) com.music.bitchord.data.webdav.PcloudPreset.folderOf(pcloudUrl) else "Music",
                         placeholder = stringResource(R.string.pcloud_folder_hint),
                     ),
+                    // BitChord Audio: the code pCloud emails before it lets an app in (1022).
+                    FieldConfig(
+                        initial = "",
+                        placeholder = stringResource(R.string.pcloud_email_code),
+                        keyboardType = KeyboardType.Number,
+                    ),
                 ),
                 canSubmit = { it[0].isNotBlank() && it[1].isNotBlank() },
                 testFailedRes = R.string.webdav_test_failed,
-                onTest = { (email, password, folder) ->
+                onTest = { (email, password, folder, code) ->
+                    if (code.isNotBlank()) {
+                        val signed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.music.bitchord.data.webdav.PcloudApiBridge.signInWithCode(
+                                com.music.bitchord.data.Http.client, email.trim(), password, code,
+                            )
+                        }
+                        if (signed.isFailure) return@ServerEditorHost Result.failure(signed.exceptionOrNull()!!)
+                    }
                     // Each region in turn; the folder is found level by level
                     // (accents, spaces and case as pCloud has them). The error
                     // shown is the one from the region that accepted the login

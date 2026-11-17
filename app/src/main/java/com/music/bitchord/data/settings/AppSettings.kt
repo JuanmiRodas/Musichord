@@ -2160,6 +2160,7 @@ object AppSettings {
     }
 
     private fun publishPcloudOAuth() {
+        com.music.bitchord.data.webdav.PcloudApiBridge.onToken = { token, host -> authStore.pcloudOAuth = "$token|$host"; pcloudSignedIn.value = true }
         val raw = authStore.pcloudOAuth
         com.music.bitchord.data.webdav.PcloudApiBridge.oauthToken = raw?.substringBefore('|')?.takeIf { it.isNotBlank() }
         com.music.bitchord.data.webdav.PcloudApiBridge.oauthApi = raw?.substringAfter('|', "")?.takeIf { it.isNotBlank() }
