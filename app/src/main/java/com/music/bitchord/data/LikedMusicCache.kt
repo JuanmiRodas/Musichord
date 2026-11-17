@@ -46,7 +46,7 @@ object LikedMusicCache {
     fun load(profile: String?): Saved? {
         val f = file(profile) ?: return null
         val saved = SongListStore.load(f) ?: return null
-        return Saved(saved.songs, saved.savedAt).takeIf { it.songs.isNotEmpty() }
+        return Saved(saved.songs.distinctBy { it.videoId }, saved.savedAt).takeIf { it.songs.isNotEmpty() }
             ?.also {
                 // The first list read this run is the account's, until one is saved.
                 if (lastProfile == null) lastProfile = profile
@@ -78,7 +78,9 @@ object LikedMusicCache {
     var lastProfile: String? = null
         private set
 
-    fun save(profile: String?, songs: List<Song>) {
+    fun save(profile: String?, songs0: List<Song>) {
+        // BitChord Audio: one row per liked song, whatever the pages said.
+        val songs = songs0.distinctBy { it.videoId }
         if (songs.isEmpty()) return
         lastProfile = profile
         publish(songs)
@@ -107,8 +109,11 @@ object LikedMusicCache {
         if (fresh.isEmpty()) return null
         val savedIndex = HashMap<String, Int>(saved.size * 2)
         saved.forEachIndexed { i, s -> savedIndex.putIfAbsent(s.videoId, i) }
-        val anchor = fresh.asReversed().firstNotNullOfOrNull { savedIndex[it.videoId] } ?: return null
+        // A song re-liked since sits on the fresh page but deep in the saved list; anchoring on
+        // it would drop everything above it. Only an anchor near the top is believed.
+        val reach = fresh.size + 50
+        val anchor = fresh.asReversed().firstNotNullOfOrNull { savedIndex[it.videoId]?.takeIf { i -> i < reach } } ?: return null
         val inFresh = fresh.mapTo(HashSet()) { it.videoId }
-        return fresh + saved.drop(anchor + 1).filterNot { it.videoId in inFresh }
+        return (fresh + saved.drop(anchor + 1).filterNot { it.videoId in inFresh }).distinctBy { it.videoId }
     }
 }

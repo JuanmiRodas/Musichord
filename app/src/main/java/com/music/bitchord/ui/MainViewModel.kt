@@ -1132,9 +1132,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * video is looked at once; a few seconds apart, so YouTube isn't hurried.
      */
     private fun swapLikedVideos(liked: List<Song>) {
+        // Off until asked for again: every swap is a new like, which YouTube puts at the top of
+        // Liked Music, so a pass over thousands of likes reorders the list. By hand only.
+        if (!com.music.bitchord.data.SongVersions.automatic) return
         if (!_signedIn.value || songVersionPass?.isActive == true) return
         val versions = com.music.bitchord.data.SongVersions
-        val todo = liked.filter { versions.looksLikeVideo(it) && !versions.tried(it.videoId) && com.music.bitchord.data.LocalLikes.isYouTubeId(it.videoId) }
+        val todo = liked.filter { versions.saysVideo(it) && !versions.tried(it.videoId) && com.music.bitchord.data.LocalLikes.isYouTubeId(it.videoId) }
         if (todo.isEmpty()) return
         songVersionPass = viewModelScope.launch {
             for (video in todo.take(30)) {
@@ -3686,8 +3689,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (current.browseId != browseId) return@map current
                     val existing = (current.songs as? UiState.Success)?.data ?: return@map current
                     val known = existing.mapTo(HashSet()) { it.contextEntryKey() }
+                    // BitChord Audio: a liked song is in Liked Music once (the saved copy and the
+                    // fetched pages can disagree on setVideoId, which doubled the list).
+                    val likedIds = if (browseId in LikedMusicCache.IDS) existing.mapTo(HashSet()) { it.videoId } else null
                     val added = fetched.songs
-                        .filter { known.add(it.contextEntryKey()) }
+                        .filter { known.add(it.contextEntryKey()) && (likedIds == null || likedIds.add(it.videoId)) }
                         .withArtwork(artworkFallback)
                     val knownVideoIds = (existing + added).mapTo(HashSet()) { it.videoId }
                     // Suggestions can arrive on a later page than the real

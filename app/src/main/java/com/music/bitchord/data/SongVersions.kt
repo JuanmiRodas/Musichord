@@ -28,7 +28,13 @@ object SongVersions {
             ")",
     )
 
-    fun looksLikeVideo(song: Song): Boolean = song.isVideo || VIDEO_WORDS.containsMatchIn(song.title)
+    fun looksLikeVideo(song: Song): Boolean = song.isVideo || saysVideo(song)
+
+    /** Only what the title says — the automatic pass never goes by the video flag alone. */
+    fun saysVideo(song: Song): Boolean = VIDEO_WORDS.containsMatchIn(song.title)
+
+    /** The automatic pass: off (it reordered Liked Music on YouTube). */
+    @Volatile var automatic: Boolean = false
 
     private var prefs: SharedPreferences? = null
 
