@@ -46,6 +46,16 @@ object PcloudApiBridge {
     @Volatile private var webdavDownUntil = 0L
 
     @Volatile private var token: String? = null
+
+    /**
+     * A token from pCloud's own sign-in page (OAuth, which takes the emailed code a
+     * password sign-in can't), and the API host it belongs to. When set, every pCloud
+     * request goes through the API with it — no password involved at all.
+     */
+    @Volatile var oauthToken: String? = null
+    @Volatile var oauthApi: String? = null
+
+    fun signedInWithPcloud(): Boolean = !oauthToken.isNullOrBlank()
     @Volatile private var preferredApi: String? = null
     private val refusedUntil = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String?>>()
     @Volatile private var tokenFor: String? = null
@@ -87,9 +97,20 @@ object PcloudApiBridge {
     /** The bridged answer to [request], or null when the API can't give one either. */
     fun answer(chain: Interceptor.Chain, request: Request): Response? {
         if (!isPcloudHost(request.url.host)) return null
-        val credentials = credentials(request.header("Authorization")) ?: return null
         val method = request.method.uppercase()
         if (method != "PROPFIND" && method != "GET" && method != "HEAD") return null
+        oauthToken?.takeIf { it.isNotBlank() }?.let { bearer ->
+            lastError = null
+            val api = oauthApi ?: apiHost(request.url.host)
+            val path = pathOf(request)
+            return runCatching {
+                when (method) {
+                    "PROPFIND" -> propfind(chain, request, api, "", path, bearer)
+                    else -> download(chain, request, api, "", path, bearer)
+                }
+            }.onFailure { lastError = it.message }.getOrNull()
+        }
+        val credentials = credentials(request.header("Authorization")) ?: return null
         lastError = null
         // The region's API host first, then the other (an account lives in one only).
         var api = preferredApi ?: apiHost(request.url.host)
@@ -168,6 +189,9 @@ object PcloudApiBridge {
         return if (trimmed.isEmpty()) "/" else trimmed
     }
 
+    private fun authParam(auth: String, bearer: String?) =
+        if (bearer != null) "access_token=" + enc(bearer) else "auth=$auth"
+
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
     /** The path as given, then in the other Unicode form (a Mac's "Música" vs the precomposed one). */
@@ -176,11 +200,11 @@ object PcloudApiBridge {
 
     // ---- PROPFIND ------------------------------------------------------------------------
 
-    private fun propfind(chain: Interceptor.Chain, request: Request, api: String, auth: String, path: String): Response? {
+    private fun propfind(chain: Interceptor.Chain, request: Request, api: String, auth: String, path: String, bearer: String? = null): Response? {
         val depth = request.header("Depth") ?: "1"
         var listed: JsonObject? = null
         for (p in forms(path)) {
-            val result = call(chain, "https://$api/listfolder?auth=$auth&path=" + enc(p)) ?: continue
+            val result = call(chain, "https://$api/listfolder?" + authParam(auth, bearer) + "&path=" + enc(p)) ?: continue
             checkToken(result)
             if (result["result"]?.jsonPrimitive?.intOrNull == 0) {
                 listed = result["metadata"]?.jsonObject
@@ -229,9 +253,9 @@ object PcloudApiBridge {
 
     // ---- GET / HEAD -----------------------------------------------------------------------
 
-    private fun download(chain: Interceptor.Chain, request: Request, api: String, auth: String, path: String): Response? {
+    private fun download(chain: Interceptor.Chain, request: Request, api: String, auth: String, path: String, bearer: String? = null): Response? {
         for (p in forms(path)) {
-            val result = call(chain, "https://$api/getfilelink?auth=$auth&forcedownload=1&path=" + enc(p)) ?: continue
+            val result = call(chain, "https://$api/getfilelink?" + authParam(auth, bearer) + "&forcedownload=1&path=" + enc(p)) ?: continue
             checkToken(result)
             if (result["result"]?.jsonPrimitive?.intOrNull != 0) {
                 lastError = "pCloud getfilelink $p: ${result["error"]?.jsonPrimitive?.content}"

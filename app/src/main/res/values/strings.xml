@@ -1666,4 +1666,12 @@
     <string name="song_version_hint">Music video</string>
     <string name="song_version_done">Liked “%1$s” in place of the video</string>
     <string name="song_version_none">No song version of this found on YouTube</string>
+    <string name="pcloud_oauth_title">Sign in with pCloud\'s page</string>
+    <string name="pcloud_oauth_signed_in">Signed in with pCloud\'s page</string>
+    <string name="pcloud_oauth_subtitle">For accounts pCloud won\'t let in by password (emailed code)</string>
+    <string name="pcloud_oauth_footer">pCloud asks a registered app for this: in pCloud\'s My Apps (docs.pcloud.com, signed in to pCloud) create an app, add the redirect URI shown in the next step, and paste its Client ID.</string>
+    <string name="pcloud_oauth_help">1. Open docs.pcloud.com, sign in, and go to My Apps.\n2. Create an app (any name, e.g. BitChord).\n3. Add this redirect URI: %1$s\n4. Copy the app\'s Client ID here and tap Sign in: pCloud\'s own page opens, with the code by email.</string>
+    <string name="pcloud_oauth_open">Sign in</string>
+    <string name="pcloud_oauth_sign_out">Sign out</string>
+    <string name="pcloud_oauth_failed">pCloud didn\'t sign in: %1$s</string>
 </resources>

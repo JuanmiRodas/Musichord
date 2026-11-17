@@ -1171,6 +1171,8 @@ object AppSettings {
         webdavUrl.value = prefs.getString(KEY_WEBDAV_URL, "").orEmpty()
         webdavUsername.value = prefs.getString(KEY_WEBDAV_USERNAME, "").orEmpty()
         webdavPassword.value = authStore.webdavPassword.orEmpty()
+        pcloudClientId.value = prefs.getString("pcloud_client_id", "").orEmpty()
+        publishPcloudOAuth()
         smbHost.value = prefs.getString(KEY_SMB_HOST, "").orEmpty()
         smbShare.value = prefs.getString(KEY_SMB_SHARE, "").orEmpty()
         smbBasePath.value = prefs.getString(KEY_SMB_BASE_PATH, "").orEmpty()
@@ -2142,7 +2144,30 @@ object AppSettings {
         publishWebDavAuth()
     }
 
+    /** BitChord Audio: the Client ID of the pCloud app registered for BitChord (pCloud's My Apps). */
+    val pcloudClientId = kotlinx.coroutines.flow.MutableStateFlow("")
+    val pcloudSignedIn = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    fun setPcloudClientId(value: String) {
+        pcloudClientId.value = value.trim()
+        prefs.edit().putString("pcloud_client_id", value.trim()).apply()
+    }
+
+    /** Signed in through pCloud's own page: [token] for [apiHost]; null signs out. */
+    fun setPcloudOAuth(token: String?, apiHost: String?) {
+        authStore.pcloudOAuth = token?.let { "$it|${apiHost.orEmpty()}" }
+        publishPcloudOAuth()
+    }
+
+    private fun publishPcloudOAuth() {
+        val raw = authStore.pcloudOAuth
+        com.music.bitchord.data.webdav.PcloudApiBridge.oauthToken = raw?.substringBefore('|')?.takeIf { it.isNotBlank() }
+        com.music.bitchord.data.webdav.PcloudApiBridge.oauthApi = raw?.substringAfter('|', "")?.takeIf { it.isNotBlank() }
+        pcloudSignedIn.value = !raw.isNullOrBlank()
+    }
+
     fun clearWebDav() {
+        setPcloudOAuth(null, null)
         setWebDavUrl("")
         setWebDavUsername("")
         setWebDavPassword("")

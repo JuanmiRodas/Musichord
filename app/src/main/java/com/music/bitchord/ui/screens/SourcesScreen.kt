@@ -337,6 +337,13 @@ fun SourcesScreen(
             },
         )
 
+        // BitChord Audio: pCloud's own sign-in page, for accounts it won't let in by password.
+        SettingsGroup(header = null, footer = stringResource(R.string.pcloud_oauth_footer)) {
+            com.music.bitchord.ui.components.PcloudSignInRow { title, subtitle, onClick ->
+                SettingsRow(icon = SfIcons.Cloud, title = title, subtitle = subtitle, onClick = onClick)
+            }
+        }
+
         RemoteLibrarySection(
             icon = SfIcons.Cloud,
             title = stringResource(R.string.webdav),

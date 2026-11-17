@@ -117,6 +117,11 @@ class AuthStore(context: Context) {
      * exports carry the server, share and username in plain prefs, but never
      * this.
      */
+    /** BitChord Audio: pCloud's own sign-in (OAuth): token and API host, "token|host". */
+    var pcloudOAuth: String?
+        get() = prefs.getString("pcloud_oauth", null)
+        set(value) = prefs.edit().putString("pcloud_oauth", value).apply()
+
     var smbPassword: String?
         get() = prefs.getString(KEY_SMB_PASSWORD, null)
         set(value) = prefs.edit().putString(KEY_SMB_PASSWORD, value).apply()

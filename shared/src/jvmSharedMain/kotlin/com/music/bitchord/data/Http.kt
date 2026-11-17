@@ -148,6 +148,10 @@ object Http {
      */
     private fun proceedWebDav(chain: okhttp3.Interceptor.Chain, original: okhttp3.Request): okhttp3.Response {
         val bridge = com.music.bitchord.data.webdav.PcloudApiBridge
+        // BitChord Audio: signed in through pCloud's own page — the API answers everything.
+        if (bridge.isPcloudHost(original.url.host) && bridge.signedInWithPcloud()) {
+            bridge.answer(chain, original)?.let { return it }
+        }
         bridge.blocked(original)?.let { return it }
         // BitChord Audio: pCloud's WebDAV refusing everything — its API answers instead.
         if (bridge.isPcloudHost(original.url.host) && bridge.webdavDown()) {
