@@ -36,6 +36,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
@@ -3808,13 +3809,7 @@ fun NowPlayingScreen(
                                     )
                                     // BitChord Audio: video mode's lyrics, over the bottom of the picture.
                                     if (videoOverlay && syncedLyricsEnabled && videoModeLyrics) {
-                                        // BitChord Audio: rests at the foot of the picture and rises
-                                        // over the ±0.5 s buttons while they show, and back.
-                                        val lyricLift by animateDpAsState(
-                                            targetValue = if (cornerShown && videoRendered) 46.dp else 12.dp,
-                                            animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                            label = "videoLyricLift",
-                                        )
+                                        val lyricLift = 12.dp
                                         // Out to the screen's edges, the lyric lines up with the title.
                                         val gutterDp = with(LocalDensity.current) { ((playerBounds.width - boxWidthPx) / 2).coerceAtLeast(0).toDp() }
                                         val lyricInset = if (videoEdge && playerBounds.width > 0) gutterDp else 14.dp
@@ -3824,12 +3819,19 @@ fun NowPlayingScreen(
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
                                                 .videoLyricsScrim(videoShade)
-                                                // BitChord Audio: a tap on the lyrics, their options.
-                                                .clickable(
-                                                    interactionSource = remember { MutableInteractionSource() },
-                                                    indication = null,
-                                                ) { showLyricsProviders = true }
-                                                // Above the ±0.5 s buttons, not over them.
+                                                // BitChord Audio: the foot of the picture, in three: a tap on
+                                                // the left puts the lyrics 0.5 s earlier, on the right 0.5 s
+                                                // later, in the middle opens their options. No buttons shown.
+                                                .pointerInput(Unit) {
+                                                    detectTapGestures { at ->
+                                                        val third = size.width / 3f
+                                                        when {
+                                                            at.x < third -> lyricsTranslation.nudge(-500)
+                                                            at.x > third * 2 -> lyricsTranslation.nudge(500)
+                                                            else -> showLyricsProviders = true
+                                                        }
+                                                    }
+                                                }
                                                 .padding(start = lyricInset, end = lyricInset, top = when { videoShade > 0.98f -> 72.dp; videoShade > 0.9f -> 44.dp; else -> 30.dp }, bottom = lyricLift),
                                         ) {
                                             // One line here — the sung one — with its
@@ -3856,23 +3858,35 @@ fun NowPlayingScreen(
                                         delay(3_500)
                                         cornerShown = false
                                     }
-                                    // BitChord Audio: lyrics earlier / later by half a second, as in the lyrics view.
+                                    // BitChord Audio: the lyrics' shift, shown in the middle of the
+                                    // picture for a moment after each tap that changes it.
                                     if (videoOverlay && videoModeLyrics && syncedLyricsEnabled) {
-                                        androidx.compose.animation.AnimatedVisibility(
-                                            visible = cornerShown && videoRendered,
-                                            enter = androidx.compose.animation.fadeIn(tween(220)),
-                                            exit = androidx.compose.animation.fadeOut(tween(450)),
-                                            modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
-                                        ) {
-                                            VideoNudgeButton("−0.5 s") { lyricsTranslation.nudge(-500) }
+                                        val shift = lyricsTranslation.offsetMs
+                                        var shiftShown by remember { mutableStateOf(false) }
+                                        var lastShift by remember(song.videoId) { mutableStateOf(shift) }
+                                        LaunchedEffect(shift) {
+                                            if (shift == lastShift) return@LaunchedEffect
+                                            lastShift = shift
+                                            shiftShown = true
+                                            delay(1_400)
+                                            shiftShown = false
                                         }
                                         androidx.compose.animation.AnimatedVisibility(
-                                            visible = cornerShown && videoRendered,
-                                            enter = androidx.compose.animation.fadeIn(tween(220)),
-                                            exit = androidx.compose.animation.fadeOut(tween(450)),
-                                            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                                            visible = shiftShown,
+                                            enter = androidx.compose.animation.fadeIn(tween(150)),
+                                            exit = androidx.compose.animation.fadeOut(tween(400)),
+                                            modifier = Modifier.align(Alignment.Center),
                                         ) {
-                                            VideoNudgeButton("+0.5 s") { lyricsTranslation.nudge(500) }
+                                            Text(
+                                                text = (if (shift > 0) "+" else if (shift < 0) "−" else "±") +
+                                                    "%.1f s".format(kotlin.math.abs(shift) / 1000f),
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.headlineSmall,
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color.Black.copy(alpha = 0.6f))
+                                                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                                            )
                                         }
                                     }
                                     androidx.compose.animation.AnimatedVisibility(
