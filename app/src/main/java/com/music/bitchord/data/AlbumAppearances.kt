@@ -35,10 +35,33 @@ object AlbumAppearances {
     @Volatile
     private var index: Index? = null
 
+    /** BitChord Audio: bumped when a fresh [index] is ready — what the stars redraw on. */
+    val version = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    @Volatile private var building = false
+
     private fun index(): Index {
         val liked = LikedMusicCache.likedSongs.value
         val library = runCatching { WebDavRepository.library() }.getOrDefault(emptyList())
         index?.takeIf { it.liked === liked && it.library === library }?.let { return it }
+        // BitChord Audio: on the main thread (every star on screen asks) a rebuild over
+        // ~10,000 songs on each change to Liked Music froze taps. The last index answers
+        // while a new one is built aside.
+        val last = index
+        if (last != null && android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            if (!building) {
+                building = true
+                Thread {
+                    try { build(LikedMusicCache.likedSongs.value, runCatching { WebDavRepository.library() }.getOrDefault(emptyList())) } finally { building = false }
+                    version.value++
+                }.start()
+            }
+            return last
+        }
+        return build(liked, library)
+    }
+
+    private fun build(liked: List<Song>, library: List<Song>): Index {
         val byKey = HashMap<String, MutableList<Song>>()
         (liked + library).forEach { s -> keyOf(s.title, s.artist)?.let { byKey.getOrPut(it) { ArrayList() } += s } }
         val likedByKey = HashMap<String, Song>()

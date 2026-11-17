@@ -33,7 +33,7 @@ import com.music.bitchord.ui.icons.BitChordIcons
 @Composable
 fun LikeStar(song: Song, tint: Color, background: Color) {
     val changes by LikeLookup.changes.collectAsState(initial = Unit)
-    val likedSongs by LikedMusicCache.likedSongs.collectAsState()
+    val likedSongs by com.music.bitchord.data.AlbumAppearances.version.collectAsState()
     val likedCopy = remember(song.videoId, song.title, changes, likedSongs) { AlbumAppearances.likedCopy(song) }
     val several = remember(song.videoId, song.title, likedSongs) { likedCopy != null && AlbumAppearances.onSeveral(song) }
     val liked = likedCopy != null

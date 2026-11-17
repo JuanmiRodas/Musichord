@@ -1098,10 +1098,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val profile = _activeProfileId.value
         // Where the video was, for when YouTube's order (new like on top) comes back.
-        LikedMusicCache.load(profile)?.songs?.let { list ->
-            val at = list.indexOfFirst { it.videoId == video.videoId }
-            if (at >= 0) LikedMusicCache.place(song.videoId, list.drop(at + 1).firstOrNull { it.videoId != song.videoId }?.videoId)
-            LikedMusicCache.save(profile, swapIn(list))
+        // Off the main thread: 4,000 songs read and written every few seconds froze taps.
+        withContext(Dispatchers.Default) {
+            LikedMusicCache.load(profile)?.songs?.let { list ->
+                val at = list.indexOfFirst { it.videoId == video.videoId }
+                if (at >= 0) LikedMusicCache.place(song.videoId, list.drop(at + 1).firstOrNull { it.videoId != song.videoId }?.videoId)
+                LikedMusicCache.save(profile, swapIn(list))
+            }
         }
         (_library.value as? UiState.Success)?.data?.let { library ->
             _library.value = UiState.Success(library.copy(likedSongs = swapIn(library.likedSongs)))
