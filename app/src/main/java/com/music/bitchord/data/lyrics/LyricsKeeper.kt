@@ -367,7 +367,7 @@ object LyricsKeeper {
      * own for word-by-word lyrics with no Japanese in them (an English version
      * or a translation of a Japanese song) are put back to your pick.
      */
-    private fun picksBack(songs: List<Song>) {
+    private suspend fun picksBack(songs: List<Song>) {
         var back = 0
         for (s in songs) {
             if (s.isVideo || !EditedLyrics.hasPrevious(s.videoId) || EditedLyrics.isHandTimed(s.videoId)) continue
