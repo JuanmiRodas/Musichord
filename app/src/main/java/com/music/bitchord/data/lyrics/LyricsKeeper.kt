@@ -122,7 +122,7 @@ object LyricsKeeper {
      * its own — the app's choice, or one you picked from the search (then only
      * by word-by-word lyrics of the same song). Lyrics you timed never.
      */
-    fun mayUpgrade(videoId: String): Boolean = !EditedLyrics.isHandTimed(videoId)
+    fun mayUpgrade(videoId: String): Boolean = !EditedLyrics.isHandTimed(videoId) && isAutoKept(videoId)
 
     /**
      * Whether the lyrics kept for [videoId] were chosen by the app (the best
@@ -231,6 +231,10 @@ object LyricsKeeper {
         running = true
         try {
             val songs = LikedMusicCache.load(LikedMusicCache.lastProfile)?.songs.orEmpty()
+            if (prefs?.getBoolean(KEY_PICKS_BACK, false) == false) {
+                picksBack(songs)
+                prefs?.edit()?.putBoolean(KEY_PICKS_BACK, true)?.apply()
+            }
             if (prefs?.getBoolean(KEY_WORD_SWEEP, false) == false) {
                 if (wordSweep(songs)) prefs?.edit()?.putBoolean(KEY_WORD_SWEEP, true)?.apply()
             }
@@ -356,6 +360,31 @@ object LyricsKeeper {
 
     private const val KEY_RECHECKED = "kept_rechecked_v1"
     private const val KEY_WORD_SWEEP = "word_sweep_v1"
+    private const val KEY_PICKS_BACK = "picks_back_v1"
+
+    /**
+     * BitChord Audio: once — lyrics you picked that the app later swapped on its
+     * own for word-by-word lyrics with no Japanese in them (an English version
+     * or a translation of a Japanese song) are put back to your pick.
+     */
+    private fun picksBack(songs: List<Song>) {
+        var back = 0
+        for (s in songs) {
+            if (s.isVideo || !EditedLyrics.hasPrevious(s.videoId) || EditedLyrics.isHandTimed(s.videoId)) continue
+            val now = EditedLyrics.get(s.videoId) ?: continue
+            val before = EditedLyrics.previous(s.videoId) ?: continue
+            val d = s.durationMillis()
+            val translation = now.none { CrossScript.hasJapanese(it.text) } &&
+                LyricsQuality.score(now, true, d) < LyricsQuality.score(now, false, d)
+            if (!translation || before.none { CrossScript.hasJapanese(it.text) }) continue
+            keep(s, before, picked = true)
+            notePicked(s.videoId)
+            EditedLyrics.dropPrevious(s.videoId)
+            back++
+            TrackLog.d(TAG, "lyrics: your pick for '${s.title}' put back (the app had swapped in a translation)")
+        }
+        if (back > 0) TrackLog.d(TAG, "lyrics: $back picks put back")
+    }
 
     /**
      * BitChord Audio: once, over every liked song — the full search (as the
@@ -365,7 +394,10 @@ object LyricsKeeper {
      * of the same song. True once every song was seen.
      */
     private suspend fun wordSweep(songs: List<Song>): Boolean {
-        val todo = songs.filter { s -> !s.isVideo && EditedLyrics.get(s.videoId)?.any { it.isWordSynced } != true }
+        // Only songs with no lyrics yet, or with lyrics the app chose: your picks are final.
+        val todo = songs.filter { s ->
+            !s.isVideo && (!EditedLyrics.has(s.videoId) || (mayUpgrade(s.videoId) && EditedLyrics.get(s.videoId)?.any { it.isWordSynced } != true))
+        }
         if (todo.isEmpty()) return true
         TrackLog.d(TAG, "lyrics: word-by-word sweep over ${todo.size} liked songs")
         var upgraded = 0
@@ -376,11 +408,12 @@ object LyricsKeeper {
             val now = withTimeoutOrNull(60_000) { runCatching { lookUp(s) }.getOrNull() }
             if (now != null) {
                 val duration = s.durationMillis()
+                val japanese = LyricsSearchAll.namesJapanese(s) || LyricsQuality.looksJapanese(now) ||
+                    (kept != null && LyricsQuality.looksJapanese(kept))
                 when {
                     kept == null -> { keep(s, now); found++ }
-                    now.any { it.isWordSynced } && now.map { it.text } != kept.map { it.text } &&
-                        LyricsSearchAll.score(now, duration) > LyricsSearchAll.score(kept, duration) &&
-                        (isAutoKept(s.videoId) || LyricsSearchAll.sameSong(now, kept)) -> {
+                    mayUpgrade(s.videoId) && now.map { it.text } != kept.map { it.text } &&
+                        LyricsSearchAll.score(now, duration, japanese) > LyricsSearchAll.score(kept, duration, japanese) -> {
                         keep(s, now, upgrade = true)
                         upgraded++
                         TrackLog.d(TAG, "lyrics: '${s.title}' now word by word")
@@ -417,9 +450,10 @@ object LyricsKeeper {
         // BitChord Audio: and the manual search, as it runs by hand — the best of both.
         val all = runCatching { LyricsSearchAll.answers(s) }.getOrDefault(emptyList())
             .filter { r -> r.source.name !in flagged && r.lines.any { it.timeMs > 0 } }
-        val manual = LyricsSearchAll.best(all, seconds * 1000L)
         val auto = best?.result?.takeIf { r -> r.lines.any { it.timeMs > 0 } }
-        val pick = listOfNotNull(auto, manual).maxByOrNull { LyricsSearchAll.score(it.lines, seconds * 1000L) }
+        val japanese = LyricsSearchAll.namesJapanese(s) || listOfNotNull(auto).plus(all).any { LyricsQuality.looksJapanese(it.lines) }
+        val manual = LyricsSearchAll.best(all, seconds * 1000L, japanese)
+        val pick = listOfNotNull(auto, manual).maxByOrNull { LyricsSearchAll.score(it.lines, seconds * 1000L, japanese) }
         return pick?.lines
     }
 }

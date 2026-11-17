@@ -22,6 +22,7 @@ object LyricsQuality {
     const val WORD = 3_000
     const val LINE = 2_000
     const val PLAIN = 1_000
+    const val TRANSLATION_PENALTY = 2_500
 
     fun score(lines: List<LyricLine>, japaneseSong: Boolean, durationMs: Long): Int {
         val text = lines.filter { it.text.isNotBlank() }
@@ -34,6 +35,10 @@ object LyricsQuality {
             else -> PLAIN
         }
         if (japaneseSong) s += romajiBonus(text)
+        // BitChord Audio: a Japanese song's lyrics with no Japanese at all and no romaji —
+        // an English version or a translation, never the song as sung: below any timed
+        // Japanese copy, however well this one is timed.
+        if (japaneseSong && text.none { CrossScript.hasJapanese(it.text) } && !isRomaji(text)) s -= TRANSLATION_PENALTY
         if (timed && durationMs > 0 && text.maxOf { it.timeMs } > durationMs + 15_000) s -= 1_500
         if (text.size < 6) s -= 500
         s += min(text.size, 60)

@@ -408,6 +408,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * is on disk — and one that fails outright with the connection off, which
      * is what made a downloaded song show nothing offline.
      */
+    private var lyricsShownFor: String? = null
+    private val lyricsUpgradedThisRun = java.util.Collections.synchronizedSet(HashSet<String>())
+
     fun loadLyrics(
         videoId: String,
         title: String,
@@ -457,8 +460,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         lyricsProviderResults.clear()
         _lyricsProviderStates.value =
             LyricsSource.entries.associateWith { LyricsProviderState.NOT_FETCHED }
-        _lyrics.value = null
-        _lyricsSource.value = null
+        // BitChord Audio: the same song looked up again (its kept lyrics were just saved,
+        // a name changed) keeps what is on screen until something else is decided —
+        // blanking it first flashed the lyrics away and back.
+        if (lyricsShownFor != videoId) {
+            _lyrics.value = null
+            _lyricsSource.value = null
+        }
+        lyricsShownFor = videoId
         lyricsJob?.cancel()
         if (sources.isEmpty()) {
             // Switched off, or every source unticked. Nothing to look up, and
@@ -496,9 +505,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // under) that the kept copy can't, so found lyrics always "beat" the very same lines
             // kept: they were kept again, which restarted the lookup, which found them again —
             // every couple of seconds, flipping the screen between script and romaji.
+            // BitChord Audio: one scale for every comparison here and in the background
+            // (LyricsSearchAll.score), with the song judged Japanese by its names or by any
+            // lyrics found for it — so an English version or a translation of a Japanese song
+            // never outranks the lyrics as sung, and two places never swap them back and forth.
+            val fullAnswers = java.util.Collections.synchronizedList(ArrayList<LyricsRepository.Result>())
+            fun japaneseSong(): Boolean {
+                val jp = com.music.bitchord.data.lyrics.LyricsQuality::looksJapanese
+                return com.music.bitchord.data.lyrics.CrossScript.hasJapanese(title) ||
+                    com.music.bitchord.data.lyrics.CrossScript.hasJapanese(artist) ||
+                    com.music.bitchord.data.lyrics.CrossScript.hasJapanese(album.orEmpty()) ||
+                    keptAuto?.let(jp) == true ||
+                    lyricsProviderResults.values.any { jp(it.lines) } ||
+                    synchronized(fullAnswers) { fullAnswers.any { jp(it.lines) } }
+            }
             fun linesScore(lines: List<com.music.bitchord.data.lyrics.LyricLine>) =
-                com.music.bitchord.data.lyrics.LyricsQuality.score(lines, com.music.bitchord.data.lyrics.LyricsQuality.looksJapanese(lines), durationMs)
-            val keptScore = keptAuto?.let(::linesScore) ?: -1
+                com.music.bitchord.data.lyrics.LyricsSearchAll.score(lines, durationMs, japaneseSong())
+            // What is on screen, and how good: anything shown before the end only ever
+            // replaces it with something strictly better — never back and forth.
+            var shownScore = -1
+            fun showIfBetter(lines: List<com.music.bitchord.data.lyrics.LyricLine>, source: LyricsSource?) {
+                if (generation != lyricsGeneration || selectedLyricsSource != null || keptAuto != null) return
+                val sc = linesScore(lines)
+                if (sc <= shownScore || lines == _lyrics.value) return
+                shownScore = sc
+                _lyrics.value = lines
+                _lyricsSource.value = source
+                _lyricsChecked.value = true
+            }
             // BitChord Audio: your own lyrics files — beside the track, or in a
             // lyrics folder, found by any of the song's names (see
             // [SidecarLyrics]). First unless Settings says online goes first.
@@ -581,6 +615,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     durationText = (durationMs / 1000).let { "${it / 60}:${(it % 60).toString().padStart(2, '0')}" },
                 )
                 runCatching { com.music.bitchord.data.lyrics.LyricsSearchAll.answers(asSong) }.getOrDefault(emptyList())
+                    .also { fullAnswers += it }
             }
             val bestAuto = LyricsRepository.best(
                 videoId = videoId,
@@ -592,13 +627,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 onSourceStarted = { source -> providerStarted(generation, source) },
                 onSourceResult = { source, result -> providerFinished(generation, source, result) },
                 onBetter = { leader ->
-                    viewModelScope.launch {
-                        if (generation != lyricsGeneration || selectedLyricsSource != null) return@launch
-                        if (keptAuto != null && (linesScore(leader.result.lines) <= keptScore || leader.result.lines == keptAuto)) return@launch
-                        _lyrics.value = leader.result.lines
-                        _lyricsSource.value = leader.result.source
-                        _lyricsChecked.value = true
-                    }
+                    // Kept lyrics stay on screen until the end decides; otherwise only better replaces.
+                    viewModelScope.launch { showIfBetter(leader.result.lines, leader.result.source) }
                 },
             )
             // BitChord Audio: not word by word yet — the manual search ("Search all") is run
@@ -608,21 +638,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (generation == lyricsGeneration) {
                 stage = "the full search"
                 val all = fullSearch.await()
-                val manual = com.music.bitchord.data.lyrics.LyricsSearchAll.best(all, durationMs)
+                val manual = all.maxByOrNull { linesScore(it.lines) }
                 com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title': full search gave ${all.size} answers" +
                     (manual?.let { " — best ${it.source.label} (score ${linesScore(it.lines)}, word by word: ${it.lines.any { l -> l.isWordSynced }})" } ?: ""))
                 if (manual != null && (best == null || linesScore(manual.lines) > linesScore(best.result.lines))) {
                     best = LyricsRepository.Best(manual, LyricsRepository.Spelling(title, artist), linesScore(manual.lines))
                     com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title': the full search found better — ${manual.source.label}")
-                    if (keptAuto == null && selectedLyricsSource == null && generation == lyricsGeneration) {
-                        _lyrics.value = manual.lines
-                        _lyricsSource.value = manual.source
-                        _lyricsChecked.value = true
-                    }
+                    showIfBetter(manual.lines, manual.source)
                 }
                 // Offered in the lyrics menu like the rest.
                 all.groupBy { it.source }.forEach { (source, results) ->
-                    val top = com.music.bitchord.data.lyrics.LyricsSearchAll.best(results, durationMs) ?: return@forEach
+                    val top = results.maxByOrNull { linesScore(it.lines) } ?: return@forEach
                     if (lyricsProviderResults[source] == null) providerFinished(generation, source, top)
                 }
             }
@@ -639,12 +665,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // Only a strictly better version replaces what was kept.
                 // Anything not the app's own last choice (a pick, or kept before
                 // that was told apart) gives way only to word-by-word lyrics of the same song.
+                // Only the app's own choice gets here (mayUpgrade): your picks are final.
+                val keptScore = linesScore(keptAuto!!)
                 val pickedByYou = !com.music.bitchord.data.lyrics.LyricsKeeper.isAutoKept(videoId)
                 val sameSong = best != null && sameLyrics(best.result.lines, keptAuto!!)
                 val wordByWord = best != null && best.result.lines.any { it.isWordSynced }
-                if (best != null && best.result.lines != keptAuto && linesScore(best.result.lines) > keptScore && selectedLyricsSource == null &&
-                    (!pickedByYou || (wordByWord && sameSong))
+                if (best != null && !pickedByYou && videoId !in lyricsUpgradedThisRun &&
+                    best.result.lines.map { it.text } != keptAuto!!.map { it.text } &&
+                    linesScore(best.result.lines) > keptScore && selectedLyricsSource == null
                 ) {
+                    // Once per song per run: an upgrade saves, the save looks the song up again,
+                    // and that second look must never undo or redo it.
+                    lyricsUpgradedThisRun += videoId
                     _lyrics.value = best.result.lines
                     _lyricsSource.value = best.result.source
                     com.music.bitchord.data.lyrics.LyricsKeeper.keep(
@@ -653,7 +685,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         upgrade = true,
                     )
                     com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title' upgraded (score $keptScore → ${linesScore(best.result.lines)})")
-                } else if (selectedLyricsSource == null) {
+                } else if (selectedLyricsSource == null && _lyrics.value != keptAuto) {
                     _lyrics.value = keptAuto
                     _lyricsSource.value = null
                     if (best != null) {
@@ -677,8 +709,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             }
-            _lyrics.value = selected?.lines
-            _lyricsSource.value = selected?.source
+            if (_lyrics.value != selected?.lines) {
+                _lyrics.value = selected?.lines
+                _lyricsSource.value = selected?.source
+            }
             _lyricsChecked.value = true
             // BitChord Audio: found once, kept — not looked up again.
             selected?.let { r ->

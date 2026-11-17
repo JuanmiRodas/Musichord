@@ -83,6 +83,17 @@ object EditedLyrics {
 
     fun hasPrevious(videoId: String): Boolean = dir?.let { File(it, name(videoId) + ".prev").isFile } == true
 
+    /** The lyrics from before the last automatic upgrade, if any. */
+    fun previous(videoId: String): List<LyricLine>? {
+        val f = dir?.let { File(it, name(videoId) + ".prev") }?.takeIf { it.isFile } ?: return null
+        val text = runCatching { f.readText() }.getOrNull() ?: return null
+        return (if (WORD_STAMP.containsMatchIn(text)) EnhancedLrc.parse(text) else LrcLib.parseLrc(text)).takeIf { it.isNotEmpty() }
+    }
+
+    fun dropPrevious(videoId: String) {
+        dir?.let { File(it, name(videoId) + ".prev").delete() }
+    }
+
     /** The lyrics from before the last automatic upgrade, back in place. */
     fun restorePrevious(song: Song): Boolean {
         val f = dir?.let { File(it, name(song.videoId) + ".prev") }?.takeIf { it.isFile } ?: return false

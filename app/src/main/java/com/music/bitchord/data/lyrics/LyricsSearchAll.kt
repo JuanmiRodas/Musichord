@@ -42,14 +42,23 @@ object LyricsSearchAll {
     }
 
     /** The best of [answers] for a song of [durationMs]: word by word, then line by line, then the rest. */
-    fun best(answers: List<LyricsRepository.Result>, durationMs: Long): LyricsRepository.Result? {
+    fun best(answers: List<LyricsRepository.Result>, durationMs: Long, japaneseSong: Boolean = false): LyricsRepository.Result? {
         if (answers.isEmpty()) return null
-        val japanese = answers.any { LyricsQuality.looksJapanese(it.lines) }
+        val japanese = japaneseSong || answers.any { LyricsQuality.looksJapanese(it.lines) }
         return answers.maxByOrNull { LyricsQuality.score(it.lines, japanese, durationMs) }
     }
 
-    fun score(lines: List<LyricLine>, durationMs: Long): Int =
-        LyricsQuality.score(lines, LyricsQuality.looksJapanese(lines), durationMs)
+    /**
+     * One scale for every comparison of two lyrics of a song — on screen, kept,
+     * in the background — so two places never disagree and swap them back and
+     * forth. [japaneseSong]: the song is Japanese (its names, or any lyrics
+     * found for it, say so) — whatever these [lines] are written in.
+     */
+    fun score(lines: List<LyricLine>, durationMs: Long, japaneseSong: Boolean = false): Int =
+        LyricsQuality.score(lines, japaneseSong || LyricsQuality.looksJapanese(lines), durationMs)
+
+    fun namesJapanese(song: Song): Boolean =
+        CrossScript.hasJapanese(song.title) || CrossScript.hasJapanese(song.artist) || CrossScript.hasJapanese(song.albumName.orEmpty())
 
     /**
      * Whether two sets of lyrics are the same song — compared in traditional

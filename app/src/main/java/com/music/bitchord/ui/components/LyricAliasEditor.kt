@@ -204,7 +204,12 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
                                     .clickable {
                                         searching?.cancel()
                                         saveNames()
-                                        EditedLyrics.choose(song, r.lines)
+                                        // Kept as yours and written into the song's files too, over what was there.
+                                        if (r.lines.any { it.timeMs > 0 }) {
+                                            com.music.bitchord.data.lyrics.LyricsKeeper.keep(song, r.lines, picked = true)
+                                        } else {
+                                            EditedLyrics.choose(song, r.lines)
+                                        }
                                         com.music.bitchord.data.lyrics.LyricsKeeper.notePicked(song.videoId)
                                         onDismiss()
                                     }
