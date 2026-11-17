@@ -622,6 +622,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } else if (selectedLyricsSource == null) {
                     _lyrics.value = keptAuto
                     _lyricsSource.value = null
+                    if (best != null) {
+                        com.music.bitchord.data.TrackLog.d(
+                            "BitChord",
+                            "lyrics for '$title': the kept ones stay (kept ${keptScore}, ${best.result.source.label} ${linesScore(best.result.lines)}" +
+                                ", picked by you: $pickedByYou, same song: $sameSong, word by word: $wordByWord)",
+                        )
+                    }
                 }
                 _lyricsChecked.value = true
                 return@launch
@@ -711,8 +718,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * case ignored), so a different song under the same name isn't taken.
      */
     private fun sameLyrics(a: List<com.music.bitchord.data.lyrics.LyricLine>, b: List<com.music.bitchord.data.lyrics.LyricLine>): Boolean {
+        // BitChord Audio: Chinese-sourced copies of Japanese lyrics (KuGou, NetEase) write some
+        // kanji in their simplified forms (梦 for 夢, 远 for 遠) and break lines elsewhere; both
+        // sides are brought to traditional forms first, so the same song is still the same song
+        // and its word-by-word copy can replace the line-synced one.
+        val toTraditional = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            runCatching { android.icu.text.Transliterator.getInstance("Hans-Hant") }.getOrNull()
+        } else {
+            null
+        }
         fun pairs(lines: List<com.music.bitchord.data.lyrics.LyricLine>): Set<String> {
-            val t = lines.joinToString("") { it.text }.lowercase().filter { it.isLetterOrDigit() }
+            val raw = lines.joinToString("") { it.text }
+            val t = (toTraditional?.transliterate(raw) ?: raw).lowercase().filter { it.isLetterOrDigit() }
             return (0 until (t.length - 1).coerceAtLeast(0)).map { t.substring(it, it + 2) }.toSet()
         }
         val x = pairs(a)
