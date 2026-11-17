@@ -122,12 +122,63 @@ object Http {
         ) {
             val header = com.music.bitchord.data.webdav.WebDavAuth.authHeader
             if (!header.isNullOrBlank()) {
-                return@Interceptor chain.proceed(
-                    request.newBuilder().header("Authorization", header).build(),
-                )
+                return@Interceptor proceedWebDav(chain, request.newBuilder().header("Authorization", header).build())
             }
         }
+        if (com.music.bitchord.data.webdav.WebDavAuth.shouldAuthorize(request.url.host)) {
+            return@Interceptor proceedWebDav(chain, request)
+        }
         chain.proceed(request)
+    }
+
+    /** BitChord Audio: path prefixes known to live under the other Unicode form. */
+    private val renamedPrefixes = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * BitChord Audio: a WebDAV request whose path has accents asked for in the
+     * other Unicode form when the server says 404.
+     *
+     * A Mac writes "Música" decomposed (u + combining accent, `Mu%CC%81sica`);
+     * the same folder can be served precomposed (`M%C3%BAsica`) once it has
+     * been touched from elsewhere. Every file then answered 404 to the
+     * addresses the library had listed — the pCloud library "broke". The
+     * answer is remembered per folder, so only the first file pays the miss.
+     */
+    private fun proceedWebDav(chain: okhttp3.Interceptor.Chain, original: okhttp3.Request): okhttp3.Response {
+        var request = original
+        val url = request.url.toString()
+        renamedPrefixes.entries.firstOrNull { url.startsWith(it.key) }?.let { (from, to) ->
+            request = request.newBuilder().url(to + url.removePrefix(from)).build()
+        }
+        val response = chain.proceed(request)
+        if (response.code != 404) return response
+        val path = request.url.encodedPath
+        val decoded = runCatching { java.net.URLDecoder.decode(path.replace("+", "%2B"), "UTF-8") }.getOrNull() ?: return response
+        if (decoded.all { it.code < 128 }) return response
+        for (form in listOf(java.text.Normalizer.Form.NFC, java.text.Normalizer.Form.NFD)) {
+            val other = java.text.Normalizer.normalize(decoded, form)
+            if (other == decoded) continue
+            val otherUrl = request.url.newBuilder().encodedPath("/").apply {
+                other.trim('/').split('/').forEach { addPathSegment(it) }
+                if (decoded.endsWith("/")) addPathSegment("")
+            }.build()
+            response.close()
+            val retry = chain.proceed(request.newBuilder().url(otherUrl).build())
+            if (retry.code != 404) {
+                // Remembered from the first folder that differs, so the rest of the library
+                // under it goes straight to the right form.
+                val a = request.url.encodedPathSegments
+                val b = otherUrl.encodedPathSegments
+                val at = a.indices.firstOrNull { it < b.size && a[it] != b[it] }
+                if (at != null && at < a.size - 1) {
+                    val base = request.url.scheme + "://" + request.url.host + (if (request.url.port != okhttp3.HttpUrl.defaultPort(request.url.scheme)) ":" + request.url.port else "")
+                    renamedPrefixes[base + "/" + a.take(at + 1).joinToString("/") + "/"] =
+                        base + "/" + b.take(at + 1).joinToString("/") + "/"
+                }
+            }
+            return retry
+        }
+        return response
     }
 
     val client: OkHttpClient = OkHttpClient.Builder()

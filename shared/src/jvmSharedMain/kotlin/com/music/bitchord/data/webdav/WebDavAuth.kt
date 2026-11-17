@@ -21,6 +21,13 @@ object WebDavAuth {
         val expected = host ?: return false
         val header = authHeader ?: return false
         if (header.isBlank()) return false
-        return requestHost.equals(expected, ignoreCase = true)
+        if (requestHost.equals(expected, ignoreCase = true)) return true
+        // BitChord Audio: pCloud answers on two WebDAV hosts (webdav. for US accounts,
+        // ewebdav. for EU ones). Files listed on one stay signed in when the saved address
+        // moves to the other — they used to go out with no credentials and come back 404.
+        return isPcloud(expected) && isPcloud(requestHost)
     }
+
+    private fun isPcloud(h: String): Boolean =
+        h.equals("webdav.pcloud.com", true) || h.equals("ewebdav.pcloud.com", true)
 }

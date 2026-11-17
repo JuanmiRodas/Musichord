@@ -269,7 +269,9 @@ object WebDavRepository {
         val folders = LibraryFolders.folders.value.filter { it.enabled }
             .ifEmpty { listOf(LibraryFolders.Folder("legacy", "", url, true, LibraryFolders.Kind.BOTH)) }
         val listed = folders.mapNotNull { folder ->
-            WebDavClient.listLibrary(folder.url, username, password, maxFiles = 50_000).getOrNull()?.let { folder to it }
+            WebDavClient.listLibrary(folder.url, username, password, maxFiles = 50_000)
+                .onFailure { TrackLog.w(TAG, "WebDAV: listing ${folder.url} failed: ${it.message}") }
+                .getOrNull()?.let { folder to it }
                 ?: repaired(folder, username, password)?.let { fixed ->
                     WebDavClient.listLibrary(fixed.url, username, password, maxFiles = 50_000).getOrNull()?.let { fixed to it }
                 }
@@ -294,6 +296,13 @@ object WebDavRepository {
         listing.tables.forEach { readAliasTable(it.url, username, password) }
         siblingTables(username, password).forEach { readAliasTable(it, username, password) }
         val songs = songsOf(listing)
+        // BitChord Audio: a listing that comes back empty over a library that wasn't is a
+        // server hiccup or a moved folder, not ten thousand songs deleted: the last library stays.
+        val before = inMemory ?: saved()
+        if (songs.isEmpty() && !before.isNullOrEmpty()) {
+            TrackLog.w(TAG, "WebDAV: listing came back empty; keeping the ${before.size} songs listed before")
+            return@withContext before
+        }
         registerLyrics(listing)
         publishLyrics(listing.lyrics.map { it.url })
         inMemory = songs
@@ -343,6 +352,8 @@ object WebDavRepository {
         username: String,
         password: String,
     ): Result<Unit> = WebDavClient.testConnection(url, username, password)
+        .onFailure { TrackLog.w(TAG, "WebDAV: connection test to $url failed: ${it.message}") }
+        .onSuccess { TrackLog.d(TAG, "WebDAV: connection test to $url ok") }
 
     /**
      * A file's best guess from its name and place, for before (or without)
