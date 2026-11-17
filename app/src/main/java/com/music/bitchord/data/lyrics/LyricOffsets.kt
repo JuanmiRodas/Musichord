@@ -36,6 +36,14 @@ object LyricOffsets {
     private const val PREFS = "bitchord_lyric_offsets"
     private const val WRITE_DELAY_MS = 2_500L
 
+    /**
+     * BitChord Audio: every song's lyrics half a second early unless told
+     * otherwise — a line read a beat ahead is easier to sing than one that
+     * lands with the voice. Lyrics you timed by hand, a shift you set, and a
+     * file's own `[offset:]` are left exactly as they are.
+     */
+    const val DEFAULT_SHIFT_MS = -500L
+
     private var prefs: SharedPreferences? = null
     private val flows = ConcurrentHashMap<String, MutableStateFlow<Long>>()
     private val pending = ConcurrentHashMap<String, Job>()
@@ -48,7 +56,8 @@ object LyricOffsets {
     /** The shift for [trackId]: as set here, else its lyrics file's `[offset:]`. */
     fun flow(trackId: String): StateFlow<Long> {
         val initial = prefs?.takeIf { it.contains(trackId) }?.getLong(trackId, 0L)
-            ?: -(SidecarLyrics.fileOffset(trackId) ?: 0L)
+            ?: SidecarLyrics.fileOffset(trackId)?.let { -it }
+            ?: if (EditedLyrics.isHandTimed(trackId)) 0L else DEFAULT_SHIFT_MS
         return flows.getOrPut(trackId) { MutableStateFlow(initial) }.also {
             if (prefs?.contains(trackId) != true) it.value = initial
         }
