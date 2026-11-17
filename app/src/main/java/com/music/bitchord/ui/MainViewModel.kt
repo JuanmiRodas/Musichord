@@ -1088,6 +1088,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val song = runCatching { YtMusicRepository.resolveAudio(video.copy(isVideo = true)) }.getOrNull()
             ?.takeIf { it.videoId != video.videoId && !it.isVideo }
             ?: return null
+        return swapLike(video, song)
+    }
+
+    /** BitChord Audio: [song] liked in [video]'s place (the like moved, its spot in Liked Music kept). */
+    private suspend fun swapLike(video: Song, song: Song): Song? {
+        if (song.videoId == video.videoId) return null
         if (YtMusicRepository.rate(song.videoId, LikeStatus.LIKE).isFailure) return null
         LikeState.set(song.videoId, LikeStatus.LIKE)
         if (YtMusicRepository.rate(video.videoId, LikeStatus.INDIFFERENT).isSuccess) {
@@ -1132,6 +1138,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             android.widget.Toast.makeText(
                 app,
                 if (song != null) app.getString(R.string.song_version_done, song.title) else app.getString(R.string.song_version_none),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    /** BitChord Audio: the like of [from] moved to the version you picked ([to]). */
+    fun linkLikeTo(from: Song, to: Song) {
+        if (!requireSignIn()) return
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val done = swapLike(from, to)
+            com.music.bitchord.data.SongVersions.markTried(from.videoId)
+            android.widget.Toast.makeText(
+                app,
+                if (done != null) app.getString(R.string.song_version_done, to.title) else app.getString(R.string.like_version_failed),
                 android.widget.Toast.LENGTH_SHORT,
             ).show()
         }
@@ -1845,6 +1866,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // BitChord Audio: liked music videos become their songs, on their own and by hand.
         com.music.bitchord.data.SongVersions.manual = { useSongVersion(it) }
+        com.music.bitchord.ui.components.LikeVersionPicker.onPick = { from, to -> linkLikeTo(from, to) }
         viewModelScope.launch {
             @OptIn(kotlinx.coroutines.FlowPreview::class)
             LikedMusicCache.likedSongs.debounce(8_000).collect {

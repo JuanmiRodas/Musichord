@@ -269,6 +269,13 @@ fun SongActionsMenu(
                 accent = palette.accent,
                 onClick = { songVersion(song) },
             )
+            // …or to the version you choose, searched with terms you can change.
+            ActionRow(
+                icon = SfIcons.FilterAlt,
+                label = stringResource(R.string.like_version_title),
+                accent = palette.accent,
+                onClick = { LikeVersionPicker.open(song) },
+            )
         }
 
         // Leads the list whenever it's available: which recording is playing

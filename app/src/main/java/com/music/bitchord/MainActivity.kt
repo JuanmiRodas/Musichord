@@ -5862,6 +5862,7 @@ private fun BitChordApp(
         // pCloud's server; the region is found by trying EU, then US.
         // BitChord Audio: a song's official Latin names, by hand (from the song menu).
         com.music.bitchord.ui.components.OfficialNamesDialogHost()
+        com.music.bitchord.ui.components.LikeVersionPickerHost()
 
         if (showPcloudEditor) {
             BackHandler { showPcloudEditor = false }

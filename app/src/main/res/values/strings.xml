@@ -1680,4 +1680,7 @@
     <string name="official_names_help">The Latin name shown beside each name in another script, and used to search lyrics, videos and versions. Yours wins over the databases; leave a field empty to look it up again.</string>
     <string name="search_terms">Search terms</string>
     <string name="search_again">Search</string>
+    <string name="like_version_title">Choose the version to like…</string>
+    <string name="like_version_none">Nothing found: change the search terms</string>
+    <string name="like_version_failed">YouTube didn\'t take the like; try again</string>
 </resources>

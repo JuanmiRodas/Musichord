@@ -1768,4 +1768,7 @@
     <string name="official_names_help">El nombre en letras latinas que se muestra junto a cada nombre en otra escritura, y que se usa para buscar letras, vídeos y versiones. El tuyo manda sobre las bases de datos; deja un campo vacío para que se vuelva a buscar.</string>
     <string name="search_terms">Términos de búsqueda</string>
     <string name="search_again">Buscar</string>
+    <string name="like_version_title">Elegir la versión a la que dar me gusta…</string>
+    <string name="like_version_none">No se ha encontrado nada: cambia los términos de búsqueda</string>
+    <string name="like_version_failed">YouTube no ha aceptado el me gusta; inténtalo otra vez</string>
 </resources>
