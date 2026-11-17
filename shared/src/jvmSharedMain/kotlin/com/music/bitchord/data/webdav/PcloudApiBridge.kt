@@ -47,6 +47,7 @@ object PcloudApiBridge {
 
     @Volatile private var token: String? = null
     @Volatile private var preferredApi: String? = null
+    private val refusedUntil = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String?>>()
     @Volatile private var tokenFor: String? = null
 
     @Volatile var lastError: String? = null
@@ -67,6 +68,22 @@ object PcloudApiBridge {
     /** Whether a WebDAV answer is one the API should be asked about instead. */
     fun refusal(code: Int): Boolean = code == 404 || code == 403 || code == 401 || code == 405 || code in 500..599
 
+    /**
+     * A request with the email and password pCloud just refused: answered 401 here, without
+     * reaching pCloud — each WebDAV request is a sign-in attempt to pCloud too, and the phone
+     * playing through a library kept its address blocked. A changed password goes through.
+     */
+    fun blocked(request: Request): Response? {
+        if (!isPcloudHost(request.url.host)) return null
+        val credentials = credentials(request.header("Authorization")) ?: return null
+        val now = System.currentTimeMillis()
+        val hit = refusedUntil.entries.firstOrNull { (key, value) ->
+            key.endsWith("|" + credentials.first + "|" + credentials.second.hashCode()) && now < value.first
+        } ?: return null
+        lastError = hit.value.second
+        return synthetic(request, 401, "Unauthorized", "", "text/plain", null)
+    }
+
     /** The bridged answer to [request], or null when the API can't give one either. */
     fun answer(chain: Interceptor.Chain, request: Request): Response? {
         if (!isPcloudHost(request.url.host)) return null
@@ -77,7 +94,7 @@ object PcloudApiBridge {
         // The region's API host first, then the other (an account lives in one only).
         var api = preferredApi ?: apiHost(request.url.host)
         var auth = auth(chain, api, credentials)
-        if (auth == null) {
+        if (auth == null && lastError?.contains("(2321") == true) {
             val other = if (api.startsWith("e")) "api.pcloud.com" else "eapi.pcloud.com"
             auth(chain, other, credentials)?.let { api = other; auth = it; preferredApi = other }
         }
@@ -105,11 +122,21 @@ object PcloudApiBridge {
     private fun auth(chain: Interceptor.Chain, api: String, credentials: Pair<String, String>): String? {
         val key = api + "|" + credentials.first + "|" + credentials.second.hashCode()
         token?.takeIf { tokenFor == key }?.let { return it }
+        // A refused sign-in is not asked again with the same email and password for a
+        // while: every file request used to try again, and pCloud then blocks the
+        // phone's address for too many attempts (4000).
+        refusedUntil[key]?.let { (until, why) ->
+            if (System.currentTimeMillis() < until) {
+                lastError = why
+                return null
+            }
+        }
         val url = "https://$api/userinfo?getauth=1&username=" + enc(credentials.first) + "&password=" + enc(credentials.second)
         val result = call(chain, url) ?: return null
         val code = result["result"]?.jsonPrimitive?.intOrNull ?: -1
         if (code != 0) {
             lastError = "pCloud sign-in refused (${code}: ${result["error"]?.jsonPrimitive?.content})"
+            refusedUntil[key] = (System.currentTimeMillis() + if (code == 4000) 60 * 60_000L else 15 * 60_000L) to lastError
             return null
         }
         val t = result["auth"]?.jsonPrimitive?.content ?: return null
