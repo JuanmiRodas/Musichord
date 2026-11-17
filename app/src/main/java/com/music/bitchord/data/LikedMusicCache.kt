@@ -35,6 +35,41 @@ object LikedMusicCache {
 
     fun init(context: Context) {
         dir = File(context.filesDir, "liked_music_cache").apply { mkdirs() }
+        placements = context.getSharedPreferences("bitchord_liked_placements", Context.MODE_PRIVATE)
+    }
+
+    private var placements: android.content.SharedPreferences? = null
+
+    /**
+     * BitChord Audio: a song liked in place of its music video — YouTube files
+     * the new like at the top; here it stays where the video was, just before
+     * [before] (the like that followed the video).
+     */
+    fun place(songId: String, before: String?) {
+        placements?.edit()?.putString(songId, before ?: "")?.apply()
+    }
+
+    /** [songs] with each placed song moved back to where its video was. */
+    fun placed(songs: List<Song>): List<Song> {
+        val all = placements?.all?.takeIf { it.isNotEmpty() } ?: return songs
+        val wanted = all.mapNotNull { (k, v) -> (v as? String)?.takeIf { it.isNotEmpty() }?.let { k to it } }.toMap()
+        if (wanted.isEmpty()) return songs
+        val moving = songs.filter { it.videoId in wanted }
+        if (moving.isEmpty()) return songs
+        val out = songs.filterNot { it.videoId in wanted }.toMutableList()
+        // Placed one after another, so a song placed before another placed song lands right.
+        var pending = moving
+        repeat(3) {
+            val left = mutableListOf<Song>()
+            for (song in pending) {
+                val at = out.indexOfFirst { it.videoId == wanted[song.videoId] }
+                if (at >= 0) out.add(at, song) else left += song
+            }
+            pending = left
+            if (pending.isEmpty()) return out
+        }
+        // Whatever it followed is gone too: it keeps YouTube's place, at the top.
+        return pending + out
     }
 
     private fun file(profile: String?): File? {
@@ -80,7 +115,7 @@ object LikedMusicCache {
 
     fun save(profile: String?, songs0: List<Song>) {
         // BitChord Audio: one row per liked song, whatever the pages said.
-        val songs = songs0.distinctBy { it.videoId }
+        val songs = placed(songs0.distinctBy { it.videoId })
         if (songs.isEmpty()) return
         lastProfile = profile
         publish(songs)
@@ -114,6 +149,6 @@ object LikedMusicCache {
         val reach = fresh.size + 50
         val anchor = fresh.asReversed().firstNotNullOfOrNull { savedIndex[it.videoId]?.takeIf { i -> i < reach } } ?: return null
         val inFresh = fresh.mapTo(HashSet()) { it.videoId }
-        return (fresh + saved.drop(anchor + 1).filterNot { it.videoId in inFresh }).distinctBy { it.videoId }
+        return placed((fresh + saved.drop(anchor + 1).filterNot { it.videoId in inFresh }).distinctBy { it.videoId })
     }
 }

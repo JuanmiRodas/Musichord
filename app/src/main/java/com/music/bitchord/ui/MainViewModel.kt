@@ -1097,7 +1097,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return without.map { if (it.videoId == video.videoId) song else it }
         }
         val profile = _activeProfileId.value
-        LikedMusicCache.load(profile)?.let { LikedMusicCache.save(profile, swapIn(it.songs)) }
+        // Where the video was, for when YouTube's order (new like on top) comes back.
+        LikedMusicCache.load(profile)?.songs?.let { list ->
+            val at = list.indexOfFirst { it.videoId == video.videoId }
+            if (at >= 0) LikedMusicCache.place(song.videoId, list.drop(at + 1).firstOrNull { it.videoId != song.videoId }?.videoId)
+            LikedMusicCache.save(profile, swapIn(list))
+        }
         (_library.value as? UiState.Success)?.data?.let { library ->
             _library.value = UiState.Success(library.copy(likedSongs = swapIn(library.likedSongs)))
         }
@@ -1132,12 +1137,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * video is looked at once; a few seconds apart, so YouTube isn't hurried.
      */
     private fun swapLikedVideos(liked: List<Song>) {
-        // Off until asked for again: every swap is a new like, which YouTube puts at the top of
-        // Liked Music, so a pass over thousands of likes reorders the list. By hand only.
         if (!com.music.bitchord.data.SongVersions.automatic) return
         if (!_signedIn.value || songVersionPass?.isActive == true) return
         val versions = com.music.bitchord.data.SongVersions
-        val todo = liked.filter { versions.saysVideo(it) && !versions.tried(it.videoId) && com.music.bitchord.data.LocalLikes.isYouTubeId(it.videoId) }
+        val todo = liked.filter { versions.looksLikeVideo(it) && !versions.tried(it.videoId) && com.music.bitchord.data.LocalLikes.isYouTubeId(it.videoId) }
         if (todo.isEmpty()) return
         songVersionPass = viewModelScope.launch {
             for (video in todo.take(30)) {

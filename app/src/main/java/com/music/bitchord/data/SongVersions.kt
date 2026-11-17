@@ -33,8 +33,8 @@ object SongVersions {
     /** Only what the title says — the automatic pass never goes by the video flag alone. */
     fun saysVideo(song: Song): Boolean = VIDEO_WORDS.containsMatchIn(song.title)
 
-    /** The automatic pass: off (it reordered Liked Music on YouTube). */
-    @Volatile var automatic: Boolean = false
+    /** The automatic pass (each swap keeps the video's place in the app's Liked Music). */
+    @Volatile var automatic: Boolean = true
 
     private var prefs: SharedPreferences? = null
 
