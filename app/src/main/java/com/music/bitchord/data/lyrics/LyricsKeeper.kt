@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.music.bitchord.data.LikedMusicCache
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.webdav.LibraryFolders
 import com.music.bitchord.data.webdav.WebDavClient
@@ -230,6 +231,9 @@ object LyricsKeeper {
         running = true
         try {
             val songs = LikedMusicCache.load(LikedMusicCache.lastProfile)?.songs.orEmpty()
+            if (prefs?.getBoolean(KEY_WORD_SWEEP, false) == false) {
+                if (wordSweep(songs)) prefs?.edit()?.putBoolean(KEY_WORD_SWEEP, true)?.apply()
+            }
             val now = System.currentTimeMillis()
             val todo = songs.filter { s ->
                 !s.isVideo && !EditedLyrics.has(s.videoId) &&
@@ -351,6 +355,45 @@ object LyricsKeeper {
     }
 
     private const val KEY_RECHECKED = "kept_rechecked_v1"
+    private const val KEY_WORD_SWEEP = "word_sweep_v1"
+
+    /**
+     * BitChord Audio: once, over every liked song — the full search (as the
+     * manual "Search all") for the ones whose lyrics are not word by word yet,
+     * and for the ones never found. Word-by-word lyrics replace kept ones the
+     * app chose; ones you picked or timed only give way to word-by-word lyrics
+     * of the same song. True once every song was seen.
+     */
+    private suspend fun wordSweep(songs: List<Song>): Boolean {
+        val todo = songs.filter { s -> !s.isVideo && EditedLyrics.get(s.videoId)?.any { it.isWordSynced } != true }
+        if (todo.isEmpty()) return true
+        TrackLog.d(TAG, "lyrics: word-by-word sweep over ${todo.size} liked songs")
+        var upgraded = 0
+        var found = 0
+        for (s in todo) {
+            if (AppSettings.meteredConnection.value != false) return false
+            val kept = EditedLyrics.get(s.videoId)
+            val now = withTimeoutOrNull(60_000) { runCatching { lookUp(s) }.getOrNull() }
+            if (now != null) {
+                val duration = s.durationMillis()
+                when {
+                    kept == null -> { keep(s, now); found++ }
+                    now.any { it.isWordSynced } && now.map { it.text } != kept.map { it.text } &&
+                        LyricsSearchAll.score(now, duration) > LyricsSearchAll.score(kept, duration) &&
+                        (isAutoKept(s.videoId) || LyricsSearchAll.sameSong(now, kept)) -> {
+                        keep(s, now, upgrade = true)
+                        upgraded++
+                        TrackLog.d(TAG, "lyrics: '${s.title}' now word by word")
+                    }
+                }
+            } else if (kept == null) {
+                prefs?.edit()?.putLong(s.videoId, System.currentTimeMillis())?.apply()
+            }
+            delay(1_500)
+        }
+        TrackLog.d(TAG, "lyrics: word-by-word sweep done — $upgraded upgraded, $found newly found of ${todo.size}")
+        return true
+    }
 
     private suspend fun lookUp(s: Song): List<LyricLine>? {
         val seconds = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
@@ -371,6 +414,12 @@ object LyricsKeeper {
             sources = sources,
             order = AppSettings.lyricsSourceOrder.value,
         )
-        return best?.result?.lines?.takeIf { l -> l.any { it.timeMs > 0 } }
+        // BitChord Audio: and the manual search, as it runs by hand — the best of both.
+        val all = runCatching { LyricsSearchAll.answers(s) }.getOrDefault(emptyList())
+            .filter { r -> r.source.name !in flagged && r.lines.any { it.timeMs > 0 } }
+        val manual = LyricsSearchAll.best(all, seconds * 1000L)
+        val auto = best?.result?.takeIf { r -> r.lines.any { it.timeMs > 0 } }
+        val pick = listOfNotNull(auto, manual).maxByOrNull { LyricsSearchAll.score(it.lines, seconds * 1000L) }
+        return pick?.lines
     }
 }

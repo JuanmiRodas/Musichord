@@ -573,7 +573,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // not merely the first to answer. Shown as soon as something is found
             // and upgraded when something better comes in. See LyricsRepository.best.
             stage = "the lyrics services"
-            val best = LyricsRepository.best(
+            // BitChord Audio: the manual search ("Search all") runs alongside, exactly as
+            // it does by hand — same names, same sources — and the best of everything wins.
+            val fullSearch = async {
+                val asSong = Song(
+                    videoId = videoId, title = title, artist = artist, thumbnailUrl = null, albumName = album,
+                    durationText = (durationMs / 1000).let { "${it / 60}:${(it % 60).toString().padStart(2, '0')}" },
+                )
+                runCatching { com.music.bitchord.data.lyrics.LyricsSearchAll.answers(asSong) }.getOrDefault(emptyList())
+            }
+            val bestAuto = LyricsRepository.best(
                 videoId = videoId,
                 spellings = nameQueries.map { LyricsRepository.Spelling(it.title, it.artist) },
                 durationMs = durationMs,
@@ -592,6 +601,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 },
             )
+            // BitChord Audio: not word by word yet — the manual search ("Search all") is run
+            // as it is by hand, the same names and sources, and the best of everything is
+            // taken: a word-by-word copy only the manual search turned up was being missed.
+            var best = bestAuto
+            if (generation == lyricsGeneration) {
+                stage = "the full search"
+                val all = fullSearch.await()
+                val manual = com.music.bitchord.data.lyrics.LyricsSearchAll.best(all, durationMs)
+                com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title': full search gave ${all.size} answers" +
+                    (manual?.let { " — best ${it.source.label} (score ${linesScore(it.lines)}, word by word: ${it.lines.any { l -> l.isWordSynced }})" } ?: ""))
+                if (manual != null && (best == null || linesScore(manual.lines) > linesScore(best.result.lines))) {
+                    best = LyricsRepository.Best(manual, LyricsRepository.Spelling(title, artist), linesScore(manual.lines))
+                    com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title': the full search found better — ${manual.source.label}")
+                    if (keptAuto == null && selectedLyricsSource == null && generation == lyricsGeneration) {
+                        _lyrics.value = manual.lines
+                        _lyricsSource.value = manual.source
+                        _lyricsChecked.value = true
+                    }
+                }
+                // Offered in the lyrics menu like the rest.
+                all.groupBy { it.source }.forEach { (source, results) ->
+                    val top = com.music.bitchord.data.lyrics.LyricsSearchAll.best(results, durationMs) ?: return@forEach
+                    if (lyricsProviderResults[source] == null) providerFinished(generation, source, top)
+                }
+            }
             val found: LyricsRepository.Result? = best?.result
             best?.let { currentLyricsRequest = LyricsRequest(videoId, it.spelling.title, it.spelling.artist, durationMs, album) }
             com.music.bitchord.data.TrackLog.d(
