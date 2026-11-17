@@ -491,9 +491,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 keptAuto = mine
             }
-            val keptScore = keptAuto?.let {
-                com.music.bitchord.data.lyrics.LyricsQuality.score(it, com.music.bitchord.data.lyrics.LyricsQuality.looksJapanese(it), durationMs)
-            } ?: -1
+            // BitChord Audio: kept and found lyrics are weighed on the same scale — the lines
+            // alone. A search's own score carries bonuses (its source, the name it was found
+            // under) that the kept copy can't, so found lyrics always "beat" the very same lines
+            // kept: they were kept again, which restarted the lookup, which found them again —
+            // every couple of seconds, flipping the screen between script and romaji.
+            fun linesScore(lines: List<com.music.bitchord.data.lyrics.LyricLine>) =
+                com.music.bitchord.data.lyrics.LyricsQuality.score(lines, com.music.bitchord.data.lyrics.LyricsQuality.looksJapanese(lines), durationMs)
+            val keptScore = keptAuto?.let(::linesScore) ?: -1
             // BitChord Audio: your own lyrics files — beside the track, or in a
             // lyrics folder, found by any of the song's names (see
             // [SidecarLyrics]). First unless Settings says online goes first.
@@ -580,7 +585,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 onBetter = { leader ->
                     viewModelScope.launch {
                         if (generation != lyricsGeneration || selectedLyricsSource != null) return@launch
-                        if (leader.score <= keptScore) return@launch
+                        if (keptAuto != null && (linesScore(leader.result.lines) <= keptScore || leader.result.lines == keptAuto)) return@launch
                         _lyrics.value = leader.result.lines
                         _lyricsSource.value = leader.result.source
                         _lyricsChecked.value = true
@@ -603,7 +608,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val pickedByYou = !com.music.bitchord.data.lyrics.LyricsKeeper.isAutoKept(videoId)
                 val sameSong = best != null && sameLyrics(best.result.lines, keptAuto!!)
                 val wordByWord = best != null && best.result.lines.any { it.isWordSynced }
-                if (best != null && best.score > keptScore && selectedLyricsSource == null &&
+                if (best != null && best.result.lines != keptAuto && linesScore(best.result.lines) > keptScore && selectedLyricsSource == null &&
                     (!pickedByYou || (wordByWord && sameSong))
                 ) {
                     _lyrics.value = best.result.lines
@@ -613,7 +618,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         best.result.lines,
                         upgrade = true,
                     )
-                    com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title' upgraded (score $keptScore → ${best.score})")
+                    com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title' upgraded (score $keptScore → ${linesScore(best.result.lines)})")
                 } else if (selectedLyricsSource == null) {
                     _lyrics.value = keptAuto
                     _lyricsSource.value = null
