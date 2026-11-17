@@ -587,7 +587,7 @@ private fun SongRowContent(
             )
             Spacer(Modifier.height(2.dp))
             val subtitle = listOfNotNull(
-                shown.artist.takeIf { it.isNotBlank() },
+                shown.artist.takeIf { it.isNotBlank() }?.let { com.music.bitchord.data.names.DisplayNames.artist(it) },
                 song.downloadFormat,
             ).joinToString(" · ")
             val quality = if (showSourceQuality) song.sourceQualityBadge() else null

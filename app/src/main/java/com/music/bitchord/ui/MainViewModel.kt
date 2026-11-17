@@ -1847,7 +1847,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         com.music.bitchord.data.SongVersions.manual = { useSongVersion(it) }
         viewModelScope.launch {
             @OptIn(kotlinx.coroutines.FlowPreview::class)
-            LikedMusicCache.likedSongs.debounce(8_000).collect { swapLikedVideos(it) }
+            LikedMusicCache.likedSongs.debounce(8_000).collect {
+                swapLikedVideos(it)
+                // BitChord Audio: official Latin names for your likes, in the background.
+                com.music.bitchord.data.names.OfficialNames.enqueue(it)
+            }
         }
         // BitChord Audio: the lyrics shown here go to the LG TV too, when the music is on it.
         viewModelScope.launch {

@@ -238,7 +238,7 @@ internal fun FullscreenVideoPlayer(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            text = song.title,
+                            text = com.music.bitchord.data.names.DisplayNames.title(song.title, song.artist),
                             color = Color.White,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -246,7 +246,7 @@ internal fun FullscreenVideoPlayer(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = song.artist,
+                            text = com.music.bitchord.data.names.DisplayNames.artist(song.artist),
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 14.sp,
                             maxLines = 1,

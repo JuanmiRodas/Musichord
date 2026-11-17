@@ -1055,6 +1055,8 @@ class PlaybackService : MediaLibraryService() {
             // BitChord Audio: a download plays at once as it is, while a better copy is
             // fetched beside it and cross-faded in; old files go once their song is over.
             com.music.bitchord.download.DownloadUpgrader.playing = mediaItem?.mediaId
+            // BitChord Audio: the playing song's official Latin names, looked up first.
+            mediaItem?.let { com.music.bitchord.data.names.OfficialNames.now(it.toSong()) }
             com.music.bitchord.download.DownloadUpgrader.onTrackChanged(this@PlaybackService)
             mediaItem?.localConfiguration?.uri?.scheme?.let { scheme ->
                 if (scheme == "content" || scheme == "file") {

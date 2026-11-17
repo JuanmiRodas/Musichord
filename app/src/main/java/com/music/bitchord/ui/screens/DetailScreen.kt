@@ -1149,7 +1149,8 @@ private fun ReleaseHeader(
 
         Spacer(Modifier.height(20.dp))
         Text(
-            text = page.title,
+            // BitChord Audio: an album name in another script with its Latin name beside it.
+            text = if (page.type == BrowseType.ALBUM) com.music.bitchord.data.names.DisplayNames.album(page.title, credit) else page.title,
             style = MaterialTheme.typography.headlineMedium,
             color = palette.onBackground,
             textAlign = TextAlign.Center,
@@ -1541,7 +1542,7 @@ private fun ArtistHeader(
             }
         }
         if (!logoShown) Text(
-            text = page.title,
+            text = com.music.bitchord.data.names.DisplayNames.artist(page.title),
             style = MaterialTheme.typography.displayLarge,
             color = palette.onBackground,
             textAlign = TextAlign.Center,

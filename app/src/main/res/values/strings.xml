@@ -1676,4 +1676,8 @@
     <string name="pcloud_oauth_failed">pCloud didn\'t sign in: %1$s</string>
     <string name="pcloud_email_code">Code from pCloud\'s email (if it asks)</string>
     <string name="pcloud_code_sent_email">pCloud has sent you a code (by email, or SMS/app if you use two-step): write it in the last field and tap Test again</string>
+    <string name="official_names_title">Official names (Latin)</string>
+    <string name="official_names_help">The Latin name shown beside each name in another script, and used to search lyrics, videos and versions. Yours wins over the databases; leave a field empty to look it up again.</string>
+    <string name="search_terms">Search terms</string>
+    <string name="search_again">Search</string>
 </resources>

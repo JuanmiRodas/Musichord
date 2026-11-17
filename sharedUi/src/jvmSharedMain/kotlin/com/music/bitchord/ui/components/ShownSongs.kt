@@ -24,3 +24,27 @@ fun rememberShown(song: Song): Song {
     val v = ShownSongs.version.intValue
     return remember(song, v) { song.shown() }
 }
+
+/**
+ * BitChord Audio: [song] for the eye — your corrections, then every name in a
+ * non-Latin script with its Latin form beside it (see
+ * [com.music.bitchord.data.names.DisplayNames]). Only for text on screen.
+ */
+@Composable
+fun rememberDisplayed(song: Song): Song {
+    val v = ShownSongs.version.intValue
+    return remember(song, v) { song.displayed() }
+}
+
+fun Song.displayed(): Song {
+    val s = shown()
+    val names = com.music.bitchord.data.names.DisplayNames
+    return s.copy(
+        title = names.title(s.title, s.artist),
+        artist = names.artist(s.artist),
+        albumName = s.albumName?.let { names.album(it, s.artist) },
+    )
+}
+
+/** The credit as corrected, undecorated — for linking names to artists. */
+fun shownArtistOf(song: Song): String = song.shown().artist

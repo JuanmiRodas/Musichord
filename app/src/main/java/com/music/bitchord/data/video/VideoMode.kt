@@ -337,8 +337,14 @@ object VideoMode {
             // even where the strict matcher says no — a fan's upload of the real
             // video titled "Artist Title" was being left out for a cover that matched.
             val artistName = song.artist.split(',').first().trim()
-            val names = (listOf(song.title) + com.music.bitchord.data.lyrics.LyricNames.cleanTitles(song.title)).distinct()
-            val queries = (listOf("${song.title} $artistName") + names.drop(1).take(2).map { "$it $artistName" }).distinct()
+            // BitChord Audio: and under its official Latin names, from the names database.
+            val (latinTitle, latinArtist) = com.music.bitchord.data.names.OfficialNames.searchNames(song.title, song.artist)
+            val names = (listOf(song.title) + com.music.bitchord.data.lyrics.LyricNames.cleanTitles(song.title) + listOfNotNull(latinTitle)).distinct()
+            val queries = (
+                listOf("${song.title} $artistName") +
+                    names.drop(1).take(2).map { "$it $artistName" } +
+                    listOfNotNull(latinTitle?.let { "$it ${latinArtist ?: artistName}" })
+                ).distinct()
             val results = queries.flatMap { q -> runCatching { youTube(q) }.getOrDefault(emptyList()) }.distinctBy { it.videoId }
             val ranked = TrackMatcher.ranked(results, TrackMatcher.targetOf(song))
             val cores = names.map(::norm).filter { it.length >= 2 }

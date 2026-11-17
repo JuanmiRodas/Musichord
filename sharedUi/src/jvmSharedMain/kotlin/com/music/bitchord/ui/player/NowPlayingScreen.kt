@@ -4157,7 +4157,7 @@ fun NowPlayingScreen(
                                 // ("… (Live)") dissolves into the new one instead of
                                 // snapping while the rest of the switch moves around
                                 // it.
-                                val shownSong = com.music.bitchord.ui.components.rememberShown(song)
+                                val shownSong = com.music.bitchord.ui.components.rememberDisplayed(song)
                                 Crossfade(
                                     targetState = shownSong.title to shownSong.artist,
                                     // Round the fade and the marquee's edge masks, whose
@@ -4191,8 +4191,8 @@ fun NowPlayingScreen(
                                         )
                                         ArtistCreditsMarquee(
                                             text = it.second,
-                                            credits = remember(it.second, song.artists, song.artistId) {
-                                                artistCredits(it.second, song.artists, song.artistId)
+                                            credits = remember(song.artist, song.artists, song.artistId) {
+                                                artistCredits(with(song) { com.music.bitchord.ui.components.shownArtistOf(this) }, song.artists, song.artistId)
                                             },
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontWeight = FontWeight.W500,

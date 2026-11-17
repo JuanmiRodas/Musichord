@@ -247,6 +247,17 @@ fun SongActionsMenu(
             }
         }
 
+        // BitChord Audio: the official Latin names of a song in another script, by hand.
+        if (com.music.bitchord.data.names.DisplayNames.needsLatin(song.title + song.artist + song.albumName.orEmpty())) {
+            if (startsGroup()) IosMenuSeparator()
+            ActionRow(
+                icon = SfIcons.Translate,
+                label = stringResource(R.string.official_names_title),
+                accent = palette.accent,
+                onClick = { OfficialNamesEditor.open(song) },
+            )
+        }
+
         // BitChord Audio: a liked music video (or any liked song, by hand) traded for its song version.
         val songVersion = com.music.bitchord.data.SongVersions.manual
         if (liked && signedIn && songVersion != null && com.music.bitchord.data.LocalLikes.isYouTubeId(song.videoId)) {

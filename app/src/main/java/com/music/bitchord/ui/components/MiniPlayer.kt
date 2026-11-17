@@ -463,7 +463,7 @@ fun MiniPlayer(
                     fadeOverflow = true,
                 )
                 FadingLine(
-                    text = shownSong.artist,
+                    text = com.music.bitchord.data.names.DisplayNames.artist(shownSong.artist),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

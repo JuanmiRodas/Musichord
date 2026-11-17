@@ -730,6 +730,12 @@ fun Song.toMediaItem(): MediaItem {
     .setMediaMetadata(
         MediaMetadata.Builder()
             .setTitle(shown?.title ?: title)
+            // BitChord Audio: the notification and lock screen show the Latin name beside
+            // one in another script; the title itself stays as it is.
+            .setDisplayTitle(
+                com.music.bitchord.data.names.DisplayNames.title(shown?.title ?: title, shown?.artist ?: artist)
+                    .takeIf { it != (shown?.title ?: title) },
+            )
             .setArtist(shown?.artist ?: artist)
             // The release this track came off, when whoever queued it knew.
             //

@@ -435,8 +435,9 @@ internal fun LandscapeCredits(
             Column {
                 var titleOverflowing by remember { mutableStateOf(false) }
                 val artistColor = chromeWhite(0.55f)
+                val shownNames = com.music.bitchord.ui.components.rememberDisplayed(song)
                 MarqueeText(
-                    text = song.title,
+                    text = shownNames.title,
                     style = MaterialTheme.typography.titleLarge,
                     color = Color.White,
                     onOverflowChange = { titleOverflowing = it },
@@ -450,7 +451,7 @@ internal fun LandscapeCredits(
                 )
                 Spacer(Modifier.height(2.dp))
                 ArtistCreditsMarquee(
-                    text = song.artist,
+                    text = shownNames.artist,
                     credits = remember(song.artist, song.artists, song.artistId) {
                         artistCredits(song.artist, song.artists, song.artistId)
                     },

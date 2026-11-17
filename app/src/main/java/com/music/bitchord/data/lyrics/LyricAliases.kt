@@ -115,6 +115,13 @@ object LyricAliases {
         add(mine.titles.ifEmpty { listOf(title) }, mine.artists)
         add(mine.titles, listOf(artist))
         out += Query(title, artist)
+        // BitChord Audio: the official Latin names from the names database.
+        val (latinTitle, latinArtist) = com.music.bitchord.data.names.OfficialNames.searchNames(title, artist)
+        if (latinTitle != null || latinArtist != null) {
+            out += Query(latinTitle ?: title, latinArtist ?: artist)
+            if (latinTitle != null && latinArtist != null) out += Query(latinTitle, artist)
+            if (latinArtist != null && latinTitle != null) out += Query(title, latinArtist)
+        }
         // BitChord Audio: the song's own names in romaji / Japanese (see LyricNames).
         out += spellings
         add(fromFile.titles, fromFile.artists.ifEmpty { listOf(artist) })

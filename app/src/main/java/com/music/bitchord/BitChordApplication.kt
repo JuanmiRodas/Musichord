@@ -178,6 +178,13 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         com.music.bitchord.data.LikedMusicCache.init(this)
         com.music.bitchord.data.PlaylistPageCache.init(this)
         com.music.bitchord.data.SongVersions.init(this)
+        // BitChord Audio: official Latin names beside names in other scripts.
+        com.music.bitchord.data.names.OfficialNames.init(this)
+        val namesRedraw = Runnable { com.music.bitchord.ui.components.ShownSongs.bump() }
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        val redraw: () -> Unit = { mainHandler.removeCallbacks(namesRedraw); mainHandler.postDelayed(namesRedraw, 400) }
+        com.music.bitchord.data.names.OfficialNames.onChanged = redraw
+        com.music.bitchord.data.names.AutoLatin.onReady = redraw
         com.music.bitchord.data.NoRecommend.init(filesDir)
         com.music.bitchord.data.sources.SongOrigins.init(this)
         com.music.bitchord.data.video.VideoMode.init(this)

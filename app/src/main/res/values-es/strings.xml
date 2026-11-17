@@ -1764,4 +1764,8 @@
     <string name="pcloud_oauth_failed">pCloud no ha iniciado sesión: %1$s</string>
     <string name="pcloud_email_code">Código del email de pCloud (si lo pide)</string>
     <string name="pcloud_code_sent_email">pCloud te ha enviado un código (por email, o por SMS/app si usas verificación en dos pasos): escríbelo en el último campo y pulsa Probar otra vez</string>
+    <string name="official_names_title">Nombres oficiales (latino)</string>
+    <string name="official_names_help">El nombre en letras latinas que se muestra junto a cada nombre en otra escritura, y que se usa para buscar letras, vídeos y versiones. El tuyo manda sobre las bases de datos; deja un campo vacío para que se vuelva a buscar.</string>
+    <string name="search_terms">Términos de búsqueda</string>
+    <string name="search_again">Buscar</string>
 </resources>

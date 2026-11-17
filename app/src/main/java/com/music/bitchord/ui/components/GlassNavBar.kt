@@ -432,7 +432,7 @@ private fun GlassNowPlaying(
                     fadeOverflow = true,
                 )
                 FadingLine(
-                    text = shownSong.artist,
+                    text = com.music.bitchord.data.names.DisplayNames.artist(shownSong.artist),
                     style = artistStyle,
                     color = secondary,
                 )

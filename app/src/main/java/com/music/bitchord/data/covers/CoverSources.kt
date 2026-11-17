@@ -65,15 +65,35 @@ object CoverSources {
     }
 
     /** Covers for [song], grouped by place; each place gives up after a few seconds. */
-    suspend fun find(context: Context, song: Song): List<Cover> = withContext(Dispatchers.IO) {
+    /** BitChord Audio: what is searched by default — what the search field starts with. */
+    fun defaultQuery(song: Song): String {
+        val artist = song.artist.split(Regex("""\s*(?:,|&|/|;|\bfeat\.?|\bft\.?|、)\s*""", RegexOption.IGNORE_CASE)).first().trim()
+        return listOf(song.albumName?.takeIf { it.isNotBlank() } ?: song.title, artist).joinToString(" ").trim()
+    }
+
+    suspend fun find(context: Context, song: Song, custom: String? = null): List<Cover> = withContext(Dispatchers.IO) {
         val names = runCatching { JapaneseNames.of(song) }.getOrDefault(JapaneseNames.Names.NONE)
         val artist = song.artist.split(Regex("""\s*(?:,|&|/|;|\bfeat\.?|\bft\.?|、)\s*""", RegexOption.IGNORE_CASE)).first().trim()
         val album = song.albumName?.takeIf { it.isNotBlank() }
         val title = song.title.replace(Regex("""\s*[(\[（【][^)\]）】]*[)\]）】]"""), " ").trim()
         val jaArtist = names.artists.firstOrNull()
         val jaTitle = names.titles.firstOrNull()
-        val albumQueries = listOfNotNull(album?.let { "$it $artist" }, album?.let { a -> jaArtist?.let { "$a $it" } }).distinct()
-        val songQueries = listOfNotNull("$title $artist", jaTitle?.let { "$it ${jaArtist ?: artist}" }).distinct()
+        // BitChord Audio: the official Latin names too (the names database).
+        val official = com.music.bitchord.data.names.OfficialNames
+        val latinArtist = official.get(com.music.bitchord.data.names.OfficialNames.Kind.ARTIST, artist, null)?.takeIf { it.source.official }?.latin
+        val latinAlbum = album?.let { official.get(com.music.bitchord.data.names.OfficialNames.Kind.ALBUM, it, artist) }?.takeIf { it.source.official }?.latin
+        val latinTitle = official.get(com.music.bitchord.data.names.OfficialNames.Kind.TITLE, song.title, artist)?.takeIf { it.source.official }?.latin
+        val custom = custom?.trim()?.takeIf { it.isNotEmpty() }
+        val albumQueries = if (custom != null) listOf(custom) else listOfNotNull(
+            album?.let { "$it $artist" },
+            album?.let { a -> jaArtist?.let { "$a $it" } },
+            latinAlbum?.let { "$it ${latinArtist ?: artist}" },
+        ).distinct()
+        val songQueries = if (custom != null) listOf(custom) else listOfNotNull(
+            "$title $artist",
+            jaTitle?.let { "$it ${jaArtist ?: artist}" },
+            latinTitle?.let { "$it ${latinArtist ?: artist}" },
+        ).distinct()
         val online = AppSettings.meteredConnection.value != null
 
         coroutineScope {

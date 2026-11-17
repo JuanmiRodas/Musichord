@@ -98,8 +98,12 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
         chosen.clear()
         albumSongs.forEach { chosen += it.videoId }
     }
-    LaunchedEffect(song.videoId) {
-        covers = runCatching { CoverSources.find(app, song) }.getOrDefault(emptyList())
+    // BitChord Audio: the search terms can be changed and searched again.
+    var query by remember(song.videoId) { mutableStateOf(CoverSources.defaultQuery(song)) }
+    var searched by remember(song.videoId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(song.videoId, searched) {
+        covers = null
+        covers = runCatching { CoverSources.find(app, song, searched) }.getOrDefault(emptyList())
     }
 
     fun applyCover() {
@@ -154,6 +158,12 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
         text = {
             Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
                 Text("${song.title} · ${song.artist}", style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.padding(4.dp))
+                SearchTermsField(
+                    value = query,
+                    onValueChange = { query = it },
+                    onSearch = { searched = query.trim().takeIf { it.isNotEmpty() && it != CoverSources.defaultQuery(song) } },
+                )
                 Spacer(Modifier.padding(4.dp))
                 val list = covers?.filter { it.url !in broken }
                 when {
@@ -288,4 +298,22 @@ private fun albumOf(song: Song): List<Song> {
     return (mates + files)
         .filter { PreferredSource.keyOf(it.title, it.artist) != ownKey }
         .distinctBy { PreferredSource.keyOf(it.title, it.artist) ?: it.videoId }
+}
+
+
+/** BitChord Audio: search terms you can change, and a button to search with them. */
+@Composable
+fun SearchTermsField(value: String, onValueChange: (String) -> Unit, onSearch: () -> Unit) {
+    androidx.compose.material3.OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        label = { Text(stringResource(R.string.search_terms)) },
+        trailingIcon = {
+            androidx.compose.material3.TextButton(onClick = onSearch) { Text(stringResource(R.string.search_again)) }
+        },
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch() }),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

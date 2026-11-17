@@ -789,7 +789,7 @@ private fun InlineQueueRow(
                 color = if (isCurrent) Color.White else Color.White.copy(alpha = 0.92f),
             )
             Text(
-                text = song.artist,
+                text = com.music.bitchord.data.names.DisplayNames.artist(song.artist),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.55f),
                 maxLines = 1,

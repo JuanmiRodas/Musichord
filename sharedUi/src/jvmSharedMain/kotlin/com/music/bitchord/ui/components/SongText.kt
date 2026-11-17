@@ -65,16 +65,19 @@ fun ExplicitSongTitle(
     badgeColor: Color = color,
     fadeOverflow: Boolean = false,
 ) {
+    // BitChord Audio: a title in another script with its Latin name beside it.
+    val v = ShownSongs.version.intValue
+    val title = remember(song.title, song.artist, v) { com.music.bitchord.data.names.DisplayNames.title(song.title, song.artist) }
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         if (song.isExplicit == true) {
             ExplicitBadge(badgeColor)
             Spacer(Modifier.width(6.dp))
         }
         if (fadeOverflow) {
-            FadingLine(text = song.title, style = style, color = color, modifier = Modifier.weight(1f, fill = false))
+            FadingLine(text = title, style = style, color = color, modifier = Modifier.weight(1f, fill = false))
         } else {
             Text(
-                text = song.title,
+                text = title,
                 style = style,
                 color = color,
                 maxLines = 1,
