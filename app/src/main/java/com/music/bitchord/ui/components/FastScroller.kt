@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -347,45 +348,7 @@ fun FastScrollerCore(
                 .padding(
                     top = contentPadding.calculateTopPadding(),
                     bottom = contentPadding.calculateBottomPadding(),
-                )
-                .pointerInput(availableDistancePx) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-
-                        // If scrollbar is hidden or not active, do not intercept touches.
-                        if (!currentThumbVisible) {
-                            return@awaitEachGesture
-                        }
-
-                        // Check if touch position is actually on the thumb
-                        val fraction = if (currentIsDragging) currentDragFraction else currentScrollProgress()
-                        val currentThumbOffset = fraction * currentAvailableDistance
-                        val thumbTop = currentThumbOffset - touchMarginPx
-                        val thumbBottom = currentThumbOffset + thumbHeightPx + touchMarginPx
-                        val isHit = down.position.y in thumbTop..thumbBottom
-
-                        if (!isHit) {
-                            return@awaitEachGesture
-                        }
-
-                        // Touch is directly on the thumb: consume and engage dragging
-                        down.consume()
-                        isDragging = true
-                        thumbVisible = true
-                        lastScrolledIndex = null
-                        currentUpdateScroll(down.position.y)
-
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-                            change.consume()
-                            currentUpdateScroll(change.position.y)
-                        }
-                        isDragging = false
-                        lastScrolledIndex = null
-                    }
-                },
+                ),
         ) {
             FastScrollThumb(
                 isDragging = isDragging,
@@ -399,6 +362,43 @@ fun FastScrollerCore(
                         IntOffset(x = 0, y = thumbOffset)
                     },
             )
+            // BitChord Audio: only the thumb takes touches. The whole 20 dp strip used to,
+            // and it sits over every row's ⋮, which then did nothing on long lists.
+            if (thumbVisible || isDragging || thumbAlpha > 0.05f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset {
+                            val f = if (isDragging) dragFraction else scrollProgress()
+                            IntOffset(0, (f * availableDistancePx - touchMarginPx).roundToInt())
+                        }
+                        .width(20.dp)
+                        .height(with(density) { (thumbHeightPx + 2 * touchMarginPx).toDp() })
+                        .pointerInput(availableDistancePx) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                fun trackY(localY: Float): Float {
+                                    val f = if (currentIsDragging) currentDragFraction else currentScrollProgress()
+                                    return f * currentAvailableDistance - touchMarginPx + localY
+                                }
+                                down.consume()
+                                isDragging = true
+                                thumbVisible = true
+                                lastScrolledIndex = null
+                                currentUpdateScroll(trackY(down.position.y))
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    change.consume()
+                                    currentUpdateScroll(trackY(change.position.y))
+                                }
+                                isDragging = false
+                                lastScrolledIndex = null
+                            }
+                        },
+                )
+            }
         }
     }
 }
