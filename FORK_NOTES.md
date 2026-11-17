@@ -256,3 +256,14 @@ Skipped on purpose: LastWave's Widevine "module" streams.
 - Source dialog: real bitrate per result (asks each source's stream).
 - `CloudBackup.soon(name)`: local likes uploaded ~8 s after a change; merged (not only restored-when-empty) at start; un-likes leave `gone:` marks.
 - Ported from ayhamo/BitChord (fixes upstream): download name byte cut / unique .part / no overwrite on same name / delete cancels in-flight / Android-stopped fails with "tap to retry" / onIdle job claim; FGS budget catch + onTimeout; PlaylistSync per-playlist approval, 6 h catch-up, failed read keeps ask; sorted album/playlist taps queue in page order; read-ahead skips pCloud/SMB/local ids; canvas title matching keeps non-Latin letters (`ForkCanvasTitles`); Automix OOM retried ×3 after 30 s (`ForkOomRetry`).
+
+## LG webOS TV app (webos/)
+- No webOS version existed anywhere (upstream `tv/` is Android TV only). Built from upstream's web player: `web/app`
+  with `vite build --mode webos` (legacy JS for Chromium 79, CSS lowered by `web/app/webos-css.ts`), plus the JS
+  service `webos/service/service.js` that replaces the browser extension (bridge, header-setting proxy on :47615).
+- Phone link: `playback/tv/TvLink.kt` (UDP discovery on :47616, pairing code → token, raw-socket HTTP because the app
+  forbids cleartext, SSE state) and `TvSpeaker.kt` (a `RemoteSpeaker` like the watch/Cast: phone keeps the queue, TV
+  plays up to 60 tracks ahead by itself). UI in the Cast popup (`ui/components/TvSection.kt`). Lyrics shown on the
+  phone (with offset) are pushed to the TV from `MainViewModel`.
+- CI: `.github/workflows/webos.yml` → rolling pre-release `webos-latest`, asset `bitchord-tv.ipk` (never "latest", so
+  the phone updater is unaffected). Install notes in `webos/README.md`.

@@ -10,4 +10,7 @@ export const config = {
   androidAppUrl: import.meta.env.VITE_ANDROID_APP_URL || 'https://github.com/kushagrasinghx/BitChord/releases/latest',
   /** BitChord's Listen Together server. vite.config.ts refuses a production build without it. */
   partyServerUrl: import.meta.env.VITE_PARTY_SERVER_URL ?? '',
+  /** BitChord Audio: the LG TV build (webos/), where a local service stands in for the extension. */
+  platform: (import.meta.env.VITE_PLATFORM || 'web') as 'web' | 'webos',
+  localServiceUrl: import.meta.env.VITE_PLATFORM === 'webos' ? 'http://127.0.0.1:47615' : '',
 } as const;

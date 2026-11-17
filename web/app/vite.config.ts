@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig, loadEnv } from 'vite';
+import legacy from '@vitejs/plugin-legacy';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
+import { webosCss } from './webos-css.ts';
 
 // The development extension's id, pinned by its manifest `key`
 // (web/extension/dev-key/). Read at build time so the page can message it.
@@ -25,9 +27,25 @@ function requirePartyServer(mode: string): void {
 }
 
 export default defineConfig(({ command, mode }) => {
-  if (command === 'build') requirePartyServer(mode);
+  // BitChord Audio: `vite build --mode webos` is the LG TV build (webos/): loaded
+  // from files on the TV, by a Chromium as old as 79 (webOS 6), with a local
+  // service in place of the extension — see src/platform/webos.ts.
+  const webos = mode === 'webos';
+  if (command === 'build' && !webos) requirePartyServer(mode);
   return {
-    plugins: [react(), tailwindcss()],
+    ...(webos ? { base: './' } : {}),
+    plugins: [
+      react(),
+      tailwindcss(),
+      ...(webos
+        ? [
+            // No ES modules (file:// pages can't load them on the TV) and the
+            // polyfills an old Chromium needs, through SystemJS chunks.
+            legacy({ targets: ['chrome >= 79'], renderModernChunks: false }) as Plugin[],
+            webosCss(),
+          ]
+        : []),
+    ],
     define: {
       DEV_EXTENSION_ID: JSON.stringify(devExtensionId()),
     },
@@ -37,7 +55,7 @@ export default defineConfig(({ command, mode }) => {
     // AutoMix's analysis worker (playback/automix): essentia.js's 2021-era
     // Emscripten glue breaks under dep pre-bundling, and the worker is a module.
     optimizeDeps: { exclude: ['essentia.js'] },
-    worker: { format: 'es' },
+    worker: { format: webos ? 'iife' : 'es' },
     server: {
       // The extension's externally_connectable and DNR rules name this origin
       // exactly, so the port must not drift to 5174 when 5173 is busy.

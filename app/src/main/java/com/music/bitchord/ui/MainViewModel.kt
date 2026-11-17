@@ -1755,6 +1755,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // BitChord Audio: the lyrics shown here go to the LG TV too, when the music is on it.
+        viewModelScope.launch {
+            _lyrics.collect { lines -> com.music.bitchord.playback.tv.TvLink.offerLyrics(currentLyricsRequest?.videoId, lines) }
+        }
         // BitChord Audio: the notification's star uses the screen's heart.
         com.music.bitchord.data.LikeLookup.toggle = { id ->
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) { toggleLike(id) }

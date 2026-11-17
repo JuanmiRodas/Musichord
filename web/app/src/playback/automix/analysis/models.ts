@@ -166,7 +166,7 @@ export function beatSpectrogram(samples: Float32Array): { values: Float32Array; 
  * beat_this_int8.onnx also quantized the convolutions and finds no beats;
  * this one matches the float model on 99-100% of beats and every downbeat.
  */
-const BEAT_MODEL_URL = '/models/beat_this_final0_q8.onnx';
+const BEAT_MODEL_URL = `${import.meta.env.BASE_URL}models/beat_this_final0_q8.onnx`;
 const CHUNK_FRAMES = 1500;
 const BORDER_FRAMES = 6;
 const PEAK_WINDOW = 7;
@@ -325,7 +325,7 @@ export async function vocalCurve(left: Float32Array, right: Float32Array): Promi
   if (left.length <= pad + 1 || left.length !== right.length) return null;
   const frames = Math.floor((left.length + 2 * pad - VOCAL_FFT) / VOCAL_HOP) + 1;
   if (frames > VOCAL_FRAMES) return null;
-  vocalSession ??= session('/models/vocals_umxhq_int8.onnx');
+  vocalSession ??= session(`${import.meta.env.BASE_URL}models/vocals_umxhq_int8.onnx`);
   const s = await vocalSession;
   if (!s) return null;
 

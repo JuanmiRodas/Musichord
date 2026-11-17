@@ -1,0 +1,54 @@
+name: BitChord Audio for LG webOS
+
+# Builds the TV app (web player + JS service) as an .ipk and keeps it on one
+# rolling pre-release, "webos-latest", so it never shows up as the phone app's
+# latest release (the in-app updater reads releases/latest).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'webos/**'
+      - '.github/workflows/webos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: webos-ipk
+  cancel-in-progress: true
+
+jobs:
+  ipk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Tools
+        run: |
+          corepack enable
+          npm i -g @webos-tools/cli
+
+      - name: Build
+        run: |
+          webos/build.sh "1.0.${{ github.run_number }}"
+          # One fixed name, so each build replaces the asset instead of piling up.
+          cp webos/out/com.bitchord.tv_*_all.ipk webos/out/bitchord-tv.ipk
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: webos-latest
+          name: BitChord Audio for LG TV (webOS)
+          prerelease: true
+          make_latest: false
+          target_commitish: ${{ github.sha }}
+          body: |
+            BitChord Audio for LG webOS TVs, build 1.0.${{ github.run_number }}.
+            Install: see webos/README.md (Developer Mode or Homebrew Channel, then `ares-install`).
+          files: webos/out/bitchord-tv.ipk

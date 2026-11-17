@@ -1646,4 +1646,20 @@
     <string name="album_link_unlink">Unlink</string>
     <string name="fork_download_stopped">Stopped by Android; tap to retry</string>
     <string name="lyric_restore_previous">Restore previous lyrics</string>
+    <string name="tv_section">LG TV · BitChord app</string>
+    <string name="tv_searching">Looking for the BitChord app on a TV… Open it on the TV, on the same Wi-Fi.</string>
+    <string name="tv_pair_hint">Enter the code the TV shows (blue button shows it again)</string>
+    <string name="tv_pair">Pair</string>
+    <string name="tv_pair_failed">Wrong code, or the TV went away</string>
+    <string name="tv_add_address">Add a TV by its address</string>
+    <string name="tv_address_hint">192.168.1.20</string>
+    <string name="tv_add">Add</string>
+    <string name="tv_not_found">No BitChord TV app at that address</string>
+    <string name="tv_playing_on">Playing on the TV</string>
+    <string name="tv_new">New · tap to pair</string>
+    <string name="tv_show_video">Show the video on the TV</string>
+    <string name="tv_stop">Back to this phone</string>
+    <string name="tv_forget">Forget this TV</string>
+    <string name="tv_unreachable">The TV isn\'t answering. Is the BitChord app open on it?</string>
+    <string name="tv_unpaired">The TV forgot this phone: pair again</string>
 </resources>

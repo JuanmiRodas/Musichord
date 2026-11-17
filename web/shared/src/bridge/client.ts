@@ -24,7 +24,7 @@ import {
  *   on our origin relays `window.postMessage` ↔ `runtime.sendMessage`.
  */
 export interface Bridge {
-  readonly transport: 'external' | 'relay';
+  readonly transport: 'external' | 'relay' | 'local';
   call<M extends BridgeMethod>(method: M, params: ParamsOf<M>, options?: CallOptions): Promise<ResultOf<M>>;
   /**
    * The extension's pushes (auth changes now, Discord status later). Returns
@@ -229,6 +229,49 @@ export function relayBridge(target: Window = window): Bridge {
   };
 }
 
+// ---- BitChord Audio: a local service in place of the extension (LG webOS TV) ----
+
+/**
+ * The TV app's companion service (webos/service) speaks the same envelopes
+ * over HTTP on the TV itself: POST <base>/bridge. It has no event pushes (no
+ * sign-in on the TV), so subscribe is a no-op.
+ */
+export function localServiceBridge(baseUrl: string): Bridge {
+  const base = baseUrl.replace(/\/$/, '');
+  return {
+    transport: 'local',
+    call(method, params, options) {
+      const request = envelope(method, params);
+      return withDeadline(options, (settle) => {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        fetch(`${base}/bridge`, {
+          method: 'POST',
+          // text/plain keeps it a simple request: no preflight.
+          headers: { 'content-type': 'text/plain' },
+          body: JSON.stringify(request),
+          signal: controller?.signal,
+        })
+          .then((r) => r.json())
+          .then((response: unknown) => {
+            if (!isBridgeResponse(response) || response.id !== request.id) {
+              return settle({ error: new BridgeCallError('protocol', 'Malformed response from the TV service') });
+            }
+            try {
+              settle({ value: unwrap(response as BridgeResponse<typeof method>) });
+            } catch (error) {
+              settle({ error });
+            }
+          })
+          .catch((error: unknown) => settle({ error: new BridgeCallError('unavailable', String(error)) }));
+        return () => controller?.abort();
+      });
+    },
+    subscribe() {
+      return () => {};
+    },
+  };
+}
+
 // ---- Detection ----------------------------------------------------------------
 
 export interface DetectedExtension {
@@ -241,6 +284,8 @@ export interface DetectOptions {
   chromiumExtensionId?: string | undefined;
   /** How long to wait for a `ping` answer on each transport. */
   timeoutMs?: number;
+  /** BitChord Audio: a local service to try first (the TV app's), e.g. http://127.0.0.1:47615. */
+  localServiceUrl?: string | undefined;
 }
 
 /**
@@ -250,6 +295,7 @@ export interface DetectOptions {
 export async function detectExtension(options: DetectOptions = {}): Promise<DetectedExtension | null> {
   const timeoutMs = options.timeoutMs ?? 1500;
   const candidates: Bridge[] = [];
+  if (options.localServiceUrl) candidates.push(localServiceBridge(options.localServiceUrl));
   const external = options.chromiumExtensionId ? externalBridge(options.chromiumExtensionId) : null;
   if (external) candidates.push(external);
   if (typeof window !== 'undefined') candidates.push(relayBridge(window));

@@ -1,0 +1,16 @@
+{
+  "id": "com.bitchord.tv",
+  "version": "1.0.0",
+  "vendor": "BitChord",
+  "type": "web",
+  "main": "index.html",
+  "title": "BitChord Audio",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "splashBackground": "splash.png",
+  "bgColor": "#121214",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true,
+  "handlesRelaunch": true,
+  "requiredPermissions": ["time.query", "activity.operation"]
+}

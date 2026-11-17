@@ -1,0 +1,6 @@
+{
+  "name": "com.bitchord.tv.service",
+  "version": "1.0.0",
+  "description": "BitChord Audio TV companion service",
+  "main": "service.js"
+}

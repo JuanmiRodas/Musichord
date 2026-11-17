@@ -101,6 +101,8 @@ fun CastDialog(
                     PipelineRule(Modifier.padding(start = 56.dp))
                 }
             }
+            // BitChord Audio: the LG TV app, beside the Cast receivers.
+            TvSection(onConnected = {})
             if (cast.casting) {
                 CastActionRow(
                     label = stringResource(R.string.cast_stop),

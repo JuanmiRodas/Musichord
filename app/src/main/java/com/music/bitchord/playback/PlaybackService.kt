@@ -797,7 +797,13 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /** Every remote speaker, as the one the session player reports. */
-    private val speakers by lazy { Speakers(listOf(castPlayback, watchSpeaker)) }
+    /** BitChord Audio: the LG TV app as the speaker — see [com.music.bitchord.playback.tv.TvLink]. */
+    private val tvSpeaker by lazy {
+        com.music.bitchord.playback.tv.TvSpeaker(localPlayer = { player }, onChanged = { publishWidgetState() })
+            .also { com.music.bitchord.playback.tv.TvLink.speaker = it }
+    }
+
+    private val speakers by lazy { Speakers(listOf(castPlayback, watchSpeaker, tvSpeaker)) }
 
     /**
      * Binds playback to a Listen Together party, when there is one.
@@ -8244,6 +8250,8 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         WearBridge.attachStreams(null)
         WearBridge.releaseSpeaker()
+        com.music.bitchord.playback.tv.TvLink.disconnect(resumeHere = false)
+        com.music.bitchord.playback.tv.TvLink.speaker = null
         // Let go of the receiver's player but leave its session alone: a
         // service that idles out while casting is not the listener choosing to
         // stop, and the next one picks the session up where it was.

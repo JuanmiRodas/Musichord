@@ -1,0 +1,7 @@
+{
+  "id": "com.bitchord.tv.service",
+  "description": "BitChord Audio: YouTube bridge, media proxy and phone remote",
+  "services": [
+    { "name": "com.bitchord.tv.service", "description": "BitChord Audio service" }
+  ]
+}
