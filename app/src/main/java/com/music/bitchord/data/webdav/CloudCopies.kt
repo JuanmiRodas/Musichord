@@ -81,6 +81,17 @@ object CloudCopies {
     private fun seconds(s: Song): Int? = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
         ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
 
+    /** The folder of [artist] in your pCloud library, from a file of theirs already there. */
+    private fun artistDir(artist: String): String? {
+        val file = WebDavRepository.library().firstOrNull { OwnFileMatcher.sameArtist(artist, it.artist) } ?: return null
+        val url = WebDavConfig.fileUrlOf(file.videoId) ?: return null
+        val albumDir = url.substringBeforeLast('/')
+        val folderName = WebDavRepository.artistFolderOf(file.videoId)
+        // The artist folder is the album folder's parent (Artist/Album/file), or the file's own.
+        val parent = albumDir.substringBeforeLast('/')
+        return if (folderName != null && java.net.URLDecoder.decode(parent.substringAfterLast('/'), "UTF-8") == folderName) parent else albumDir
+    }
+
     fun copy(context: Context, songs: List<Song>, artist: String, title: String, playlist: Boolean) {
         val app = context.applicationContext
         if (!WebDavRepository.isConfigured()) {
@@ -118,8 +129,41 @@ object CloudCopies {
                 }
                 uri?.let { s.copy(localUri = it) }
             }
-            val folder = if (playlist) listOf("Playlists", title) else listOf(artist.ifBlank { "Unknown" }, title)
-            val summary = runCatching { WebDavUploads.upload(app, ready, folder) }
+            // Tagged first — title, artist, album, track number and the cover — so the files are
+            // whole wherever they go (a JioSaavn copy is saved without tags).
+            ready.forEachIndexed { i, s ->
+                runCatching {
+                    val cover = (com.music.bitchord.data.covers.OfflineCovers.localFor(s.thumbnailUrl ?: "")?.let { android.net.Uri.fromFile(it).toString() }
+                        ?: Downloads.savedArtwork(s.videoId)
+                        ?: s.thumbnailUrl)
+                        ?.let { url -> com.music.bitchord.data.covers.CoverWriter.fetch(url.replace(Regex("=w\\d+-h\\d+.*$"), "=w1200-h1200")) }
+                    com.music.bitchord.data.edits.TagWriter.intoDownload(
+                        app,
+                        s.localUri!!,
+                        com.music.bitchord.data.edits.TagWriter.Change(
+                            text = com.music.bitchord.data.covers.CoverTags.Text(
+                                title = s.title,
+                                artist = s.artist,
+                                album = if (playlist) s.albumName else (s.albumName ?: title),
+                                albumArtist = if (playlist) null else artist,
+                                track = if (playlist) null else (i + 1).toString(),
+                            ),
+                            cover = cover,
+                        ),
+                    )
+                }.onFailure { TrackLog.w(TAG, "cloud copy: tags for '${s.title}' failed: ${it.message}") }
+            }
+            // Into your music folder on pCloud: the artist's own folder when you have one there,
+            // else a new one in your first music folder.
+            val base = artistDir(artist)
+            val folder = when {
+                playlist -> listOf("Playlists", title)
+                base != null -> listOf(title)
+                else -> listOf(artist.ifBlank { "Unknown" }, title)
+            }
+            val root = base ?: LibraryFolders.musicFolders().firstOrNull()?.url
+            TrackLog.d(TAG, "cloud copy: '$title' into ${root ?: "the top of pCloud"} / ${folder.joinToString("/")}")
+            val summary = runCatching { WebDavUploads.upload(app, ready, folder, root?.let(WebDavConfig::normalizeUrl)) }
                 .onFailure { TrackLog.w(TAG, "cloud copy: '$title' failed: ${it.message}") }
                 .getOrNull() ?: return@launch
             TrackLog.d(TAG, "cloud copy: '$title' — ${summary.uploaded} uploaded, ${summary.skipped} skipped, ${summary.failed} failed")

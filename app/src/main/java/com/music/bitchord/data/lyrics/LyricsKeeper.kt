@@ -124,6 +124,24 @@ object LyricsKeeper {
      * better and its own were the app's choice. True when they were taken.
      */
     suspend fun adoptTwin(song: Song): Boolean {
+        // BitChord Audio: lyrics you timed by hand under any id of this song (your file, the
+        // YouTube track, a local like's link) come along first, whatever scores higher — the
+        // song playing from another copy than the one you timed it on showed none of them.
+        if (!EditedLyrics.isHandTimed(song.videoId)) {
+            val ids = LinkedHashSet<String>()
+            twinOf(song.videoId)?.let { ids += it.videoId }
+            runCatching { ids += com.music.bitchord.data.LocalLikes.sameAs(song.videoId) }
+            runCatching { ids += com.music.bitchord.data.sources.SourceMap.idsForFile(song.videoId) }
+            runCatching { com.music.bitchord.data.sources.SourceMap.entry(song.videoId)?.file?.let { ids += it } }
+            ids.remove(song.videoId)
+            val timed = ids.firstOrNull { EditedLyrics.isHandTimed(it) }
+            val lines = timed?.let { EditedLyrics.get(it) }?.takeIf { l -> l.any { it.timeMs > 0 } }
+            if (lines != null && EditedLyrics.get(song.videoId)?.map { it.text } != lines.map { it.text }) {
+                EditedLyrics.save(song, lines, besideFile = true)
+                TrackLog.d(TAG, "lyrics: '${song.title}' took the lyrics you timed on its other copy")
+                return true
+            }
+        }
         val twin = twinOf(song.videoId) ?: return false
         val theirs = EditedLyrics.get(twin.videoId)?.takeIf { l -> l.any { it.timeMs > 0 } } ?: return false
         val mine = EditedLyrics.get(song.videoId)
