@@ -493,7 +493,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // replaced only by word-by-word lyrics of the same song (and can be put back).
                 if (!com.music.bitchord.data.lyrics.LyricsKeeper.mayUpgrade(videoId) || already || durationMs <= 0L) {
                     com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title': kept ones stay (" +
-                        (if (already) "already word by word" else if (durationMs <= 0L) "no length yet" else "timed by you") + ")")
+                        (if (already) "already word by word" else if (durationMs <= 0L) "no length yet" else if (com.music.bitchord.data.lyrics.EditedLyrics.isHandTimed(videoId)) "timed by you" else "picked by you") + ")")
                     // Asked again once the length is known, so the better version is still looked for.
                     if (durationMs <= 0L && !already) lyricsFor = null
                     return@launch
