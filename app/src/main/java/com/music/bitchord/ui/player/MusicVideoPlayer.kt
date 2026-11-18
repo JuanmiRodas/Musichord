@@ -643,6 +643,8 @@ object MusicVideoEngine {
      * [InnerTubeXResolver.extractVideo]. A video that needed it is asked that
      * way from the start next time.
      */
+    private val RESOLVE_TIMEOUT_MS = 25_000L
+
     private suspend fun resolve(videoId: String, cap: Int): InnerTubeXResolver.VideoStream? {
         val skip = refused[videoId].orEmpty().toSet()
         if (videoId !in ageGated) {
@@ -686,9 +688,17 @@ object MusicVideoEngine {
                 }
                 if (loadedId != videoId) return@launch
             }
+            TrackLog.d(TAG, "video: finding the picture", about = videoId)
             val stream = try {
                 cachedStream(videoId, cap)
-                    ?: resolve(videoId, cap)?.also { streams[videoId] = Triple(it, cap, System.currentTimeMillis()) }
+                    // BitChord Audio: never waits forever — a resolve that hangs (YouTube's
+                    // player page not answering) left the picture loading for good.
+                    ?: (kotlinx.coroutines.withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { resolve(videoId, cap) } ?: run {
+                        TrackLog.w(TAG, "video: no answer in ${RESOLVE_TIMEOUT_MS / 1000}s — trying the next video", about = videoId)
+                        if (loadedId == videoId) loadedId = null
+                        loadedFor?.let { forId -> com.music.bitchord.data.video.VideoMode.failed(forId, ref) }
+                        return@launch
+                    })?.also { streams[videoId] = Triple(it, cap, System.currentTimeMillis()) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: StreamResolveException) {
