@@ -3526,7 +3526,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             // BitChord Audio: your own music by them (pCloud, your uploads) blended in.
                             if (_signedIn.value) com.music.bitchord.data.OwnLibrary.refreshUploads()
                             val merged = withContext(Dispatchers.Default) {
-                                com.music.bitchord.data.OwnLibrary.mergeArtist(page0.name, page0.songs, page0.sections, text(R.string.albums))
+                                com.music.bitchord.data.OwnLibrary.mergeArtist(page0.name.orEmpty(), page0.songs, page0.sections, text(R.string.albums))
                             }
                             val page = page0.copy(songs = merged.songs, sections = merged.sections)
                             sections = page.sections
