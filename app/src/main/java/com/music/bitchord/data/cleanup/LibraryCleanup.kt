@@ -136,7 +136,7 @@ object LibraryCleanup {
     private fun buildGroups(): List<Group> {
         val library = WebDavRepository.library().filter { WebDavConfig.isWebDavId(it.videoId) }
         return library.groupBy { dirOf(it.videoId).orEmpty() }
-            .filterKeys { it.isNotEmpty() && it !in done && !it.contains("/" + URLEncoder.encode(ARCHIVE, "UTF-8").replace("+", "%20")) && !decode(it).contains(ARCHIVE) }
+            .filterKeys { it.isNotEmpty() && !done.containsKey(it) && !it.contains("/" + URLEncoder.encode(ARCHIVE, "UTF-8").replace("+", "%20")) && !decode(it).contains(ARCHIVE) }
             .map { (dir, songs) ->
                 val files = songs.sortedWith(compareBy({ it.trackNumber ?: 999 }, { it.title })).map { s ->
                     FileInfo(
@@ -172,8 +172,8 @@ object LibraryCleanup {
     }
 
     private fun next() {
-        val g = _state.value.groups.firstOrNull { it.key !in done }
-        _state.value = _state.value.copy(current = g, proposal = null, left = _state.value.groups.count { it.key !in done })
+        val g = _state.value.groups.firstOrNull { !done.containsKey(it.key) }
+        _state.value = _state.value.copy(current = g, proposal = null, left = _state.value.groups.count { !done.containsKey(it.key) })
         if (g != null) propose(g, null)
     }
 
