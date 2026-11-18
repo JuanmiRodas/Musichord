@@ -3817,7 +3817,8 @@ fun NowPlayingScreen(
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
-                                                .clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
+                                                // Edge to edge the picture has no corners, nor does its shade.
+                                                .clip(RoundedCornerShape(bottomStart = if (videoEdge) 0.dp else 10.dp, bottomEnd = if (videoEdge) 0.dp else 10.dp))
                                                 .videoLyricsScrim(videoShade)
                                                 // BitChord Audio: the foot of the picture, in three: a tap on
                                                 // the left puts the lyrics 0.5 s earlier, on the right 0.5 s
@@ -4034,13 +4035,22 @@ fun NowPlayingScreen(
                                             } while (event.changes.any { it.pressed })
                                         }
                                     }
-                                    .combinedClickable(
-                                        enabled = !queueOpen,
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onLongClick = { sizerShown = true; sizerTouch++ },
-                                        onClick = openLyrics,
-                                    ),
+                                    // BitChord Audio: as in video mode — a tap on the left puts the
+                                    // lyrics 0.5 s earlier, on the right 0.5 s later, in the middle
+                                    // opens their options; a long press, the size.
+                                    .pointerInput(queueOpen) {
+                                        if (queueOpen) return@pointerInput
+                                        detectTapGestures(
+                                            onLongPress = { sizerShown = true; sizerTouch++ },
+                                        ) { at ->
+                                            val third = size.width / 3f
+                                            when {
+                                                at.x < third -> lyricsTranslation.nudge(-500)
+                                                at.x > third * 2 -> lyricsTranslation.nudge(500)
+                                                else -> showLyricsProviders = true
+                                            }
+                                        }
+                                    },
                             ) {
                                 VideoKaraokeLyrics(
                                     lines = if (withTranslation) lyricsTranslation.panelLines else lyricsTranslation.displayedLyrics,
@@ -4526,7 +4536,10 @@ fun NowPlayingScreen(
                     // loading, "not available", status and blank lines titleMedium's
                     // 24sp, taller again in Devanagari or Thai — so every track change
                     // (sung line → loading line) grew the deck and shrank the sleeve.
-                    Box(
+                    // BitChord Audio: the line now sits above the title (or over the video),
+                    // so this old slot under the title — and its "looking for lyrics" notes —
+                    // is gone while the lyrics are closed: the title and buttons stay put.
+                    if (lyricsOpen) Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(lyricSlotHeight),
