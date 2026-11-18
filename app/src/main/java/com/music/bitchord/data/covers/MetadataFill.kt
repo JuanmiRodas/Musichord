@@ -9,6 +9,7 @@ import com.music.bitchord.data.edits.TagWriter
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.SourceMap
+import com.music.bitchord.data.webdav.WebDavConfig
 import com.music.bitchord.data.webdav.WebDavRepository
 import com.music.bitchord.download.Downloads
 import kotlinx.coroutines.CoroutineScope
@@ -73,7 +74,68 @@ object MetadataFill {
                 delay(2_000)
             }
             if (downloads + files > 0) TrackLog.d(TAG, "metadata: filled $downloads downloads and $files pCloud files")
+            fixUnnamed(app)
         }
+    }
+
+    private val _fixed = kotlinx.coroutines.flow.MutableStateFlow(0)
+    /** Files of yours whose missing artist or album was written in this run. */
+    val fixed: kotlinx.coroutines.flow.StateFlow<Int> = _fixed
+
+    private val GENERIC = Regex("""(?i)^\s*(various( artists)?|varios( artistas)?|va|soundtracks?|ost|bandas? sonoras?|music|música|musica|compilations?|recopilatorios?|singles?|misc\.?|otros|others|downloads?|descargas)\s*$""")
+    private fun usable(name: String?) = !name.isNullOrBlank() && WebDavRepository.named(name) && !GENERIC.matches(name) && !WebDavRepository.discFolder(name)
+
+    /**
+     * Your pCloud files whose tags say "Unknown artist" (or nothing): the artist worked
+     * out from context and written into the file — the liked song it was heard to be,
+     * else the artist the other files of its folder name, else its file name or artist
+     * folder; and the album from its folder when that is missing too.
+     */
+    private suspend fun fixUnnamed(app: Context) {
+        val library = WebDavRepository.library()
+        if (library.isEmpty()) return
+        val byId = library.associateBy { it.videoId }
+        val liked = LikedMusicCache.likedSongs.value.associateBy { it.videoId }
+        val heardAs = HashMap<String, Song>()
+        SourceMap.fileLinks().forEach { (songId, fileId) ->
+            if (com.music.bitchord.playback.smart.AudioCheck.confirmed(songId, fileId)) liked[songId]?.let { heardAs[fileId] = it }
+        }
+        fun dirOf(id: String) = WebDavConfig.fileUrlOf(id)?.substringBeforeLast('/')
+        val byDir = library.groupBy { dirOf(it.videoId) }
+        var done = 0
+        for ((id, missing) in WebDavRepository.unnamedTags.entries.toList()) {
+            if (!wifi() || done >= 40) break
+            val file = byId[id] ?: continue
+            val stamp = "u:$id:" + missing.sorted().joinToString()
+            if (prefs?.getBoolean(stamp, false) == true) continue
+            val heard = heardAs[id]
+            val artist = if ("artist" in missing) {
+                heard?.artist
+                    ?: byDir[dirOf(id)].orEmpty()
+                        .filter { it.videoId != id && WebDavRepository.unnamedTags[it.videoId]?.contains("artist") != true }
+                        .groupingBy { it.artist }.eachCount().maxByOrNull { it.value }?.key
+                    ?: file.artist
+            } else null
+            val album = if ("album" in missing) heard?.albumName ?: file.albumName else null
+            val text = CoverTags.Text(
+                artist = artist?.takeIf(::usable),
+                albumArtist = artist?.takeIf(::usable)?.split(",", "&", " feat").orEmpty().firstOrNull()?.trim(),
+                album = album?.takeIf(::usable),
+            )
+            prefs?.edit()?.putBoolean(stamp, true)?.apply()
+            if (text.isEmpty) continue
+            val outcome = runCatching {
+                TagWriter.intoPcloud(app, id, TagWriter.Change(text = text, cover = heard?.let { cover(it) }))
+            }.getOrNull()
+            TrackLog.d(TAG, "metadata: '${file.title}' had no ${missing.joinToString(" or ")} — wrote ${text.artist ?: "-"} / ${text.album ?: "-"}: $outcome")
+            if (outcome is CoverWriter.Outcome.Saved) {
+                done++
+                _fixed.value = _fixed.value + 1
+                WebDavRepository.unnamedTags.remove(id)
+            }
+            delay(2_000)
+        }
+        if (done > 0) TrackLog.d(TAG, "metadata: $done files that named nobody now say who")
     }
 
     private fun text(song: Song, file: Song? = null) = CoverTags.Text(

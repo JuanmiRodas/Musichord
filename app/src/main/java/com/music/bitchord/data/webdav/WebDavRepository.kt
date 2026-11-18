@@ -380,8 +380,20 @@ object WebDavRepository {
     private val fileNameAliases = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
 
     /** [this] with whatever its file's tags say, keeping the guesses where they say nothing. */
+    /**
+     * BitChord Audio: files whose tags name nobody — "Unknown artist", "Artista desconocido",
+     * no artist at all, or no real album — with what is missing ("artist", "album"),
+     * for [com.music.bitchord.data.covers.MetadataFill] to put right in the file.
+     */
+    val unnamedTags = java.util.concurrent.ConcurrentHashMap<String, Set<String>>()
+
     private fun Song.withTags(t: RemoteTags.Tags): Song {
         val guessed = this
+        val missing = buildSet {
+            if (t.artist?.takeIf(::named) == null && t.albumArtist?.takeIf(::named) == null) add("artist")
+            if (t.album?.takeIf { named(it) && !discFolder(it) } == null) add("album")
+        }
+        if (missing.isNotEmpty()) unnamedTags[videoId] = missing else unnamedTags.remove(videoId)
         val song = copy(
             title = t.title?.takeIf(::named) ?: title,
             artist = t.artist?.takeIf(::named) ?: t.albumArtist?.takeIf(::named) ?: artist,

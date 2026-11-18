@@ -790,6 +790,12 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            val fixedTags by com.music.bitchord.data.covers.MetadataFill.fixed.collectAsStateWithLifecycle()
+                            if (fixedTags > 0) Text(
+                                text = stringResource(R.string.metadata_fixed_count, fixedTags),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                             if (p.running && p.total > 0) {
                                 androidx.compose.material3.LinearProgressIndicator(
                                     progress = { p.done.toFloat() / p.total },

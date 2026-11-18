@@ -1702,4 +1702,5 @@
     <string name="audio_check_waiting">%1$d of %2$d heard · waiting for Wi-Fi</string>
     <string name="audio_check_idle">Every link between your songs and your files is heard (like Shazam) in the background, on Wi-Fi</string>
     <string name="audio_check_counts">%1$d confirmed · %2$d other recordings unlinked · %3$d unsure</string>
+    <string name="metadata_fixed_count">%1$d files with an unknown artist or album fixed</string>
 </resources>

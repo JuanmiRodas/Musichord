@@ -1790,4 +1790,5 @@
     <string name="audio_check_waiting">%1$d de %2$d escuchadas · esperando Wi-Fi</string>
     <string name="audio_check_idle">Cada vínculo entre tus canciones y tus archivos se escucha (como Shazam) en segundo plano, con Wi-Fi</string>
     <string name="audio_check_counts">%1$d confirmadas · %2$d otras grabaciones desvinculadas · %3$d dudosas</string>
+    <string name="metadata_fixed_count">%1$d archivos con artista o álbum desconocido corregidos</string>
 </resources>
