@@ -178,7 +178,7 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                                         Text(stringResource(R.string.cleanup_nothing), style = MaterialTheme.typography.bodyMedium)
                                     }
                                 } else {
-                                    Text(p.album, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text(p.album.ifBlank { stringResource(R.string.cleanup_loose) }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                     Text(p.artist, style = MaterialTheme.typography.bodyMedium)
                                     Text(listOfNotNull(p.year, p.genre, p.source).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -197,6 +197,9 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                                     Text("${t.track ?: "–"}", Modifier.width(28.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Column(Modifier.weight(1f)) {
                                         Text(t.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (t.album != null) {
+                                            Text(listOfNotNull(t.album, t.year).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
                                         if (f != null && (f.title != t.title || f.artist != t.artist)) {
                                             Text(
                                                 "${f.title} · ${f.artist}",

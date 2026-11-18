@@ -1719,4 +1719,5 @@
     <string name="cleanup_another">Another proposal</string>
     <string name="cleanup_keep">Leave as it is</string>
     <string name="cleanup_apply">Apply</string>
+    <string name="cleanup_loose">Loose songs, each with its own release</string>
 </resources>

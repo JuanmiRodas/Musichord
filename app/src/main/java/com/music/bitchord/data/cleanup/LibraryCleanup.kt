@@ -69,7 +69,24 @@ object LibraryCleanup {
         val cover get() = files.firstNotNullOfOrNull { it.thumb }
     }
 
-    data class TrackFix(val id: String, val title: String, val artist: String, val track: Int?, val disc: Int?)
+    /** One file's fix; [album], [year] and [cover] set when it is not the folder's release (a folder of loose songs). */
+    data class TrackFix(
+        val id: String,
+        val title: String,
+        val artist: String,
+        val track: Int?,
+        val disc: Int?,
+        val album: String? = null,
+        val year: String? = null,
+        val cover: String? = null,
+    )
+
+    /** Not a release to propose: karaoke, off vocal, "originally performed by", tribute or cover compilations. */
+    private val JUNK = Regex("""(?i)karaoke|カラオケ|off[\s-]?vocal|オフボーカル|originally performed|in the style of|made famous|instrumental version|tribute|backing track|cover version|piano version|lullaby|8-?bit|music box""")
+    private fun junk(vararg s: String?) = s.any { it != null && JUNK.containsMatchIn(it) }
+
+    /** A folder that holds loose songs, not one release. */
+    private val LOOSE = Regex("""(?i)^(otros|others|misc\.?|miscellaneous|varios|singles?|sueltas?|canciones|songs|unsorted|random|extras?|downloads?|descargas)$""")
 
     data class Proposal(
         val artist: String,
@@ -234,9 +251,14 @@ object LibraryCleanup {
         ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
         val found = LinkedHashMap<String, SearchResult.Browse>()
         for (q in queries) {
+            val ownJunk = g.files.any { junk(it.title, it.album) }
             YtMusicRepository.search(q, SearchFilter.ALBUMS).getOrNull().orEmpty()
                 .filterIsInstance<SearchResult.Browse>()
                 .filter { it.item.type == BrowseType.ALBUM }
+                // Never a karaoke or cover release, unless the files themselves are one.
+                .filter { ownJunk || !junk(it.item.title, it.item.subtitle) }
+                // The folder's artist when it names one.
+                .filter { artistGuess.isBlank() || WebDavRepository.named(artistGuess).not() || OwnFileMatcher.sameArtist(artistGuess, it.item.subtitle) }
                 .forEach { found.putIfAbsent(it.item.browseId, it) }
             if (found.size >= 6) break
         }
@@ -278,17 +300,66 @@ object LibraryCleanup {
     private suspend fun proposalFor(g: Group, hint: String?): Proposal? {
         val cands = candidates(g, hint)
         val before = rejected[g.key].orEmpty()
-        if (Gemini.ready) ai(g, hint, cands, before)?.let { return it }
+        if (Gemini.ready) ai(g, hint, cands, before)?.takeIf { p -> p.album.isNotBlank() || p.tracks.any { it.album != null } }?.let { return it }
         // Without the assistant: the release whose tracks fit best, one not turned down.
         val ranked = cands.sortedByDescending { fit(g, it) }
             .filter { c -> before.none { it.ytAlbumId == c.browseId } }
-        val c = ranked.firstOrNull() ?: return null
+        val c = ranked.firstOrNull()?.takeIf { fit(g, it) >= 0.45 && !LOOSE.matches(g.path.substringAfterLast('/')) }
+            ?: return perTrack(g, hint, before)
         val parts = c.subtitle.split("•", "·").map { it.trim() }
         val artist = parts.getOrNull(1)?.takeIf { it.isNotBlank() && yearOf(it) == null } ?: g.files.first().artist
         return Proposal(
             artist = artist, albumArtist = artist, album = c.title, year = yearOf(c.subtitle), genre = null,
             coverUrl = bigCover(c.thumb), ytAlbumId = c.browseId, tracks = mapTracks(g, c, artist),
             reason = "YouTube Music", source = "YouTube Music",
+        )
+    }
+
+    /** A title made searchable: "Mirai (Corrector Yui ending 1)" → "Mirai". */
+    private fun cleanTitle(t: String) = t
+        .replace(Regex("""[(\[（【][^)\]）】]*[)\]）】]"""), " ")
+        .replace(Regex("""(?i)\b(opening|ending|op|ed|insert song|theme|tv\s*size|full\s*version|version)\b\s*\d*"""), " ")
+        .replace(Regex("""^\s*\d{1,3}[\s.\-_]+"""), " ")
+        .replace(Regex("""\s+"""), " ").trim(' ', '-', '_')
+
+    /**
+     * Each file found on its own (a folder of loose songs): the song YouTube Music has with
+     * that name — by the folder's artist, the same length, not karaoke — and its release.
+     */
+    private suspend fun perTrack(g: Group, hint: String?, before: List<Proposal>): Proposal? {
+        val folder = g.path.split('/').filter { it.isNotBlank() }
+        val context = folder.dropLast(if (LOOSE.matches(folder.lastOrNull().orEmpty())) 1 else 0).lastOrNull().orEmpty()
+        val artistGuess = g.files.map { it.artist }.filter { WebDavRepository.named(it) }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        val turnedDown = before.flatMap { p -> p.tracks.map { it.id + "|" + it.title + "|" + it.album } }.toSet()
+        val tracks = g.files.map { f ->
+            val clean = cleanTitle(f.title)
+            val queries = listOfNotNull(
+                hint?.let { "$clean $it" },
+                artistGuess?.let { "$clean $it" },
+                "$clean $context",
+                f.title,
+            ).distinct()
+            var pick: Song? = null
+            for (q in queries) {
+                val found = YtMusicRepository.search(q, SearchFilter.SONGS).getOrNull().orEmpty()
+                    .mapNotNull { (it as? SearchResult.Track)?.song ?: (it as? SearchResult.TopTrack)?.song }
+                    .filter { !junk(it.title, it.albumName) || junk(f.title) }
+                    .filter { artistGuess == null || OwnFileMatcher.sameArtist(artistGuess, it.artist) }
+                    .filter { s -> OwnFileMatcher.allKeys(s.title).any { k -> k in OwnFileMatcher.allKeys(clean) } || OwnFileMatcher.allKeys(clean).any { it in OwnFileMatcher.allKeys(s.title) } }
+                    .filter { (f.id + "|" + it.title + "|" + it.albumName) !in turnedDown }
+                pick = found.firstOrNull { s -> f.seconds != null && seconds(s)?.let { kotlin.math.abs(it - f.seconds) <= 3 } == true }
+                    ?: found.firstOrNull()
+                if (pick != null) break
+            }
+            if (pick == null) TrackFix(f.id, f.title, artistGuess ?: f.artist, f.track, null)
+            else TrackFix(f.id, pick.title, pick.artist, f.track, null, album = pick.albumName, cover = bigCover(pick.thumbnailUrl))
+        }
+        if (tracks.none { it.album != null }) return null
+        val artist = artistGuess ?: tracks.groupingBy { it.artist }.eachCount().maxByOrNull { it.value }!!.key
+        return Proposal(
+            artist = artist, albumArtist = artist, album = "", year = null, genre = null,
+            coverUrl = tracks.firstNotNullOfOrNull { it.cover }, ytAlbumId = null, tracks = tracks,
+            reason = "YouTube Music, canción por canción", source = "YouTube Music",
         )
     }
 
@@ -312,19 +383,24 @@ YouTube Music albums that may be this release: $yt
 Proposals the owner already REJECTED (do not repeat them): $no
 ${if (hint != null) "The owner adds: $hint" else ""}
 The attached image (if any) is the cover found with the files.
-Work out which official release this folder is (search the web if needed: Discogs, MusicBrainz, VGMdb, Wikipedia, YouTube Music). Use the official romanized/Latin names when the release has them, else the original. Anime soundtracks and theme songs: credit the real performing artist, not the anime.
+Work out which official release this folder is (search the web: Discogs, MusicBrainz, VGMdb, Wikipedia, Spotify, Apple Music, YouTube Music). Rules:
+- Propose releases exactly as they appear on Spotify / Apple Music (official album name, artist, year, track order).
+- NEVER propose karaoke, off vocal, instrumental, "originally performed by", tribute or cover releases unless the files themselves clearly are that.
+- Use every clue: folder names are context (an artist, an anime or game name). A title like "Mirai (Corrector Yui ending 1)" or a folder "Corrector Yui" means: find that anime's ending 1, check it matches the title, and take its official single/album, artist and year.
+- A folder named like "Otros", "Singles", "Misc" (or files clearly from different releases) holds loose songs: then give each track its own "album", "year" and "coverUrl", and set the top-level "album" to "".
+- Use the official romanized/Latin names when the release has them, else the original. Anime and game songs: credit the real performing artist, not the anime.
 Answer ONLY a JSON object:
 {"artist": "...", "albumArtist": "...", "album": "...", "year": "YYYY or null", "genre": "... or null",
  "youtubeAlbumId": "one of the ids above when it is the same release, else null",
  "coverUrl": "a direct image URL of the official cover (large) or null",
  "reason": "one short sentence, in Spanish, why",
- "tracks": [{"i": 0, "title": "...", "artist": "...", "track": 1, "disc": null}]}
+ "tracks": [{"i": 0, "title": "...", "artist": "...", "track": 1, "disc": null, "album": "only for loose songs, else null", "year": null, "coverUrl": null}]}
 Every file index must appear once in tracks.
 """.trimIndent()
         val cover = g.cover?.let { url -> runCatching { CoverWriter.fetch(url) }.getOrNull() }
         val o = Gemini.ask(prompt, cover?.bytes, cover?.mime) ?: return null
         val artist = o.optString("artist").takeIf { it.isNotBlank() && it != "null" } ?: return null
-        val album = o.optString("album").takeIf { it.isNotBlank() && it != "null" } ?: return null
+        val album = o.optString("album").takeIf { it != "null" }.orEmpty()
         val ytId = o.optString("youtubeAlbumId").takeIf { id -> cands.any { it.browseId == id } }
         val c = cands.firstOrNull { it.browseId == ytId }
         val arr = o.optJSONArray("tracks") ?: JSONArray()
@@ -338,6 +414,9 @@ Every file index must appear once in tracks.
                 t.optString("artist").takeIf { it.isNotBlank() && it != "null" } ?: artist,
                 t.optInt("track", 0).takeIf { it > 0 } ?: fallback[i].track,
                 t.optInt("disc", 0).takeIf { it > 0 },
+                album = t.optString("album").takeIf { it.isNotBlank() && it != "null" },
+                year = t.optString("year").takeIf { Regex("""\d{4}""").matches(it) },
+                cover = t.optString("coverUrl").takeIf { it.startsWith("http") },
             )
         }
         val coverUrl = o.optString("coverUrl").takeIf { it.startsWith("http") }
@@ -347,7 +426,7 @@ Every file index must appear once in tracks.
             album = album,
             year = o.optString("year").takeIf { Regex("""\d{4}""").matches(it) } ?: c?.let { yearOf(it.subtitle) },
             genre = o.optString("genre").takeIf { it.isNotBlank() && it != "null" },
-            coverUrl = bigCover(c?.thumb) ?: coverUrl ?: itunesCover(artist, album),
+            coverUrl = bigCover(c?.thumb) ?: coverUrl ?: album.takeIf { it.isNotBlank() }?.let { itunesCover(artist, it) },
             ytAlbumId = ytId,
             tracks = tracks,
             reason = o.optString("reason").takeIf { it.isNotBlank() && it != "null" } ?: "Gemini",
@@ -384,23 +463,25 @@ Every file index must appear once in tracks.
 
     private suspend fun apply(g: Group, p: Proposal) {
         val context = app ?: return
-        val cover = p.coverUrl?.let { runCatching { CoverWriter.fetch(it) }.getOrNull() }
+        val covers = HashMap<String, CoverWriter.Image?>()
+        suspend fun coverAt(url: String?) = url?.let { u -> covers.getOrPut(u) { runCatching { CoverWriter.fetch(u) }.getOrNull() } }
         val u = AppSettings.webdavUsername.value
         val pw = AppSettings.webdavPassword.value
         var ok = 0
         for (t in p.tracks) {
             val f = g.files.firstOrNull { it.id == t.id } ?: continue
             val text = CoverTags.Text(
-                title = t.title, artist = t.artist, album = p.album, albumArtist = p.albumArtist,
-                year = p.year, track = t.track?.toString(), genre = p.genre,
+                title = t.title, artist = t.artist, album = t.album ?: p.album.takeIf { it.isNotBlank() },
+                albumArtist = if (t.album != null) t.artist.split(",", "&", " feat").first().trim() else p.albumArtist,
+                year = t.year ?: p.year?.takeIf { t.album == null }, track = t.track?.toString(), genre = p.genre,
             )
             val lyrics = runCatching {
                 com.music.bitchord.download.LyricsTag.forTrack(
                     Song(videoId = t.id, title = t.title, artist = t.artist, thumbnailUrl = null,
-                        durationText = f.seconds?.let { "%d:%02d".format(it / 60, it % 60) }, albumName = p.album),
+                        durationText = f.seconds?.let { "%d:%02d".format(it / 60, it % 60) }, albumName = t.album ?: p.album),
                 )
             }.getOrNull()
-            val change = TagWriter.Change(text = text, discNumber = t.disc?.toString(), lyrics = lyrics?.let { it.enhanced ?: it.plain }, cover = cover)
+            val change = TagWriter.Change(text = text, discNumber = t.disc?.toString(), lyrics = lyrics?.let { it.enhanced ?: it.plain }, cover = coverAt(t.cover ?: p.coverUrl))
             val result = if (f.ext in LOSSLESS) toAac(context, f, change, u, pw) else when (val o = TagWriter.intoPcloud(context, f.id, change)) {
                 is CoverWriter.Outcome.Saved -> "Saved"
                 else -> o.toString()

@@ -1807,4 +1807,5 @@
     <string name="cleanup_another">Otra propuesta</string>
     <string name="cleanup_keep">Dejar como está</string>
     <string name="cleanup_apply">Aplicar</string>
+    <string name="cleanup_loose">Canciones sueltas, cada una con su lanzamiento</string>
 </resources>
