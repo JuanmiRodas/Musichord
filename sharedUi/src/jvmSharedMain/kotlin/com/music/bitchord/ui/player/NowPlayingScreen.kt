@@ -62,6 +62,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
@@ -4139,6 +4140,23 @@ fun NowPlayingScreen(
                                 .washTint({ videoWash }, { videoWashAmount }),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // BitChord Audio: the album's cover, small, before the credits. Collapsed
+                            // (lyrics or queue up) the sleeve itself sits there, so it steps aside.
+                            val compactHeader = lyricsOpen || queueOpen
+                            if (!compactHeader) {
+                                AsyncImage(
+                                    model = remoteArt ?: song.thumbnailUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .graphicsLayer { alpha = (1f - p() * 4f).coerceIn(0f, 1f) }
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .opensPage(song.albumId, onOpenAlbum),
+                                )
+                                Spacer(Modifier.width(12.dp))
+                            }
                             Column(
                                 Modifier
                                     .weight(1f)
@@ -4193,6 +4211,7 @@ fun NowPlayingScreen(
                                             text = it.first,
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontSize = 20.sp,
+                                                lineHeight = 24.sp,
                                             ),
                                             color = Color.White,
                                             enabled = scrolling,
@@ -4215,7 +4234,8 @@ fun NowPlayingScreen(
                                             },
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontWeight = FontWeight.W500,
-                                                fontSize = 20.sp,
+                                                fontSize = if (compactHeader) 20.sp else 16.sp,
+                                                lineHeight = if (compactHeader) 24.sp else 19.sp,
                                             ),
                                             color = artistColor,
                                             enabled = scrolling,
@@ -4225,9 +4245,23 @@ fun NowPlayingScreen(
                                             startDelayMillis = if (titleOverflowing) MARQUEE_ARTIST_STAGGER_MS else 0L,
                                             onOpenArtist = onOpenArtist,
                                         )
+                                        // BitChord Audio: and the album, under the artist.
+                                        val album = song.albumName?.takeIf { a -> a.isNotBlank() }
+                                        if (!compactHeader && album != null) {
+                                            MarqueeText(
+                                                text = remember(album, song.artist) { com.music.bitchord.data.names.DisplayNames.album(album, song.artist) },
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 16.sp),
+                                                color = chromeWhite(0.4f),
+                                                enabled = scrolling,
+                                                modifier = Modifier.opensPage(song.albumId, onOpenAlbum),
+                                            )
+                                        }
                                     }
                                 }
                             }
+                            // BitChord Audio: the star, video and menu sit under the timeline
+                            // now; here only while the credits are a header (lyrics, queue).
+                            if (compactHeader) {
                             Spacer(Modifier.width(10.dp))
                             // BitChord Audio: the OLED view of the lyrics — black, one line.
                             if (lyricsOpen && collapseDone && !lyrics.isNullOrEmpty()) {
@@ -4311,6 +4345,7 @@ fun NowPlayingScreen(
                                 },
                                 modifier = Modifier.menuAnchor(),
                             )
+                            }
                         }
 
                         // [lyricsOpen] asked first: a close has already hidden the
@@ -4614,6 +4649,42 @@ fun NowPlayingScreen(
                         onScrub = onScrub,
                         onScrubFinished = onScrubFinished,
                     ) {
+                    }
+                    // BitChord Audio: the song's own buttons, centred under the timeline.
+                    if (!(lyricsOpen || queueOpen)) {
+                        Row(
+                            modifier = Modifier.padding(top = 14.dp, bottom = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (PlayerPlatform.host.videoModeSupported) {
+                                CircleGlyph(
+                                    icon = Icons.Rounded.SmartDisplay,
+                                    contentDescription = stringResource(Res.string.video_mode),
+                                    onClick = { PlayerPlatform.host.toggleVideoMode(song) },
+                                    onLongClick = { PlayerPlatform.host.openVideoSearch(song) },
+                                    active = videoModeOn,
+                                    busy = videoModeOn && videoModeLooking == song.videoId,
+                                )
+                            }
+                            if (signedIn || song.localUri != null) {
+                                val liked = likeStatus == LikeStatus.LIKE
+                                CircleGlyph(
+                                    icon = if (liked) BitChordIcons.StarFilled else BitChordIcons.Star,
+                                    contentDescription = stringResource(if (liked) Res.string.remove_from_liked else Res.string.like),
+                                    onClick = onToggleLike,
+                                    active = liked,
+                                    haptic = if (liked) Haptic.ToggleOff else Haptic.ToggleOn,
+                                )
+                            }
+                            CircleGlyph(
+                                icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
+                                contentDescription = stringResource(Res.string.more),
+                                onClick = onOpenMenu,
+                                haptic = Haptic.Tap,
+                                modifier = Modifier.menuAnchor(),
+                            )
+                        }
                     }
 
                     val transport: @Composable () -> Unit = {
