@@ -370,12 +370,12 @@ internal fun PlaybackQualityLabel(
  * it what Automix's analysis is doing. Nothing at all while the setting is off.
  */
 @Composable
-internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
+internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier, withSource: Boolean = true) {
     val showNerdStats by PlayerSettings.showNerdStats.collectAsStateWithLifecycle()
     // BitChord Audio: where the song is playing from, always shown, and the
     // way into choosing another copy of it.
     if (!showNerdStats) {
-        SourceLine(song, modifier)
+        if (withSource) SourceLine(song, modifier)
         return
     }
     val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
@@ -410,7 +410,7 @@ internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
     ) {
         // BitChord Audio: one line — where it plays from and what it is,
         // measured (codec, rate, bitrate, channels) — not the same facts twice.
-        SourceLine(song, detail = nerdStats?.describe())
+        if (withSource) SourceLine(song, detail = nerdStats?.describe())
         // Only when Automix is actually switched on: otherwise this would
         // report on analysis nothing is going to use, which is noise rather
         // than a stat.
@@ -979,6 +979,32 @@ private fun OutputPartyPill(
     onParty: () -> Unit,
     /** Who's in it, before the settings page — see [ListenTogetherMembersSheet]. */
     onOpenMembers: () -> Unit,
+    /** BitChord Audio: the playing song — its source (place · format · kbps) shares the line. */
+    song: Song? = null,
+) {
+    if (song != null) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            SourceLine(song, Modifier.weight(1f, fill = false), caption = true)
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.weight(1f, fill = false), contentAlignment = Alignment.CenterEnd) {
+                OutputCaptionText(accountName, onOpenOutput, onOpenMembers, fill = false)
+            }
+        }
+        return
+    }
+    OutputCaptionText(accountName, onOpenOutput, onOpenMembers, fill = true)
+}
+
+@Composable
+private fun OutputCaptionText(
+    accountName: String?,
+    onOpenOutput: () -> Unit,
+    onOpenMembers: () -> Unit,
+    fill: Boolean,
 ) {
     val badge = rememberPartyBadge()
     val shown by PlayerSettings.showListenTogetherButton.collectAsStateWithLifecycle()
@@ -1225,8 +1251,7 @@ internal fun OutputCaption(
     val jamName = badge.hostFirstName
         ?.let { stringResource(Res.string.listen_together_jam, it) }
         ?: stringResource(Res.string.listen_together_jam_unnamed)
-    val captionModifier = Modifier
-        .fillMaxWidth(0.65f)
+    val captionModifier = (if (fill) Modifier.fillMaxWidth(0.65f) else Modifier)
         .additiveChrome(LocalPlayerChrome.current)
         .clickable { if (badge.inParty) onOpenMembers() else onOpenOutput() }
     if (!badge.inParty && (outputFormat.bitPerfect || outputFormat.dacLimited)) {
@@ -1980,7 +2005,7 @@ private fun ShimmerText(
  * from and what it is. Tapping it opens the source picker.
  */
 @Composable
-internal fun SourceLine(song: Song, modifier: Modifier = Modifier, detail: String? = null) {
+internal fun SourceLine(song: Song, modifier: Modifier = Modifier, detail: String? = null, caption: Boolean = false) {
     val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
     val snapshot = nerdStats?.takeIf { it.mediaId == null || it.mediaId == song.videoId }
     // A file of yours is read by a source with no name of its own ("Unknown").
@@ -2012,14 +2037,19 @@ internal fun SourceLine(song: Song, modifier: Modifier = Modifier, detail: Strin
                 .weight(1f, fill = false)
                 .clip(RoundedCornerShape(50))
                 .clickable { PlayerPlatform.host.chooseSource(song) }
-                .padding(horizontal = 10.dp, vertical = 4.dp),
+                .padding(horizontal = if (caption) 0.dp else 10.dp, vertical = if (caption) 0.dp else 4.dp),
         ) {
             Text(
-                text = "$text  ›",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), offset = Offset(0f, 1f), blurRadius = 4f),
-                ),
-                color = Color.White.copy(alpha = 0.8f),
+                text = if (caption) text else "$text  ›",
+                // BitChord Audio: as a caption, the device name's own type and colour.
+                style = if (caption) {
+                    MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
+                } else {
+                    MaterialTheme.typography.labelSmall.copy(
+                        shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), offset = Offset(0f, 1f), blurRadius = 4f),
+                    )
+                },
+                color = if (caption) chromeWhite(0.55f) else Color.White.copy(alpha = 0.8f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -2028,12 +2058,12 @@ internal fun SourceLine(song: Song, modifier: Modifier = Modifier, detail: Strin
         Icon(
             imageVector = Icons.Rounded.CoverIcon,
             contentDescription = "Cover",
-            tint = Color.White.copy(alpha = 0.7f),
+            tint = if (caption) chromeWhite(0.55f) else Color.White.copy(alpha = 0.7f),
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
                 .clickable { PlayerPlatform.host.chooseCover(song) }
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .size(16.dp),
+                .padding(horizontal = if (caption) 4.dp else 8.dp, vertical = if (caption) 0.dp else 4.dp)
+                .size(if (caption) 13.dp else 16.dp),
         )
     }
 }

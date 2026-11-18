@@ -1767,10 +1767,13 @@ fun NowPlayingScreen(
             modifier = Modifier.fillMaxWidth().height(20.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
+            // BitChord Audio: where the song plays from (and the cover button) on the
+            // device's line, in its type and colour.
             OutputCaption(
                 accountName = accountName,
                 onOpenOutput = openAudioOutput,
                 onOpenMembers = openListenTogetherMembers,
+                song = song,
             )
         }
     }
@@ -4700,8 +4703,9 @@ fun NowPlayingScreen(
                         )
                         // BitChord Audio: where the song plays from (and the cover
                         // button), under the controls rather than over the cover.
+                        // (Where it plays from moved to the device's line at the foot.)
                         Spacer(Modifier.height(4.dp))
-                        SleeveNerdStats(song = song, modifier = Modifier.fillMaxWidth())
+                        SleeveNerdStats(song = song, modifier = Modifier.fillMaxWidth(), withSource = false)
                     }
                     if (!hideVolumeBar) {
                         // The transport rides midway between the two blocks it
