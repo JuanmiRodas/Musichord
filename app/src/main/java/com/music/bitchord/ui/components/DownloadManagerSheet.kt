@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -257,6 +258,25 @@ fun DownloadManagerPage(
                             Text(stringResource(R.string.clear))
                         }
                     }
+                }
+
+                // BitChord Audio: over mobile data or Wi-Fi only, right here (also in Settings).
+                val wifiOnly by com.music.bitchord.data.settings.AppSettings.wifiOnlyDownloads.collectAsState()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.download_wifi_only),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    androidx.compose.material3.Switch(
+                        checked = wifiOnly,
+                        onCheckedChange = com.music.bitchord.data.settings.AppSettings::setWifiOnlyDownloads,
+                    )
                 }
 
                 // The batch's own bar, under the heading it belongs to. The

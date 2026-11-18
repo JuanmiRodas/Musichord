@@ -2042,8 +2042,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Retried when the connection comes back; a song that failed waits for the next run.
         viewModelScope.launch {
             @OptIn(kotlinx.coroutines.FlowPreview::class)
-            kotlinx.coroutines.flow.combine(LikedMusicCache.likedSongs, com.music.bitchord.data.settings.AppSettings.meteredConnection) { songs, _ -> songs }
-                .debounce(20_000)
+            kotlinx.coroutines.flow.combine(
+                LikedMusicCache.likedSongs,
+                com.music.bitchord.data.settings.AppSettings.meteredConnection,
+                com.music.bitchord.data.settings.AppSettings.wifiOnlyDownloads,
+            ) { songs, _, _ -> songs }
+                .debounce(5_000)
                 .collect { songs -> downloadAllLiked(songs) }
         }
         // BitChord Audio: covers of downloaded songs kept for offline, as likes and downloads change.
