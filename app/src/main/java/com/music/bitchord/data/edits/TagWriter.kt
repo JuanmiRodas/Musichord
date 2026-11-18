@@ -77,6 +77,9 @@ object TagWriter {
         return ok
     }
 
+    /** BitChord Audio: [change] written into a file of the app's own (a transcode being prepared). */
+    fun intoLocalFile(file: File, change: Change): Boolean = runCatching { applyToFile(file, change) }.getOrDefault(false)
+
     /** [change] written into a local [file] (a copy being prepared). */
     private fun applyToFile(file: File, change: Change): Boolean =
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use { apply(it, change) }

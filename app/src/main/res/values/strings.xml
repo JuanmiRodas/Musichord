@@ -1703,4 +1703,20 @@
     <string name="audio_check_idle">Every link between your songs and your files is heard (like Shazam) in the background, on Wi-Fi</string>
     <string name="audio_check_counts">%1$d confirmed · %2$d other recordings unlinked · %3$d unsure</string>
     <string name="metadata_fixed_count">%1$d files with an unknown artist or album fixed</string>
+    <string name="cleanup_title">Clean up the pCloud library</string>
+    <string name="cleanup_subtitle">Swipe through your albums: the assistant fixes artist, album, year, cover, lyrics and quality</string>
+    <string name="cleanup_left">%1$d albums left</string>
+    <string name="cleanup_wifi">waiting for Wi-Fi to write</string>
+    <string name="cleanup_writing">writing “%1$s”</string>
+    <string name="cleanup_done">%1$d written</string>
+    <string name="cleanup_gemini_hint">Optional: paste a free Gemini key (aistudio.google.com → Get API key) so the assistant reads the cover, searches the web and understands your notes. Without it, proposals come from YouTube Music.</string>
+    <string name="cleanup_gemini_key">Gemini API key</string>
+    <string name="cleanup_all_done">Every album folder has been reviewed.</string>
+    <string name="cleanup_thinking">Looking for this release…</string>
+    <string name="cleanup_nothing">No proposal found. Write a hint below and swipe left.</string>
+    <string name="cleanup_lossless">Lossless files: made into AAC 320 kbps; the originals go to the “_Archivo BitChord” folder</string>
+    <string name="cleanup_hint">Hint for the assistant (artist, anime, year…)</string>
+    <string name="cleanup_another">Another proposal</string>
+    <string name="cleanup_keep">Leave as it is</string>
+    <string name="cleanup_apply">Apply</string>
 </resources>

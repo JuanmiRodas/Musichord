@@ -766,6 +766,16 @@ fun SettingsScreen(
                     onCheckedChange = com.music.bitchord.data.webdav.CloudCopies::setWifiOnly,
                 )
             }
+            // BitChord Audio: the pCloud library cleanup, card by card.
+            val cleanupTitle = stringResource(R.string.cleanup_title)
+            row(cleanupTitle, "pcloud", "metadata", "tags", "gemini") {
+                SettingsRow(
+                    icon = androidx.compose.material.icons.Icons.Rounded.AutoFixHigh,
+                    title = cleanupTitle,
+                    subtitle = stringResource(R.string.cleanup_subtitle),
+                    onClick = { com.music.bitchord.ui.components.LibraryReview.open() },
+                )
+            }
             // BitChord Audio: the background listening check of your library's links (read only).
             val checkTitle = stringResource(R.string.audio_check_title)
             row(checkTitle, "shazam", "library", "pcloud") {

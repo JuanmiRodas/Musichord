@@ -5882,6 +5882,7 @@ private fun BitChordApp(
                 viewModel.openDetail(id, "", "", null, BrowseType.ARTIST)
             }
         }
+        com.music.bitchord.ui.components.LibraryReviewHost()
         com.music.bitchord.ui.components.AppearsOnHost(
             onOpenAlbum = { id, title, cover -> viewModel.openDetail(id, title, "", cover, BrowseType.ALBUM) },
             onPlay = { s -> playFrom(listOf(s), 0, QueueSource(s.title, PlaybackSourceType.SEARCH)) },

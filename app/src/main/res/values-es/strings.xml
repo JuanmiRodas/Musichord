@@ -1791,4 +1791,20 @@
     <string name="audio_check_idle">Cada vínculo entre tus canciones y tus archivos se escucha (como Shazam) en segundo plano, con Wi-Fi</string>
     <string name="audio_check_counts">%1$d confirmadas · %2$d otras grabaciones desvinculadas · %3$d dudosas</string>
     <string name="metadata_fixed_count">%1$d archivos con artista o álbum desconocido corregidos</string>
+    <string name="cleanup_title">Limpiar la biblioteca de pCloud</string>
+    <string name="cleanup_subtitle">Desliza por tus álbumes: el asistente corrige artista, álbum, año, portada, letras y calidad</string>
+    <string name="cleanup_left">Quedan %1$d álbumes</string>
+    <string name="cleanup_wifi">esperando Wi-Fi para escribir</string>
+    <string name="cleanup_writing">escribiendo «%1$s»</string>
+    <string name="cleanup_done">%1$d escritos</string>
+    <string name="cleanup_gemini_hint">Opcional: pega una clave gratuita de Gemini (aistudio.google.com → Get API key) para que el asistente mire la portada, busque en internet y entienda tus notas. Sin ella, las propuestas salen de YouTube Music.</string>
+    <string name="cleanup_gemini_key">Clave de API de Gemini</string>
+    <string name="cleanup_all_done">Todas las carpetas de álbumes están revisadas.</string>
+    <string name="cleanup_thinking">Buscando este lanzamiento…</string>
+    <string name="cleanup_nothing">No encontré ninguna propuesta. Escribe una pista abajo y desliza a la izquierda.</string>
+    <string name="cleanup_lossless">Archivos sin pérdida: se pasan a AAC 320 kbps; los originales van a la carpeta «_Archivo BitChord»</string>
+    <string name="cleanup_hint">Pista para el asistente (artista, anime, año…)</string>
+    <string name="cleanup_another">Otra propuesta</string>
+    <string name="cleanup_keep">Dejar como está</string>
+    <string name="cleanup_apply">Aplicar</string>
 </resources>
