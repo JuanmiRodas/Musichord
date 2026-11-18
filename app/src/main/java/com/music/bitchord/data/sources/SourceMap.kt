@@ -245,10 +245,12 @@ object SourceMap {
 
     fun record(videoId: String, file: Song?) {
         if (!WebDavConfig.isConfigured(AppSettings.webdavUrl.value)) return
-        val rank = file?.let { OwnFileMatcher.qualityRank(it) } ?: 0
+        // BitChord Audio: a file heard to be another recording is never this song.
+        val heard = file?.takeIf { !com.music.bitchord.playback.smart.AudioCheck.rejected(videoId, it.videoId) }
+        val rank = heard?.let { OwnFileMatcher.qualityRank(it) } ?: 0
         val old = entries[videoId]
         entries[videoId] = Entry(
-            file?.videoId, if (rank >= 9_000) 0 else rank, rank >= 9_000, gen(),
+            heard?.videoId, if (rank >= 9_000) 0 else rank, rank >= 9_000, gen(),
             saavn = old?.saavn, saavnChecked = old?.saavnChecked == true,
         )
     }

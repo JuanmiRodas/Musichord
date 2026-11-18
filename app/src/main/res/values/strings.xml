@@ -1697,4 +1697,9 @@
     <string name="cloud_copy_wifi_only">Copy to pCloud over Wi-Fi only</string>
     <string name="cloud_copy_waiting">“%1$s” will be copied to pCloud when you are on Wi-Fi</string>
     <string name="appears_on_looking">Looking…</string>
+    <string name="audio_check_title">Library listening check</string>
+    <string name="audio_check_running">Listening %1$d of %2$d: %3$s</string>
+    <string name="audio_check_waiting">%1$d of %2$d heard · waiting for Wi-Fi</string>
+    <string name="audio_check_idle">Every link between your songs and your files is heard (like Shazam) in the background, on Wi-Fi</string>
+    <string name="audio_check_counts">%1$d confirmed · %2$d other recordings unlinked · %3$d unsure</string>
 </resources>

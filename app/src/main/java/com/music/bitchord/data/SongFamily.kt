@@ -134,7 +134,10 @@ object SongFamily {
         albumName = o.optString("al").ifBlank { null }, albumId = o.optString("ai").ifBlank { null },
     )
 
+    @Volatile private var appContext: android.content.Context? = null
+
     fun init(context: android.content.Context) {
+        appContext = context.applicationContext
         file = java.io.File(context.filesDir, FILE)
         bg.launch { load() }
     }
@@ -182,6 +185,7 @@ object SongFamily {
             root.put("songs", songs)
             root.put("related", org.json.JSONObject().apply { related.forEach { (k, v) -> put(k, org.json.JSONArray(v.toList())) } })
             runCatching { file?.writeText(root.toString()) }
+            appContext?.let { com.music.bitchord.data.sync.SettingsSync.changed(it) }
         }
     }
 

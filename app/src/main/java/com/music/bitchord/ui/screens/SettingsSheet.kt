@@ -766,6 +766,41 @@ fun SettingsScreen(
                     onCheckedChange = com.music.bitchord.data.webdav.CloudCopies::setWifiOnly,
                 )
             }
+            // BitChord Audio: the background listening check of your library's links (read only).
+            val checkTitle = stringResource(R.string.audio_check_title)
+            row(checkTitle, "shazam", "library", "pcloud") {
+                val p by com.music.bitchord.playback.smart.AudioCheck.progress.collectAsStateWithLifecycle()
+                SettingsRow(
+                    icon = androidx.compose.material.icons.Icons.Rounded.GraphicEq,
+                    title = checkTitle,
+                    subtitleContent = {
+                        androidx.compose.foundation.layout.Column {
+                            Text(
+                                text = when {
+                                    p.running && p.current != null -> stringResource(R.string.audio_check_running, p.done, p.total, p.current!!)
+                                    p.running -> stringResource(R.string.audio_check_waiting, p.done, p.total)
+                                    else -> stringResource(R.string.audio_check_idle)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                            )
+                            Text(
+                                text = stringResource(R.string.audio_check_counts, p.same, p.different, p.unsure),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (p.running && p.total > 0) {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { p.done.toFloat() / p.total },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                )
+                            }
+                        }
+                    },
+                    value = if (p.running && p.total > 0) "${p.done * 100 / p.total} %" else null,
+                )
+            }
             val exportDownloadsTitle = stringResource(R.string.export_compatible_downloads)
             row(exportDownloadsTitle, "music folder") {
                 SettingsSubRow(

@@ -39,13 +39,15 @@ object MetadataFill {
         if (prefs == null) prefs = app.getSharedPreferences("bitchord_metadata_fill", Context.MODE_PRIVATE)
         if (job?.isActive == true) return
         job = scope.launch {
-            delay(180_000)
+            delay(60_000)
             val liked = LikedMusicCache.likedSongs.value.associateBy { it.videoId }
             var downloads = 0
             for (m in Downloads.savedMetadataSongs()) {
                 if (!wifi()) break
                 if (prefs?.getBoolean("d:" + m.videoId, false) == true) continue
                 val uri = m.localUri ?: continue
+                // Only a download heard to be this song (see AudioCheck); the rest wait for it.
+                if (!com.music.bitchord.playback.smart.AudioCheck.confirmed(m.videoId, "download:$uri")) continue
                 val info = liked[m.videoId] ?: m
                 if (runCatching { fillDownload(app, uri, info) }.getOrDefault(false)) downloads++
                 prefs?.edit()?.putBoolean("d:" + m.videoId, true)?.apply()
@@ -57,6 +59,7 @@ object MetadataFill {
                 if (prefs?.getBoolean("p:$fileId", false) == true) continue
                 val file = library[fileId] ?: continue
                 val song = liked[songId] ?: continue
+                if (!com.music.bitchord.playback.smart.AudioCheck.confirmed(songId, fileId)) continue
                 val missing = file.albumName.isNullOrBlank() || file.artist.isBlank() ||
                     file.artist.equals("unknown", true) || file.artist.contains("unknown artist", true)
                 if (missing && !song.albumName.isNullOrBlank()) {

@@ -148,6 +148,23 @@ object OwnLibrary {
 
     data class Merged(val songs: List<Song>, val sections: List<HomeShelf>)
 
+    /**
+     * YouTube Music albums of [artist]'s you like songs from that the page doesn't show
+     * (its shelf holds a handful; live albums are often left out) — most liked first.
+     */
+    private fun likedAlbumsOf(artist: String, sections: List<HomeShelf>): List<ShelfItem> {
+        val shownIds = sections.flatMap { it.items }.mapNotNull { it.browseId }.toSet()
+        val shownNames = sections.flatMap { it.items }.map { it.title }
+        return LikedMusicCache.likedSongs.value.asSequence()
+            .filter { !it.isVideo && !it.albumId.isNullOrBlank() && !it.albumName.isNullOrBlank() }
+            .filter { s -> s.artist.split(PARTS).any { OwnFileMatcher.sameArtist(artist, it) || ArtistLinks.linked(artist, OwnFileMatcher.key(it)) } }
+            .groupBy { it.albumId!! }
+            .filterKeys { it !in shownIds }
+            .filter { (_, t) -> shownNames.none { sameAlbum(it, t.first().albumName!!) } }
+            .entries.sortedByDescending { it.value.size }
+            .map { (id, t) -> ShelfItem(t.first().albumName!!, t.first().artist.split(PARTS).first(), t.firstNotNullOfOrNull { it.thumbnailUrl }, null, id) }
+    }
+
     // ── BitChord Audio: the Library tab with your music in it ─────────────────────────
 
     /**
@@ -229,9 +246,21 @@ object OwnLibrary {
      * them, and your albums not already among its shelves in its albums shelf
      * ([albumsTitle] when it has none).
      */
+    /**
+     * Whether [s] is [artist]'s: credited to them (or a name linked to theirs), or credited
+     * to nobody and filed in their folder — not another singer's album that happens to
+     * sit in their folder (an album they produced for someone else).
+     */
+    private fun isBy(s: Song, artist: String): Boolean {
+        val names = s.artist.split(PARTS).filter { it.isNotBlank() }
+        if (names.isEmpty() || names.none { WebDavRepository.named(it) }) return true
+        return names.any { n -> OwnFileMatcher.sameArtist(artist, n) || ArtistLinks.linked(artist, OwnFileMatcher.key(n)) }
+    }
+
     fun mergeArtist(artist: String, songs: List<Song>, sections: List<HomeShelf>, albumsTitle: String): Merged {
-        val mine = runCatching { songsBy(artist) }.getOrDefault(emptyList())
-        if (mine.isEmpty()) return Merged(songs, sections)
+        val mine = runCatching { songsBy(artist) }.getOrDefault(emptyList()).filter { isBy(it, artist) }
+        val likedAlbums = likedAlbumsOf(artist, sections)
+        if (mine.isEmpty() && likedAlbums.isEmpty()) return Merged(songs, sections)
         // Only songs sharing a name are weighed against each other (any script).
         val pageKeys = HashMap<String, MutableList<Song>>()
         songs.forEach { s -> OwnFileMatcher.allKeys(s.title).forEach { pageKeys.getOrPut(it) { ArrayList() } += s } }
@@ -242,8 +271,11 @@ object OwnLibrary {
             // The page's song list stays a list: your albums carry the rest.
             .take(30)
         val shown = sections.flatMap { it.items }.map { it.title }
-        val albums = mine.filter { !it.albumName.isNullOrBlank() }.groupBy { it.albumName!!.trim() }
-            .filterKeys { name -> shown.none { sameAlbum(it, name) } }
+        val albums = mine.filter { !it.albumName.isNullOrBlank() && WebDavRepository.named(it.albumName!!) && !WebDavRepository.discFolder(it.albumName!!) }
+            .groupBy { it.albumName!!.trim() }
+            .filterKeys { name -> shown.none { sameAlbum(it, name) } && likedAlbums.none { sameAlbum(it.title, name) } }
+            // Those with a cover and the most songs first; loose files without one last.
+            .entries.sortedWith(compareBy<Map.Entry<String, List<Song>>>({ e -> e.value.none { it.thumbnailUrl != null } }, { -it.value.size }))
             .mapNotNull { (name, tracks) ->
                 val id = pageOf(name, tracks) ?: return@mapNotNull null
                 val source = if (tracks.any(::isPcloud)) "pCloud" else "YouTube Music"
@@ -256,11 +288,14 @@ object OwnLibrary {
                 )
             }
         val out = sections.toMutableList()
-        if (albums.isNotEmpty()) {
+        if (albums.isNotEmpty() || likedAlbums.isNotEmpty()) {
             val i = out.indexOfFirst { s -> s.layout == ShelfLayout.CARDS && Regex("(?i)album|álbum|アルバム").containsMatchIn(s.title) }
-            // Yours first in the albums shelf: YouTube Music's carry on after (and under "See all").
-            if (i >= 0) out[i] = out[i].copy(items = albums + out[i].items)
-            else out.add(0, HomeShelf(title = albumsTitle, items = albums))
+            // The albums you like songs from (a live album YouTube Music's shelf leaves out) and
+            // your own with covers first; YouTube Music's after; covers-less files last.
+            val withCover = albums.filter { it.thumbnailUrl != null }
+            val bare = albums.filter { it.thumbnailUrl == null }
+            if (i >= 0) out[i] = out[i].copy(items = likedAlbums + withCover + out[i].items + bare)
+            else out.add(0, HomeShelf(title = albumsTitle, items = likedAlbums + withCover + bare))
         }
         if (extraSongs.isNotEmpty() || albums.isNotEmpty()) {
             TrackLog.d(TAG, "own library: '$artist' — ${extraSongs.size} of your songs and ${albums.size} of your albums added to the page")

@@ -2070,6 +2070,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
                 // BitChord Audio: every song's other performances, mapped in the background.
                 com.music.bitchord.data.SongFamily.mapAll()
+                // BitChord Audio: every link to your files heard, as Shazam would, before it is trusted.
+                com.music.bitchord.playback.smart.AudioCheck.start()
                 // BitChord Audio: missing details (album, artist, cover) filled into your files.
                 com.music.bitchord.data.covers.MetadataFill.start(getApplication())
                 // BitChord Audio: the links to your files made by the older matcher, checked once.

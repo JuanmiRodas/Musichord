@@ -821,12 +821,10 @@ fun VideoShelfCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
+        com.music.bitchord.ui.components.MarkedText(
             text = localizeCardSubtitle(item.subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = subtitleColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }

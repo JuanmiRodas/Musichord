@@ -383,9 +383,9 @@ object WebDavRepository {
     private fun Song.withTags(t: RemoteTags.Tags): Song {
         val guessed = this
         val song = copy(
-            title = t.title ?: title,
-            artist = t.artist ?: t.albumArtist ?: artist,
-            albumName = t.album ?: albumName,
+            title = t.title?.takeIf(::named) ?: title,
+            artist = t.artist?.takeIf(::named) ?: t.albumArtist?.takeIf(::named) ?: artist,
+            albumName = t.album?.takeIf { named(it) && !discFolder(it) } ?: albumName,
             trackNumber = t.trackNumber ?: trackNumber,
             durationText = t.durationMs?.let(::formatDuration) ?: durationText,
             sourceQuality = t.qualityLabel ?: sourceQuality,
@@ -545,7 +545,18 @@ object WebDavRepository {
 
     internal fun parentFolderName(fileUrl: String): String? = runCatching {
         val path = java.net.URI(fileUrl).path.orEmpty().trimEnd('/')
-        val parent = path.substringBeforeLast('/', "").substringAfterLast('/').trim()
-        URLDecoder.decode(parent, "UTF-8").takeIf { it.isNotBlank() }
+        val dir = path.substringBeforeLast('/', "")
+        val parent = URLDecoder.decode(dir.substringAfterLast('/').trim(), "UTF-8")
+        // "Album/Disc 2/01 x.flac": the album is the folder above the disc's.
+        if (discFolder(parent)) URLDecoder.decode(dir.substringBeforeLast('/', "").substringAfterLast('/').trim(), "UTF-8").takeIf { it.isNotBlank() }
+        else parent.takeIf { it.isNotBlank() }
     }.getOrNull()
+
+    /** BitChord Audio: a name that names nothing — "Unknown artist", "Unknown album", "Track 01". */
+    private val NOBODY = Regex("""(?i)^\s*(unknown(\s+(artist|album|title))?|<unknown>|desconocid[oa]|artista desconocido|álbum desconocido|various|n/?a|untitled|track\s*\d+|pista\s*\d+)\s*$""")
+    fun named(s: String) = s.isNotBlank() && !NOBODY.matches(s)
+
+    /** A disc folder or tag ("Disc 2", "CD1", "Disk 1"), not an album. */
+    private val DISC = Regex("""(?i)^\s*(disc|disk|cd|dvd|bd)\s*[-_.]?\s*\d+\s*$""")
+    fun discFolder(s: String) = DISC.matches(s)
 }

@@ -227,6 +227,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         com.music.bitchord.download.KeptPlaylists.init(this)
         com.music.bitchord.data.OwnLibrary.init(this)
         com.music.bitchord.data.SongFamily.init(this)
+        com.music.bitchord.playback.smart.AudioCheck.init(this)
         com.music.bitchord.data.webdav.CloudCopies.init(this)
         Downloads.exportExisting(this) // BitChord Audio: finishes moving downloads out to Music/BitChord
         Downloads.backfillArtwork(this) // BitChord Audio: covers for downloads saved without one

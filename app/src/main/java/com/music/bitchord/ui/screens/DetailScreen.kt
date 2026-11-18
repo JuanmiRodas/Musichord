@@ -2425,12 +2425,10 @@ private fun TopReleaseCard(
             // treatment, the artist line's: the page's own colour, partly
             // transparent.
             val secondary = palette.onBackground.copy(alpha = TOP_RELEASE_SECONDARY_ALPHA)
-            Text(
+            com.music.bitchord.ui.components.MarkedText(
                 text = item.subtitle,
                 style = MaterialTheme.typography.bodyMedium,
                 color = secondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
             // Faded out at the end of its last line, as the player's title is,
             // and set a little tighter than the scale for when it takes two.
@@ -2540,12 +2538,10 @@ private fun SectionCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
+        com.music.bitchord.ui.components.MarkedText(
             text = item.subtitle,
             style = MaterialTheme.typography.bodyMedium,
             color = palette.onBackgroundVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
