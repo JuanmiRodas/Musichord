@@ -167,7 +167,7 @@ internal class OwnFirst(
             withContext(Dispatchers.Default) { bestFor(song) }
         } ?: return items
         TrackLog.d(TAG, "own-first: '${song.title}' starts from your file", about = song.videoId)
-        return items.toMutableList().also { it[startIndex] = file.toMediaItem() }
+        return items.toMutableList().also { it[startIndex] = file.toMediaItem().withQueueIdentityOf(it[startIndex]) }
     }
 
     /** The next few items, replaced by your files while still upcoming. Main thread. */

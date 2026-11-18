@@ -6596,10 +6596,15 @@ class PlaybackService : MediaLibraryService() {
         if (count == 0) return
         val current = player.currentMediaItemIndex.coerceAtLeast(0)
         val wanted = resume.song.videoId
+        // BitChord Audio: the song under any of its ids — your file played in place of the
+        // liked track is the liked track's slot, not a stranger to put in after the cursor
+        // (which left the list cursor behind and replayed the same songs each launch).
+        val same = com.music.bitchord.data.LocalLikes.sameAs(wanted) +
+            listOfNotNull(com.music.bitchord.data.sources.SourceMap.fileSong(wanted)?.let { runCatching { com.music.bitchord.data.sources.SourceMap.likedSongFor(it)?.videoId }.getOrNull() })
         val at = (0 until count).firstOrNull { resume.entryId != null && player.getMediaItemAt(it).queueEntryId == resume.entryId }
             ?: (0 until count).minByOrNull { i ->
-                if (player.getMediaItemAt(i).mediaId == wanted) kotlin.math.abs(i - current) else Int.MAX_VALUE
-            }?.takeIf { player.getMediaItemAt(it).mediaId == wanted }
+                if (player.getMediaItemAt(i).mediaId in same) kotlin.math.abs(i - current) else Int.MAX_VALUE
+            }?.takeIf { player.getMediaItemAt(it).mediaId in same }
         if (at == null) {
             // Past the saved window: the song goes in after the restored cursor and plays from there.
             player.addMediaItem(current + 1, resume.song.toMediaItem())
@@ -6978,11 +6983,9 @@ class PlaybackService : MediaLibraryService() {
     private fun applyMusicOnly(exoPlayer: ExoPlayer, index: Int, item: MediaItem, video: Song, audio: Song) {
         TrackLog.d("BitChord", "music-only: playing '${audio.title}' (${audio.videoId})", about = video.videoId)
         YtMusicRepository.rememberVideoVersion(audio.videoId, video)
-        val replacement = QueueShuffle.withQueueMetadata(
-            audio.asMusicOnlyOf(video).toMediaItem(),
-            newCanonicalIndex = item.canonicalIndex,
-            newContextCycleId = item.contextCycleId,
-        )
+        // BitChord Audio: the slot's whole queue identity (tier and entry too), so the list
+        // cursor follows it — see [replaceInQueue].
+        val replacement = audio.asMusicOnlyOf(video).toMediaItem().withQueueIdentityOf(item)
         val isCurrent = index == exoPlayer.currentMediaItemIndex
         // Only already audible when the setting was turned on with a video
         // playing: that one is switched over like the player menu's switch.

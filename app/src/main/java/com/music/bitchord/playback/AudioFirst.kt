@@ -114,7 +114,7 @@ internal class AudioFirst(
         if (!wants(song)) return items
         val audio = withTimeoutOrNull(START_TIMEOUT_MS) { resolve(song) } ?: return items
         TrackLog.d(TAG, "audio-first: '${song.title}' starts as ${audio.videoId}", about = song.videoId)
-        return items.toMutableList().also { it[startIndex] = audio.toMediaItem() }
+        return items.toMutableList().also { it[startIndex] = audio.toMediaItem().withQueueIdentityOf(it[startIndex]) }
     }
 
     /** Point 2: replaces the next few videos in the queue while they are still upcoming. Main thread. */
