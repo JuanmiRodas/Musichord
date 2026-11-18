@@ -5,6 +5,8 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.isSupported
@@ -87,5 +89,25 @@ internal fun Modifier.vibrantChrome(enabled: Boolean): Modifier =
                 drawLayer(floor)
                 drawLayer(dodge)
             }
+        }
+    }
+
+/**
+ * BitChord Audio: white content drawn in [color] instead, by [amount] (0 = untouched):
+ * the controls take a washed-out colour of the video in edge-to-edge video mode.
+ * Multiplies the content by the colour in a layer of its own, so transparency is kept.
+ */
+fun Modifier.washTint(color: () -> Color, amount: () -> Float): Modifier =
+    graphicsLayer {
+        compositingStrategy = if (amount() > 0.001f) {
+            androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+        } else {
+            androidx.compose.ui.graphics.CompositingStrategy.Auto
+        }
+    }.drawWithContent {
+        drawContent()
+        val a = amount()
+        if (a > 0.001f) {
+            drawRect(androidx.compose.ui.graphics.lerp(Color.White, color(), a), blendMode = BlendMode.Modulate)
         }
     }

@@ -97,6 +97,9 @@ interface PlayerHost {
     /** BitChord Audio: the video ended before the song — the player shows its cover (or visualizer) again. */
     val videoModeOver: StateFlow<Boolean> get() = NoVideoOver
 
+    /** BitChord Audio: the video shown in video mode (its thumbnail tints the controls edge to edge). */
+    val videoModeShownVideoId: StateFlow<String?> get() = NoVideoLooking
+
     /** BitChord Audio: video mode's lyrics size, as a scale. */
     val videoModeLyricsScale: StateFlow<Float> get() = NoVideoScale
 

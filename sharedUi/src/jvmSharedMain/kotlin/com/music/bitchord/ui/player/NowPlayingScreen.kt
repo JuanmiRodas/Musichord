@@ -979,6 +979,23 @@ fun NowPlayingScreen(
     val videoModeSquare = videoModeFrame == 0
     // BitChord Audio: the picture out to the screen's edges, at the album square's height.
     val videoEdge = videoOverlay && videoModeFrame == 1
+    // BitChord Audio: edge to edge, the player goes to OLED black around the picture and its
+    // controls take the video's most present colour, washed out — both easing in and out.
+    val shownVideoId by PlayerPlatform.host.videoModeShownVideoId.collectAsStateWithLifecycle()
+    val videoThumb = shownVideoId?.takeIf { Regex("^[A-Za-z0-9_-]{11}$").matches(it) }
+        ?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
+        ?: song.thumbnailUrl
+    val videoMain = rememberArtworkColors(videoThumb.takeIf { videoEdge }).colors.firstOrNull() ?: Color.White
+    val videoWash by androidx.compose.animation.animateColorAsState(
+        targetValue = androidx.compose.ui.graphics.lerp(videoMain, Color.White, 0.5f),
+        animationSpec = tween(750),
+        label = "videoWash",
+    )
+    val videoWashAmount by animateFloatAsState(
+        targetValue = if (videoEdge) 1f else 0f,
+        animationSpec = tween(durationMillis = 750, easing = FastOutSlowInEasing),
+        label = "videoWashAmount",
+    )
     val videoLyricsScale by PlayerPlatform.host.videoModeLyricsScale.collectAsStateWithLifecycle()
     val videoLooks by PlayerPlatform.host.videoModeLooks.collectAsStateWithLifecycle()
     // BitChord Audio: text burnt into the video's bottom (its own subtitles,
@@ -2583,7 +2600,12 @@ fun NowPlayingScreen(
                 // BitChord Audio: video mode dims the player around the picture —
                 // the song's own colours kept, only darker — easing in and out.
                 val videoDim by animateFloatAsState(
-                    targetValue = if (videoOverlay) 0.62f else 0f,
+                    targetValue = when {
+                        // Edge to edge: OLED black, #000000, all round the picture.
+                        videoEdge && !lyricsOpen && !queueOpen -> 1f
+                        videoOverlay -> 0.62f
+                        else -> 0f
+                    },
                     animationSpec = tween(durationMillis = 750, easing = FastOutSlowInEasing),
                     label = "videoModeDim",
                 )
@@ -4004,7 +4026,7 @@ fun NowPlayingScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .offset {
-                                        val bottom = (currentTitleTop() + lyricSlotHeight * (1f - p())).roundToPx() +
+                                        val bottom = currentTitleTop().roundToPx() +
                                             (HEADER_HEIGHT.roundToPx() - 52.dp.roundToPx()) / 2 -
                                             // A clear gap above the title.
                                             22.dp.roundToPx()
@@ -4091,6 +4113,7 @@ fun NowPlayingScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .washTint({ videoWash }, { videoWashAmount })
                                 // Collapsed, this row shares the header with the sleeve
                                 // rather than sitting under it, and the two are not the
                                 // same height — centring the credits in the taller of
@@ -4105,9 +4128,7 @@ fun NowPlayingScreen(
                                         x = 0,
                                         y = (
                                             currentTitleTop() -
-                                                lerp(0.dp, (HEADER_HEIGHT - THUMB_SIZE) / 2, p()) +
-                                                // BitChord Audio: down into the lyric line's place.
-                                                (if (lyricsAboveCredits) lyricSlotHeight * (1f - p()) else 0.dp)
+                                                lerp(0.dp, (HEADER_HEIGHT - THUMB_SIZE) / 2, p())
                                         ).roundToPx(),
                                     )
                                 }
@@ -4504,7 +4525,7 @@ fun NowPlayingScreen(
                     ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.onSizeChanged { size ->
+                        modifier = Modifier.washTint({ videoWash }, { videoWashAmount }).onSizeChanged { size ->
                             if (spotifyCanvasPresentation) {
                                 val measuredHeight = with(density) { size.height.toDp() }
                                 if (measuredHeight != spotifyCanvasDeckHeight) {
