@@ -148,6 +148,43 @@ object OwnLibrary {
 
     data class Merged(val songs: List<Song>, val sections: List<HomeShelf>)
 
+    // ── BitChord Audio: search over your own music ────────────────────────────────────
+
+    data class Found(val songs: List<Song>, val albums: List<ShelfItem>)
+
+    /**
+     * Your songs and albums answering [query] (pCloud, uploads, downloads), each word of
+     * it found in the title, artist or album — in any script (romaji keys too).
+     */
+    fun search(query: String, downloaded: List<Song> = emptyList()): Found {
+        val words = query.split(Regex("""\s+""")).map { OwnFileMatcher.key(it) }.filter { it.isNotEmpty() }
+        if (words.isEmpty()) return Found(emptyList(), emptyList())
+        val pool = (WebDavRepository.library() + _uploads.value + downloaded).distinctBy { it.videoId }
+        fun hay(s: Song): String = buildString {
+            append(OwnFileMatcher.key(s.title)); append(' ')
+            append(OwnFileMatcher.key(s.artist)); append(' ')
+            append(OwnFileMatcher.key(s.albumName.orEmpty())); append(' ')
+            runCatching { OwnFileMatcher.allKeys(s.title).forEach { append(it.removePrefix("~")).append(' ') } }
+        }
+        val hits = pool.filter { s -> val h = hay(s); words.all { it in h } }
+        val songs = hits.distinctBy { OwnFileMatcher.key(it.title) + "|" + OwnFileMatcher.key(it.artist) + "|" + ((seconds(it) ?: 0) / 3) }.take(40)
+        val albums = hits.filter { !it.albumName.isNullOrBlank() }
+            .filter { s -> words.all { w -> w in OwnFileMatcher.key(s.albumName!!) + " " + OwnFileMatcher.key(s.artist) } }
+            .groupBy { it.albumName!!.trim() + "|" + OwnFileMatcher.key(it.artist.split(PARTS).first()) }
+            .values.mapNotNull { tracks ->
+                val name = tracks.first().albumName!!.trim()
+                val id = pageOf(name, tracks) ?: return@mapNotNull null
+                ShelfItem(
+                    title = name,
+                    subtitle = "$CLOUD " + tracks.first().artist + " · " + if (tracks.any(::isPcloud)) "pCloud" else "YouTube Music",
+                    thumbnailUrl = tracks.firstNotNullOfOrNull { it.thumbnailUrl },
+                    videoId = null,
+                    browseId = id,
+                )
+            }.take(12)
+        return Found(songs, albums)
+    }
+
     /**
      * [artist]'s page with your music in it: your songs not already among [songs] after
      * them, and your albums not already among its shelves in its albums shelf

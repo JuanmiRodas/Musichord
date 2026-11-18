@@ -413,10 +413,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * seconds later — YouTube is not instant) and merged in, so the change shows at once; a
      * like YouTube doesn't list yet is asked for once more. Every outcome is logged.
      */
+    private val likeSeq = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     private fun verifyLike(videoId: String, status: LikeStatus) {
+        // Only the latest tap on a song is checked: a like right after an un-like (or the
+        // other way round) must never be undone by the older tap's check.
+        val seq = likeSeq.merge(videoId, 1, Int::plus) ?: 1
         viewModelScope.launch {
             for (attempt in 1..2) {
                 kotlinx.coroutines.delay(if (attempt == 1) 4_000 else 15_000)
+                if (likeSeq[videoId] != seq) return@launch
                 val fresh = YtMusicRepository.browseSongs(YtMusicRepository.LIKED_MUSIC).getOrNull()?.songs ?: return@launch
                 val listed = fresh.any { it.videoId == videoId }
                 val profile = _activeProfileId.value
@@ -429,7 +435,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         if (ok) "Liked Music agrees" else "Liked Music doesn't show it yet (try $attempt)",
                 )
                 if (ok) return@launch
-                if (attempt == 1) YtMusicRepository.rate(videoId, status)
+                if (attempt == 1 && likeSeq[videoId] == seq && LikeState.overrides.value[videoId].let { it == null || it == status }) {
+                    YtMusicRepository.rate(videoId, status)
+                }
             }
         }
     }
@@ -3045,9 +3053,42 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // A search that has been superseded shouldn't land on screen,
                 // whether it succeeded or failed.
                 if (request.requestId != newestRequestId.get()) return@collectLatest
+                // BitChord Audio: your own music answers too (pCloud, uploads, downloads) — in
+                // the same list, after the top result, each only when YouTube Music hasn't it
+                // already; and on its own when YouTube can't be reached.
+                val own = withContext(Dispatchers.Default) {
+                    runCatching {
+                        val downloaded = com.music.bitchord.download.Downloads.savedMetadataSongs()
+                        com.music.bitchord.data.OwnLibrary.search(request.query, downloaded)
+                    }.getOrNull()
+                }
+                if (request.requestId != newestRequestId.get()) return@collectLatest
+                fun ownRows(yt: List<SearchResult>): List<SearchResult> {
+                    own ?: return emptyList()
+                    val ytSongs = yt.mapNotNull { (it as? SearchResult.Track)?.song ?: (it as? SearchResult.TopTrack)?.song }
+                    val wantSongs = request.filter == null || request.filter == SearchFilter.SONGS
+                    val wantAlbums = request.filter == null || request.filter == SearchFilter.ALBUMS
+                    val songs = if (wantSongs) own.songs.filter { m -> ytSongs.none { com.music.bitchord.data.OwnLibrary.sameSong(it, m) } }
+                        .take(if (request.filter == null) 8 else 40).map { SearchResult.Track(it) } else emptyList()
+                    val albums = if (wantAlbums) own.albums.map {
+                        SearchResult.Browse(com.music.bitchord.data.model.BrowseItem(it.browseId!!, it.title, it.subtitle, it.thumbnailUrl, BrowseType.ALBUM))
+                    } else emptyList()
+                    return albums + songs
+                }
                 _results.value = result.fold(
-                    onSuccess = { page -> published(page, key, request.requestId) },
-                    onFailure = { failure -> UiState.Error(failure.friendly()) },
+                    onSuccess = { page ->
+                        val extra = ownRows(page.rows)
+                        if (extra.isEmpty()) {
+                            published(page, key, request.requestId)
+                        } else {
+                            val top = page.rows.take(1)
+                            published(page.copy(rows = top + extra + page.rows.drop(1)), key, request.requestId)
+                        }
+                    },
+                    onFailure = { failure ->
+                        val extra = ownRows(emptyList())
+                        if (extra.isNotEmpty()) UiState.Success(extra) else UiState.Error(failure.friendly())
+                    },
                 )
             }
     }
