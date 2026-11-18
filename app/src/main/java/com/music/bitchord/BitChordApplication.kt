@@ -177,6 +177,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         AppSettings.init(this, authStore)
         com.music.bitchord.data.LikedMusicCache.init(this)
         com.music.bitchord.data.PlaylistPageCache.init(this)
+        com.music.bitchord.data.covers.OfflineCovers.init(this)
         com.music.bitchord.data.SongVersions.init(this)
         // BitChord Audio: official Latin names beside names in other scripts.
         com.music.bitchord.data.names.OfficialNames.init(this)
@@ -225,6 +226,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         Downloads.init(this)
         Downloads.exportExisting(this) // BitChord Audio: finishes moving downloads out to Music/BitChord
         Downloads.backfillArtwork(this) // BitChord Audio: covers for downloads saved without one
+        com.music.bitchord.data.covers.OfflineCovers.sweep(this, afterMs = 40_000) // and in every list, offline
         // After both of the things a check reads: the setting and the record.
         PlaylistSync.init(this)
         // The device's own listening record. Opened here rather than in
@@ -303,6 +305,9 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
             // Coil's own transport never sees Http.client's interceptor, so
             // the header is attached per request instead. See WebDavCoilAuth.
             .components {
+                // BitChord Audio: a downloaded song's cover from the copy kept on the phone,
+                // so lists show it offline. See OfflineCovers.
+                add(com.music.bitchord.data.covers.OfflineCovers.CoilInterceptor())
                 add(WebDavCoilAuth())
                 // Covers filed on the SMB share; anything else falls
                 // through to Coil's own fetchers. See SmbCoverFetcher.

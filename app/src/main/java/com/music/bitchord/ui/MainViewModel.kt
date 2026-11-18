@@ -2016,6 +2016,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
             }
         }
+        // BitChord Audio: covers of downloaded songs kept for offline, as likes and downloads change.
+        viewModelScope.launch {
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            kotlinx.coroutines.flow.combine(LikedMusicCache.likedSongs, com.music.bitchord.download.Downloads.saved) { a, b -> a.size to b.size }
+                .debounce(30_000)
+                .collect { com.music.bitchord.data.covers.OfflineCovers.sweep(getApplication(), afterMs = 0) }
+        }
         // BitChord Audio: the lyrics shown here go to the LG TV too, when the music is on it.
         viewModelScope.launch {
             _lyrics.collect { lines -> com.music.bitchord.playback.tv.TvLink.offerLyrics(currentLyricsRequest?.videoId, lines) }

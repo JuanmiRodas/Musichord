@@ -24,6 +24,10 @@ object PlaylistPageCache {
     fun load(browseId: String): List<Song>? =
         file(browseId)?.let { SongListStore.load(it) }?.songs?.takeIf { it.isNotEmpty() }
 
+    /** BitChord Audio: every list kept here (for their covers offline, see OfflineCovers). */
+    fun all(): List<Song> =
+        dir?.listFiles()?.flatMap { f -> runCatching { SongListStore.load(f)?.songs.orEmpty() }.getOrDefault(emptyList()) }.orEmpty()
+
     fun save(browseId: String, songs: List<Song>) {
         if (songs.isEmpty()) return
         val f = file(browseId) ?: return
