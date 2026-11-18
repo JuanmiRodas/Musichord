@@ -430,6 +430,12 @@ fun SongActionsMenu(
                     com.music.bitchord.data.webdav.PcloudAlbums.pageIdOf(song)?.let(onOpenAlbum)
                         ?: PcloudBrowser.openFolderOf(song)
                 }
+            } else {
+                // BitChord Audio: an album YouTube Music doesn't link, found among yours.
+                val own = remember(song.videoId) { com.music.bitchord.data.AlbumAppearances.pageOf(song) }
+                if (own != null) {
+                    ActionRow(SfIcons.Album, stringResource(R.string.open_album), accent = palette.accent, description = song.albumName) { onOpenAlbum(own) }
+                }
             }
             else -> ActionRow(
                 SfIcons.Album,
@@ -505,21 +511,15 @@ fun SongActionsMenu(
         ) {
             value = runCatching { com.music.bitchord.data.AlbumAppearances.search(song) }.getOrDefault(value)
         }
-        val others = appearances.filter { a ->
-            a.name.lowercase().filter(Char::isLetterOrDigit) != song.albumName.orEmpty().lowercase().filter(Char::isLetterOrDigit)
-        }
-        if (others.isNotEmpty()) {
-            IosMenuSeparator()
-            others.take(6).forEach { a ->
-                ActionRow(
-                    icon = SfIcons.Album,
-                    label = a.name,
-                    description = stringResource(R.string.also_on_albums) + " · " + a.source,
-                    accent = palette.accent,
-                    enabled = a.browseId != null,
-                ) { a.browseId?.let(onOpenAlbum) }
-            }
-        }
+        // BitChord Audio: "Open album" (this copy's own — YouTube Music's or your pCloud
+        // album) and "Appears on…" (its other albums, performances, and other artists' versions).
+        IosMenuSeparator()
+        ActionRow(
+            icon = SfIcons.Album,
+            label = stringResource(R.string.appears_on_title),
+            description = appearances.size.takeIf { it > 1 }?.let { stringResource(R.string.also_on_albums) + " · $it" },
+            accent = palette.accent,
+        ) { AppearsOn.show(song) }
 
         // The player's own: about the track playing right now rather than
         // about the song as a thing in a library.

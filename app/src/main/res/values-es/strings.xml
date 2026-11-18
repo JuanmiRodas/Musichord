@@ -1773,4 +1773,10 @@
     <string name="like_version_failed">YouTube no ha aceptado el me gusta; inténtalo otra vez</string>
     <string name="kept_downloaded_on">Descargada — toca para dejar de guardarla en el móvil</string>
     <string name="kept_downloaded_off">Descargar esta lista y mantenerla al día</string>
+    <string name="appears_on_title">Aparece en…</string>
+    <string name="appears_on_albums">Álbumes</string>
+    <string name="appears_on_performances">Otras interpretaciones</string>
+    <string name="appears_on_other_artists">Por otros artistas</string>
+    <string name="appears_on_none">No hay otras interpretaciones</string>
+    <string name="appears_on_no_work">MusicBrainz no tiene esta canción como obra, así que no se pueden confirmar versiones de otros artistas</string>
 </resources>

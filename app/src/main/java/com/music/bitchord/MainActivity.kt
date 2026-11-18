@@ -5863,6 +5863,11 @@ private fun BitChordApp(
         // BitChord Audio: a song's official Latin names, by hand (from the song menu).
         com.music.bitchord.ui.components.OfficialNamesDialogHost()
         com.music.bitchord.ui.components.LikeVersionPickerHost()
+        // BitChord Audio: "Appears on…" — other albums, performances, other artists.
+        com.music.bitchord.ui.components.AppearsOnHost(
+            onOpenAlbum = { id, title, cover -> viewModel.openDetail(id, title, "", cover, BrowseType.ALBUM) },
+            onPlay = { s -> playFrom(listOf(s), 0, QueueSource(s.title, PlaybackSourceType.SEARCH)) },
+        )
 
         if (showPcloudEditor) {
             BackHandler { showPcloudEditor = false }

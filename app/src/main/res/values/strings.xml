@@ -1685,4 +1685,10 @@
     <string name="like_version_failed">YouTube didn\'t take the like; try again</string>
     <string name="kept_downloaded_on">Downloaded — tap to stop keeping it on the phone</string>
     <string name="kept_downloaded_off">Download this list and keep it up to date</string>
+    <string name="appears_on_title">Appears on…</string>
+    <string name="appears_on_albums">Albums</string>
+    <string name="appears_on_performances">Other performances</string>
+    <string name="appears_on_other_artists">By other artists</string>
+    <string name="appears_on_none">No other performances found</string>
+    <string name="appears_on_no_work">MusicBrainz doesn\'t know this song as a work, so other artists\' versions can\'t be confirmed</string>
 </resources>

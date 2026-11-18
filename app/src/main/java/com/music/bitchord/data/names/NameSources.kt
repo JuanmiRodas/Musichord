@@ -30,9 +30,9 @@ object NameSources {
     private fun same(a: String?, b: String?): Boolean =
         a != null && b != null && OfficialNames.norm(a) == OfficialNames.norm(b)
 
-    private fun lucene(s: String) = s.replace(Regex("""([+\-!(){}\[\]^"~*?:\\/]|&&|\|\|)"""), "\\\\$1")
+    internal fun lucene(s: String) = s.replace(Regex("""([+\-!(){}\[\]^"~*?:\\/]|&&|\|\|)"""), "\\\\$1")
 
-    private suspend fun getJson(url: String, musicBrainz: Boolean = false): JSONObject? = withContext(Dispatchers.IO) {
+    internal suspend fun getJson(url: String, musicBrainz: Boolean = false): JSONObject? = withContext(Dispatchers.IO) {
         if (musicBrainz) {
             mbGate.withLock {
                 val wait = 1_100 - (System.currentTimeMillis() - mbLast)
@@ -49,13 +49,13 @@ object NameSources {
         }.onFailure { TrackLog.d(TAG, "names: ${url.toHttpUrl().host} failed: ${it.message}") }.getOrNull()
     }
 
-    private fun mb(path: String, vararg params: Pair<String, String>): String =
+    internal fun mb(path: String, vararg params: Pair<String, String>): String =
         "https://musicbrainz.org/ws/2/$path".toHttpUrl().newBuilder().apply {
             params.forEach { (k, v) -> addQueryParameter(k, v) }
             addQueryParameter("fmt", "json")
         }.build().toString()
 
-    private fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
+    internal fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
 
     // ---- artists ------------------------------------------------------------------------
 

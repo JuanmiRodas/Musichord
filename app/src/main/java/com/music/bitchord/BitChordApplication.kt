@@ -225,6 +225,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         // without a media-store query per row.
         Downloads.init(this)
         com.music.bitchord.download.KeptPlaylists.init(this)
+        com.music.bitchord.data.OwnLibrary.init(this)
         Downloads.exportExisting(this) // BitChord Audio: finishes moving downloads out to Music/BitChord
         Downloads.backfillArtwork(this) // BitChord Audio: covers for downloads saved without one
         com.music.bitchord.data.covers.OfflineCovers.sweep(this, afterMs = 40_000) // and in every list, offline

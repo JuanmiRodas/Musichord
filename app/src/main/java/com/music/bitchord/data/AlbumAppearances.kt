@@ -19,7 +19,20 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 object AlbumAppearances {
 
-    data class Album(val name: String, val browseId: String?, val source: String)
+    data class Album(val name: String, val browseId: String?, val source: String, val cover: String? = null)
+
+    /**
+     * BitChord Audio: the page of [song]'s own album — YouTube Music's, else the album of
+     * yours (pCloud) it is on, by name in either script.
+     */
+    fun pageOf(song: Song): String? = runCatching {
+        com.music.bitchord.data.webdav.PcloudAlbums.pageIdOf(song)
+            ?: song.albumId
+            ?: song.albumName?.takeIf { it.isNotBlank() }?.let { name ->
+                WebDavRepository.library().firstOrNull { f -> f.albumName?.let { OwnLibrary.sameAlbum(name, it) } == true }?.albumName
+                    ?.let { LocalGroups.albumPageId(WebDavConfig.BROWSE_ID, it) }
+            }
+    }.getOrNull() ?: song.albumId
 
     private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
 
@@ -93,7 +106,7 @@ object AlbumAppearances {
             WebDavConfig.isWebDavId(s.videoId) -> LocalGroups.albumPageId(WebDavConfig.BROWSE_ID, name)
             else -> s.albumId
         }
-        return Album(name, id, source)
+        return Album(name, id, source, s.thumbnailUrl)
     }
 
     /** The albums [song] is known to be on, from what is on the phone already. */
