@@ -157,10 +157,11 @@ object OwnLibrary {
         val shownNames = sections.flatMap { it.items }.map { it.title }
         return LikedMusicCache.likedSongs.value.asSequence()
             .filter { !it.isVideo && !it.albumId.isNullOrBlank() && !it.albumName.isNullOrBlank() }
-            .filter { s -> s.artist.split(PARTS).any { OwnFileMatcher.sameArtist(artist, it) || ArtistLinks.linked(artist, OwnFileMatcher.key(it)) } }
+            .filter { s -> s.artist.split(PARTS).firstOrNull()?.let { sameName(artist, it) } == true }
             .groupBy { it.albumId!! }
             .filterKeys { it !in shownIds }
-            .filter { (_, t) -> shownNames.none { sameAlbum(it, t.first().albumName!!) } }
+            // Only the very same name: "LIVE vol.#19" is not "LIVE vol.#21".
+            .filter { (_, t) -> shownNames.none { OwnFileMatcher.key(it) == OwnFileMatcher.key(t.first().albumName!!) } }
             .entries.sortedByDescending { it.value.size }
             .map { (id, t) -> ShelfItem(t.first().albumName!!, t.first().artist.split(PARTS).first(), t.firstNotNullOfOrNull { it.thumbnailUrl }, null, id) }
     }
@@ -252,9 +253,29 @@ object OwnLibrary {
      * sit in their folder (an album they produced for someone else).
      */
     private fun isBy(s: Song, artist: String): Boolean {
-        val names = s.artist.split(PARTS).filter { it.isNotBlank() }
-        if (names.isEmpty() || names.none { WebDavRepository.named(it) }) return true
-        return names.any { n -> OwnFileMatcher.sameArtist(artist, n) || ArtistLinks.linked(artist, OwnFileMatcher.key(n)) }
+        val names = s.artist.split(PARTS).filter { it.isNotBlank() && WebDavRepository.named(it) }
+        if (names.isEmpty()) return true
+        // The first credit: "Revo & Yuki Kajiura" is Revo's, not hers.
+        return sameName(artist, names.first())
+    }
+
+    /**
+     * The same artist, strictly: the same name (any order, any script, a linked name) —
+     * not one name inside another ("YUKI" is not "Yuki Kajiura").
+     */
+    fun sameName(a: String, b: String): Boolean {
+        val ka = OwnFileMatcher.key(a)
+        val kb = OwnFileMatcher.key(b)
+        if (ka.isEmpty() || kb.isEmpty()) return false
+        if (ka == kb || ArtistLinks.linked(a, kb) || ArtistLinks.linked(b, ka)) return true
+        fun latin(s: String) = s.none { it.code > 0x2FF && it.isLetter() }
+        fun words(s: String) = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.sorted()
+        if (latin(a) && latin(b)) return words(a) == words(b)
+        // A kanji name against its romaji: its reading, word for word.
+        fun read(s: String) = if (latin(s)) words(s).toSet() else com.music.bitchord.data.sources.JapaneseReading.romajiWords(s)
+        val ra = read(a) ?: return false
+        val rb = read(b) ?: return false
+        return ra.isNotEmpty() && ra == rb
     }
 
     fun mergeArtist(artist: String, songs: List<Song>, sections: List<HomeShelf>, albumsTitle: String): Merged {

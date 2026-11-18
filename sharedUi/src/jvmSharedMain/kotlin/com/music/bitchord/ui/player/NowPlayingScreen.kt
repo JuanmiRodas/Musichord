@@ -64,6 +64,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -4163,6 +4164,10 @@ fun NowPlayingScreen(
                             Column(
                                 Modifier
                                     .weight(1f)
+                                    // BitChord Audio: three lines (title, artist, album) can be a
+                                    // little taller than the row; they overflow evenly around the
+                                    // cover's centre instead of being cut off at the bottom.
+                                    .wrapContentHeight(unbounded = true)
                                     // Scaling the already measured type is a draw-only
                                     // operation. Animating fontSize forced both marquee
                                     // texts through shaping and measurement every frame.
@@ -4214,7 +4219,7 @@ fun NowPlayingScreen(
                                             text = it.first,
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontSize = 20.sp,
-                                                lineHeight = 24.sp,
+                                                lineHeight = if (compactHeader || song.albumName.isNullOrBlank()) 24.sp else 22.sp,
                                             ),
                                             color = Color.White,
                                             enabled = scrolling,
@@ -4238,7 +4243,7 @@ fun NowPlayingScreen(
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontWeight = FontWeight.W500,
                                                 fontSize = if (compactHeader) 20.sp else 16.sp,
-                                                lineHeight = if (compactHeader) 24.sp else 19.sp,
+                                                lineHeight = if (compactHeader) 24.sp else 18.sp,
                                             ),
                                             color = artistColor,
                                             enabled = scrolling,
@@ -4253,7 +4258,7 @@ fun NowPlayingScreen(
                                         if (!compactHeader && album != null) {
                                             MarqueeText(
                                                 text = remember(album, song.artist) { com.music.bitchord.data.names.DisplayNames.album(album, song.artist) },
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 16.sp),
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 15.sp),
                                                 color = chromeWhite(0.4f),
                                                 enabled = scrolling,
                                                 modifier = Modifier.opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
