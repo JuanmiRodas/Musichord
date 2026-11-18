@@ -117,10 +117,33 @@ object OwnLibrary {
         return ka.any { it in kb }
     }
 
-    /** The page your album [name] opens: your pCloud album's, or the uploads' own. */
+    private const val OWN_ALBUM = "own:album:"
+    private const val SEP = "\u0001"
+
+    /**
+     * The page your album [name] opens: your pCloud album's when it is only there; else
+     * one page joining your pCloud files and your uploads of it — each song once, the
+     * best copy of it (see [albumSongs]).
+     */
     private fun pageOf(name: String, songs: List<Song>): String? {
-        if (songs.any(::isPcloud)) return LocalGroups.albumPageId(WebDavConfig.BROWSE_ID, songs.first(::isPcloud).albumName ?: name)
-        return songs.firstNotNullOfOrNull { it.albumId }
+        val pcloudOnly = songs.all(::isPcloud)
+        if (pcloudOnly) return LocalGroups.albumPageId(WebDavConfig.BROWSE_ID, songs.first().albumName ?: name)
+        return OWN_ALBUM + songs.first().artist + SEP + name
+    }
+
+    fun isOwnAlbum(browseId: String) = browseId.startsWith(OWN_ALBUM)
+
+    /** The songs of your album page [browseId]: pCloud and uploads joined, the best copy of each. */
+    fun albumSongs(browseId: String): List<Song>? {
+        if (!isOwnAlbum(browseId)) return null
+        val (artist, name) = browseId.removePrefix(OWN_ALBUM).split(SEP, limit = 2).let { it.getOrNull(0).orEmpty() to it.getOrNull(1).orEmpty() }
+        val all = songsBy(artist).filter { s -> s.albumName?.let { sameAlbum(name, it) } == true }
+        val picked = ArrayList<Song>()
+        for (s in all.sortedByDescending { runCatching { OwnFileMatcher.qualityRank(it) }.getOrDefault(0) + if (isPcloud(it)) 1 else 0 }) {
+            if (picked.none { sameSong(it, s) }) picked += s
+        }
+        // In the order the library holds them (track numbers lead file names).
+        return all.filter { a -> picked.any { it.videoId == a.videoId } }
     }
 
     data class Merged(val songs: List<Song>, val sections: List<HomeShelf>)

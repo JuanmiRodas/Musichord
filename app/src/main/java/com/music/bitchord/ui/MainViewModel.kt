@@ -3829,6 +3829,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         fun nonEmpty(songs: List<Song>, empty: () -> String): UiState<List<Song>> =
             if (songs.isEmpty()) UiState.Error(empty()) else UiState.Success(songs)
 
+        // BitChord Audio: an album of yours (pCloud and your YouTube Music uploads joined).
+        com.music.bitchord.data.OwnLibrary.albumSongs(browseId)?.let { songs ->
+            return nonEmpty(songs) { text(R.string.no_tracks_here) }
+        }
         // BitChord Audio: an artist page's "Liked songs".
         com.music.bitchord.data.LikedByArtist.parse(browseId)?.let { (artistId, name) ->
             return nonEmpty(com.music.bitchord.data.LikedByArtist.songs(name, artistId)) { text(R.string.liked_by_artist_empty) }
