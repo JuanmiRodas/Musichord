@@ -356,8 +356,33 @@ object OwnFileMatcher {
         val x = a?.replace(NOTE, " ")?.let(::key).orEmpty()
         val y = b?.replace(NOTE, " ")?.let(::key).orEmpty()
         if (x.isEmpty() || y.isEmpty()) return false
-        return x == y || (minOf(x.length, y.length) >= 5 && (x in y || y in x))
+        if (x == y) return true
+        if (minOf(x.length, y.length) < 5 || !(x in y || y in x)) return false
+        // BitChord Audio: one name inside another is the same album only when what is left
+        // is an edition ("… (Deluxe Edition)", "… Remastered 2019", "… Disc 2") — not
+        // another album that starts the same ("Fiction" vs "FictionJunction 2010-2013 The BEST").
+        val wa = albumWords(a!!)
+        val wb = albumWords(b!!)
+        val cjk = Regex("""[\p{IsHan}\p{IsHiragana}\p{IsKatakana}\p{IsHangul}]""")
+        if (cjk.containsMatchIn(a) || cjk.containsMatchIn(b)) {
+            return minOf(x.length, y.length).toDouble() / maxOf(x.length, y.length) >= 0.6
+        }
+        val (short, long) = if (wa.size <= wb.size) wa to wb else wb to wa
+        if (short.isEmpty()) return false
+        val at = (0..long.size - short.size).firstOrNull { i -> long.subList(i, i + short.size) == short } ?: return false
+        val rest = long.subList(0, at) + long.subList(at + short.size, long.size)
+        return rest.all { it in EDITION || it.all(Char::isDigit) }
     }
+
+    private fun albumWords(s: String) = s.replace(NOTE, " ").lowercase()
+        .split(Regex("""[^\p{L}\p{N}]+""")).filter { it.isNotEmpty() }
+
+    private val EDITION = setOf(
+        "deluxe", "edition", "remaster", "remastered", "remasters", "version", "ver", "disc", "disk", "cd", "bonus",
+        "track", "tracks", "special", "limited", "anniversary", "expanded", "edit", "original", "standard", "complete",
+        "the", "a", "an", "de", "of", "ep", "single", "reissue", "mono", "stereo", "hi", "res", "explicit", "clean",
+        "digital", "japan", "japanese", "international", "import", "type", "regular", "first", "press",
+    )
 
     /** One letter apart, more or less: at least 85% alike as letters and digits. */
     fun nearSpelling(a: String, b: String): Boolean {
