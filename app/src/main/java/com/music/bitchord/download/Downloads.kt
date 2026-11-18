@@ -411,6 +411,24 @@ object Downloads {
      * has just been shown to be false is not worth keeping to be shown false
      * again on the next play.
      */
+    /**
+     * BitChord Audio: the downloaded copy of the song [videoId] is, under any of its ids —
+     * the liked YouTube track, your pCloud file matched to it, a local like's link, the
+     * Saavn stand-in. A song you downloaded plays from the phone, whatever id is queued.
+     * Cheap: only lookups already in memory, so it may run on the main thread.
+     */
+    fun localCopyOf(videoId: String): String? {
+        verifiedSavedUri(videoId)?.let { return it }
+        val saved = _saved.value
+        if (saved.isEmpty()) return null
+        val ids = LinkedHashSet<String>()
+        runCatching { ids += com.music.bitchord.data.LocalLikes.sameAs(videoId) }
+        runCatching { com.music.bitchord.data.sources.SourceMap.entry(videoId)?.file?.let { ids += it } }
+        runCatching { ids += com.music.bitchord.data.sources.SourceMap.idsForFile(videoId) }
+        ids.remove(videoId)
+        return ids.firstOrNull { it in saved }?.let(::verifiedSavedUri)
+    }
+
     fun verifiedSavedUri(videoId: String): String? {
         val recorded = _saved.value[videoId] ?: return null
         if (!isMissingLocalFile(recorded)) return recorded

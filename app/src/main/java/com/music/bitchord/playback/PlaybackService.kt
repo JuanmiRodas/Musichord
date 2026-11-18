@@ -1483,6 +1483,17 @@ class PlaybackService : MediaLibraryService() {
             // usually *not* the one playing, which is exactly why the lines
             // have to say. See [TrackLog.about].
             val about = TrackLog.about(mediaIdIn(dataSpec.uri))
+            // BitChord Audio: a song downloaded under any of its ids plays from the phone —
+            // a queue restored or built before the download, or a stand-in id (your file,
+            // the Saavn copy, the audio of a video), would otherwise go to the network.
+            if (dataSpec.uri.scheme == "http" || dataSpec.uri.scheme == "https" || dataSpec.uri.authority == "source" || dataSpec.uri.scheme == "webdav") {
+                val id = mediaIdIn(dataSpec.uri)
+                val local = id?.let { runCatching { Downloads.localCopyOf(it) }.getOrNull() }
+                if (local != null) {
+                    TrackLog.d("BitChord", "playing the download instead of the network", about = id)
+                    return@Resolver dataSpec.buildUpon().setUri(Uri.parse(local)).setHttpRequestHeaders(emptyMap()).build()
+                }
+            }
             // A source-backed track is resolved by whichever source can serve
             // it, which is not necessarily the one it was queued from — see
             // [SourceResolver.resolve]. Handled ahead of the YouTube path
@@ -6263,7 +6274,7 @@ class PlaybackService : MediaLibraryService() {
         if (!localPath.isNullOrBlank()) {
             return true
         }
-        if (Downloads.verifiedSavedUri(mediaId) != null) {
+        if (Downloads.localCopyOf(mediaId) != null) {
             return true
         }
         return false
@@ -6352,7 +6363,7 @@ class PlaybackService : MediaLibraryService() {
             return Uri.fromFile(java.io.File(localPath))
         }
 
-        val downloadedUri = Downloads.verifiedSavedUri(mediaId)
+        val downloadedUri = Downloads.localCopyOf(mediaId)
         if (downloadedUri != null) {
             return Uri.parse(downloadedUri)
         }

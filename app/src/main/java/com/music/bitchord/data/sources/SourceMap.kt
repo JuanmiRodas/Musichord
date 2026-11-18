@@ -61,6 +61,9 @@ object SourceMap {
     /** The raw entry, JioSaavn part included, without the library checks. */
     fun entry(videoId: String): Entry? = entries[videoId]
 
+    /** BitChord Audio: the YouTube ids matched to your file [fileId] (cheap; no library matching). */
+    fun idsForFile(fileId: String): List<String> = entries.filterValues { it.file == fileId }.keys.toList()
+
     private val entries = ConcurrentHashMap<String, Entry>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null

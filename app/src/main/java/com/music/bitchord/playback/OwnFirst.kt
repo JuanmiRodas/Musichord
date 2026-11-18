@@ -91,6 +91,8 @@ internal class OwnFirst(
             is com.music.bitchord.data.sources.PreferredSource.File -> return if (enabled) fileFor(song) else null
             null -> Unit
         }
+        // BitChord Audio: downloaded — it plays from the phone; no stand-in from the network.
+        if (song.localUri != null || com.music.bitchord.download.Downloads.localCopyOf(song.videoId) != null) return null
         if (enabled) fileFor(song)?.let { return it }
         if (!saavnEnabled) return null
         val copy = SourceMap.saavnSongFor(song) ?: return null

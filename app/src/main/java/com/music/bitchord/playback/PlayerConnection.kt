@@ -657,6 +657,7 @@ private fun Song.pickedMixQuery(configId: String): String {
  * lossless, or at least 256 kbps, or the one you picked — while online.
  * Offline, the download plays.
  */
+@Suppress("unused")
 private fun Song.ownFilePlaysInstead(): Boolean = runCatching {
     com.music.bitchord.data.settings.AppSettings.ownFilesAllowedNow &&
         !OriginalVersion.isPinned(videoId) &&
@@ -696,7 +697,10 @@ fun Song.toMediaItem(): MediaItem {
     // that has become stale since it was created. Checking only the lookup
     // leaves that path unguarded.
     val offlineUri = localUri?.takeUnless(Downloads::isMissingLocalFile)
-        ?: Downloads.verifiedSavedUri(videoId)?.takeUnless { ownFilePlaysInstead() }
+        // BitChord Audio: a download always plays first — offline or not, under any of the
+        // song's ids. A better copy (your file, a higher rung) replaces the download itself
+        // in the background (DownloadUpgrader), never the playing.
+        ?: Downloads.localCopyOf(videoId)
     val uriString = offlineUri ?: when {
         videoId.startsWith("content://") || videoId.startsWith("file://") -> videoId
         // Title, artist and runtime ride along in the URI because they are what

@@ -74,6 +74,8 @@ internal class AudioFirst(
                 it !is com.music.bitchord.data.sources.PreferredSource.File && it !is com.music.bitchord.data.sources.PreferredSource.Chosen
             } &&
             song.localUri == null &&
+            // BitChord Audio: downloaded — it plays from the phone as it is.
+            com.music.bitchord.download.Downloads.localCopyOf(song.videoId) == null &&
             song.videoId !in keepVideo &&
             song.videoId !in noAudio
 
