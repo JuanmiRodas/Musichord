@@ -5864,6 +5864,14 @@ private fun BitChordApp(
         com.music.bitchord.ui.components.OfficialNamesDialogHost()
         com.music.bitchord.ui.components.LikeVersionPickerHost()
         // BitChord Audio: "Appears on…" — other albums, performances, other artists.
+        // BitChord Audio: "Go to artist" with several artists — which one.
+        com.music.bitchord.ui.components.ArtistPickerHost()
+        androidx.compose.runtime.SideEffect {
+            com.music.bitchord.ui.components.ArtistPicker.open = { id ->
+                dismissPlayer()
+                viewModel.openDetail(id, "", "", null, BrowseType.ARTIST)
+            }
+        }
         com.music.bitchord.ui.components.AppearsOnHost(
             onOpenAlbum = { id, title, cover -> viewModel.openDetail(id, title, "", cover, BrowseType.ALBUM) },
             onPlay = { s -> playFrom(listOf(s), 0, QueueSource(s.title, PlaybackSourceType.SEARCH)) },

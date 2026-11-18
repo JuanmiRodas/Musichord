@@ -103,6 +103,9 @@ interface PlayerHost {
     /** BitChord Audio: the page of [song]'s album — YouTube Music's, else your pCloud album's. */
     fun albumPageOf(song: com.music.bitchord.data.model.Song): String? = song.albumId
 
+    /** BitChord Audio: the artist line tapped — one artist opens, several ask which. False: not handled. */
+    fun goToArtist(song: com.music.bitchord.data.model.Song): Boolean = false
+
     /** BitChord Audio: video mode's lyrics size, as a scale. */
     val videoModeLyricsScale: StateFlow<Float> get() = NoVideoScale
 

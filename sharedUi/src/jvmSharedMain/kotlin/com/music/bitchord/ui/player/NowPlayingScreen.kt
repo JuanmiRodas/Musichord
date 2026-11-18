@@ -4246,7 +4246,7 @@ fun NowPlayingScreen(
                                             // starting together reads as clutter, so the artist
                                             // waits a beat before it joins in.
                                             startDelayMillis = if (titleOverflowing) MARQUEE_ARTIST_STAGGER_MS else 0L,
-                                            onOpenArtist = onOpenArtist,
+                                            onOpenArtist = { id, name -> if (!PlayerPlatform.host.goToArtist(song)) onOpenArtist(id, name) },
                                         )
                                         // BitChord Audio: and the album, under the artist.
                                         val album = song.albumName?.takeIf { a -> a.isNotBlank() }

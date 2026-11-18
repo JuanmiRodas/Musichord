@@ -166,6 +166,11 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override val videoModeShownVideoId: StateFlow<String?> get() = MusicVideoEngine.shownVideoId
     // BitChord Audio: an album YouTube Music doesn't have (a live release, one only in your
     // pCloud) opens as your pCloud album's page.
+    override fun goToArtist(song: com.music.bitchord.data.model.Song): Boolean {
+        com.music.bitchord.ui.components.ArtistPicker.goTo(song)
+        return true
+    }
+
     override fun albumPageOf(song: com.music.bitchord.data.model.Song): String? =
         com.music.bitchord.data.AlbumAppearances.pageOf(song)
     override val videoModeLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.lyricsScale

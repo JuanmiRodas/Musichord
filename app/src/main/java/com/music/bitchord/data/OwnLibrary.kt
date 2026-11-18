@@ -68,11 +68,34 @@ object OwnLibrary {
 
     private fun isPcloud(s: Song) = WebDavConfig.isWebDavId(s.videoId)
 
+    private val PARTS = Regex("""\s*(?:,|&|/|;|、|\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b|\bcon\b|×)\s*""", RegexOption.IGNORE_CASE)
+
+    @Volatile private var byArtist: Triple<List<Song>, List<Song>, Map<String, List<Song>>>? = null
+
+    /** Every song of yours under each name it credits (and its artist folder), built once per library. */
+    private fun artistIndex(): Map<String, List<Song>> {
+        val library = WebDavRepository.library()
+        val uploads = _uploads.value
+        byArtist?.takeIf { it.first === library && it.second === uploads }?.let { return it.third }
+        val map = HashMap<String, MutableList<Song>>()
+        for (s in library + uploads) {
+            val names = s.artist.split(PARTS) + listOfNotNull(WebDavRepository.artistFolderOf(s.videoId))
+            names.map { OwnFileMatcher.key(it) }.filter { it.isNotEmpty() }.toSet()
+                .forEach { map.getOrPut(it) { ArrayList() } += s }
+        }
+        byArtist = Triple(library, uploads, map)
+        return map
+    }
+
     /** Your songs by [artist] (any of their names), pCloud and uploads. */
     fun songsBy(artist: String): List<Song> {
-        fun by(s: Song) = OwnFileMatcher.sameArtist(artist, s.artist) || ArtistLinks.linked(artist, s.artist) ||
-            WebDavRepository.artistFolderOf(s.videoId)?.let { OwnFileMatcher.sameArtist(artist, it) } == true
-        return (WebDavRepository.library() + _uploads.value).filter(::by)
+        val index = artistIndex()
+        val direct = artist.split(PARTS).flatMap { index[OwnFileMatcher.key(it)].orEmpty() }
+        // Names it is linked to (a romaji credit for a kanji one), and the slower spelling match
+        // only over the names the index holds — not every song.
+        val linked = index.keys.filter { k -> direct.isEmpty() && (ArtistLinks.linked(artist, k) || OwnFileMatcher.sameArtist(artist, k)) }
+            .flatMap { index[it].orEmpty() }
+        return (direct + linked).distinctBy { it.videoId }
     }
 
     private fun seconds(s: Song): Int? = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
@@ -110,8 +133,15 @@ object OwnLibrary {
     fun mergeArtist(artist: String, songs: List<Song>, sections: List<HomeShelf>, albumsTitle: String): Merged {
         val mine = runCatching { songsBy(artist) }.getOrDefault(emptyList())
         if (mine.isEmpty()) return Merged(songs, sections)
-        val extraSongs = mine.filter { m -> songs.none { sameSong(it, m) } }
-            .distinctBy { OwnFileMatcher.key(it.title) + "|" + (it.albumName ?: "") + "|" + (seconds(it) ?: 0) }
+        // Only songs sharing a name are weighed against each other (any script).
+        val pageKeys = HashMap<String, MutableList<Song>>()
+        songs.forEach { s -> OwnFileMatcher.allKeys(s.title).forEach { pageKeys.getOrPut(it) { ArrayList() } += s } }
+        val extraSongs = mine.filter { m ->
+            OwnFileMatcher.allKeys(m.title).flatMap { pageKeys[it].orEmpty() }.distinct().none { sameSong(it, m) }
+        }
+            .distinctBy { OwnFileMatcher.key(it.title) + "|" + (it.albumName ?: "") + "|" + ((seconds(it) ?: 0) / 3) }
+            // The page's song list stays a list: your albums carry the rest.
+            .take(30)
         val shown = sections.flatMap { it.items }.map { it.title }
         val albums = mine.filter { !it.albumName.isNullOrBlank() }.groupBy { it.albumName!!.trim() }
             .filterKeys { name -> shown.none { sameAlbum(it, name) } }
@@ -129,7 +159,8 @@ object OwnLibrary {
         val out = sections.toMutableList()
         if (albums.isNotEmpty()) {
             val i = out.indexOfFirst { s -> s.layout == ShelfLayout.CARDS && Regex("(?i)album|álbum|アルバム").containsMatchIn(s.title) }
-            if (i >= 0) out[i] = out[i].copy(items = out[i].items + albums)
+            // Yours first in the albums shelf: YouTube Music's carry on after (and under "See all").
+            if (i >= 0) out[i] = out[i].copy(items = albums + out[i].items)
             else out.add(0, HomeShelf(title = albumsTitle, items = albums))
         }
         if (extraSongs.isNotEmpty() || albums.isNotEmpty()) {

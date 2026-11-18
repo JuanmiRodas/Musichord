@@ -3564,12 +3564,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 resolved == BrowseType.ARTIST -> {
                     YtMusicRepository.artistPage(browseId).fold(
                         onSuccess = { page0 ->
-                            // BitChord Audio: your own music by them (pCloud, your uploads) blended in.
+                            // BitChord Audio: your own music by them (pCloud, your uploads) blended in —
+                            // after the page is up, so YouTube Music's part never waits on it.
                             if (_signedIn.value) com.music.bitchord.data.OwnLibrary.refreshUploads()
-                            val merged = withContext(Dispatchers.Default) {
-                                com.music.bitchord.data.OwnLibrary.mergeArtist(page0.name.orEmpty(), page0.songs, page0.sections, text(R.string.albums))
+                            viewModelScope.launch(Dispatchers.Default) {
+                                val merged = runCatching {
+                                    com.music.bitchord.data.OwnLibrary.mergeArtist(page0.name.orEmpty(), page0.songs, page0.sections, text(R.string.albums))
+                                }.getOrNull() ?: return@launch
+                                kotlinx.coroutines.delay(300)
+                                _detailStack.value = _detailStack.value.map { p ->
+                                    if (p.browseId == browseId && p.songs is UiState.Success) {
+                                        p.copy(songs = UiState.Success(merged.songs.withArtwork(thumbnailUrl ?: page0.thumbnailUrl)), sections = merged.sections)
+                                    } else p
+                                }
                             }
-                            val page = page0.copy(songs = merged.songs, sections = merged.sections)
+                            val page = page0
                             sections = page.sections
                             artwork = page.thumbnailUrl
                             name = page.name

@@ -444,16 +444,26 @@ fun SongActionsMenu(
                 description = song.albumName,
             ) { onOpenAlbum(id) }
         }
-        when (val id = song.artistId) {
-            null -> if (resolvingLinks) {
-                LoadingActionRow(SfIcons.Artist, stringResource(R.string.open_artist), palette)
-            }
-            else -> ActionRow(
+        // BitChord Audio: always offered — several artists ask which (with their photos), and
+        // an artist the song carries no link for (your files, JioSaavn) is found by name.
+        val several = remember(song.videoId) { ArtistPicker.names(song).size > 1 }
+        when {
+            song.artistId == null && resolvingLinks -> LoadingActionRow(SfIcons.Artist, stringResource(R.string.open_artist), palette)
+            song.artistId != null && !several -> ActionRow(
                 SfIcons.Artist,
                 stringResource(R.string.open_artist),
                 accent = palette.accent,
                 description = song.artist.takeIf { it.isNotBlank() },
-            ) { onOpenArtist(id) }
+            ) { onOpenArtist(song.artistId!!) }
+            song.artist.isNotBlank() -> ActionRow(
+                SfIcons.Artist,
+                stringResource(R.string.open_artist),
+                accent = palette.accent,
+                description = song.artist,
+            ) {
+                ArtistPicker.open = onOpenArtist
+                ArtistPicker.goTo(song)
+            }
         }
         ActionRow(SfIcons.Info, stringResource(R.string.song_info), accent = palette.accent) {
             showingSongInfo = true
