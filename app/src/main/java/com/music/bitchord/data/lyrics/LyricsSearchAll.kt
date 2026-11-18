@@ -16,7 +16,13 @@ import kotlinx.coroutines.withTimeoutOrNull
 object LyricsSearchAll {
 
     /** Every answer for [song], as the manual search gets them. */
-    suspend fun answers(song: Song, maxTitles: Int = 3, maxArtists: Int = 2, timeoutMs: Long = 30_000): List<LyricsRepository.Result> {
+    suspend fun answers(
+        song: Song,
+        maxTitles: Int = 3,
+        maxArtists: Int = 2,
+        timeoutMs: Long = 30_000,
+        onResult: ((LyricsRepository.Result) -> Unit)? = null,
+    ): List<LyricsRepository.Result> {
         val mine = LyricAliases.userNames(song.videoId, song.title, song.artist)
         val (titles, artists) = if (!mine.isEmpty) {
             mine.titles to mine.artists
@@ -34,7 +40,10 @@ object LyricsSearchAll {
         withTimeoutOrNull(timeoutMs) {
             coroutineScope {
                 for (t in ts) for (a in ars) launch {
-                    LyricsRepository.everyAnswer(song.videoId, t, a, duration, song.albumName, sources) { r -> out += r }
+                    LyricsRepository.everyAnswer(song.videoId, t, a, duration, song.albumName, sources) { r ->
+                        out += r
+                        onResult?.invoke(r)
+                    }
                 }
             }
         }

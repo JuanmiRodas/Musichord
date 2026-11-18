@@ -96,10 +96,13 @@ object LyricsKeeper {
                 else -> putLong(AUTO + song.videoId, System.currentTimeMillis())
             }
         }?.apply()
-        if (upgrade) forgetEmbedded(song)
         scope.launch { runCatching { writeToFolder(song, lines) } }
-        if (picked) forgetEmbedded(song)
-        scope.launch { runCatching { embedInFiles(song, lines) } }
+        // Off the main thread: finding the song's files matches names across the library
+        // (a pick from the lyric search froze the screen until Android closed the app).
+        scope.launch {
+            if (upgrade || picked) runCatching { forgetEmbedded(song) }
+            runCatching { embedInFiles(song, lines) }
+        }
     }
 
     private const val AUTO = "auto:"

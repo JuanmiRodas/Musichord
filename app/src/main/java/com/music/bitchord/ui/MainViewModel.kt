@@ -523,9 +523,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.music.bitchord.data.lyrics.LyricsSearchAll.score(lines, durationMs, japaneseSong())
             // What is on screen, and how good: anything shown before the end only ever
             // replaces it with something strictly better — never back and forth.
-            var shownScore = -1
+            // Kept lyrics (the app's own choice) count as shown: something strictly better
+            // replaces them as soon as it arrives, and the end never goes back.
+            var shownScore = keptAuto?.let(::linesScore) ?: -1
             fun showIfBetter(lines: List<com.music.bitchord.data.lyrics.LyricLine>, source: LyricsSource?) {
-                if (generation != lyricsGeneration || selectedLyricsSource != null || keptAuto != null) return
+                if (generation != lyricsGeneration || selectedLyricsSource != null) return
+                if (keptAuto != null && videoId in lyricsUpgradedThisRun) return
+                if (lines.none { it.timeMs > 0 } && keptAuto != null) return
                 val sc = linesScore(lines)
                 if (sc <= shownScore || lines == _lyrics.value) return
                 shownScore = sc
@@ -614,8 +618,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     videoId = videoId, title = title, artist = artist, thumbnailUrl = null, albumName = album,
                     durationText = (durationMs / 1000).let { "${it / 60}:${(it % 60).toString().padStart(2, '0')}" },
                 )
-                runCatching { com.music.bitchord.data.lyrics.LyricsSearchAll.answers(asSong) }.getOrDefault(emptyList())
-                    .also { fullAnswers += it }
+                // Each answer is weighed as it arrives, not after the slowest source.
+                runCatching {
+                    com.music.bitchord.data.lyrics.LyricsSearchAll.answers(asSong) { r ->
+                        fullAnswers += r
+                        viewModelScope.launch { showIfBetter(r.lines, r.source) }
+                    }
+                }.getOrDefault(emptyList())
             }
             val bestAuto = LyricsRepository.best(
                 videoId = videoId,
@@ -685,7 +694,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         upgrade = true,
                     )
                     com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title' upgraded (score $keptScore → ${linesScore(best.result.lines)})")
-                } else if (selectedLyricsSource == null && _lyrics.value != keptAuto) {
+                } else if (selectedLyricsSource == null && _lyrics.value == null) {
                     _lyrics.value = keptAuto
                     _lyricsSource.value = null
                     if (best != null) {
