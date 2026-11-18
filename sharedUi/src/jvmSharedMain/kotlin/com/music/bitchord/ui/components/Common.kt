@@ -501,7 +501,7 @@ private fun SongRowContent(
     // …and with the details you corrected by hand.
     val editsVersion = ShownSongs.version.intValue
     val shown = remember(song.videoId, song.title, com.music.bitchord.data.model.ArtworkOverrides.display, editsVersion) {
-        val picked = com.music.bitchord.data.model.ArtworkOverrides.display?.invoke(song) ?: song
+        val picked = (if (com.music.bitchord.data.model.ArtworkOverrides.inAlbumInView(song)) null else com.music.bitchord.data.model.ArtworkOverrides.display?.invoke(song)) ?: song
         com.music.bitchord.data.model.ArtworkOverrides.edited?.invoke(song)?.let { e ->
             picked.copy(title = e.title, artist = e.artist, albumName = e.albumName, trackNumber = e.trackNumber)
         } ?: picked

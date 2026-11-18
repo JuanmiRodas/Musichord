@@ -4156,7 +4156,7 @@ fun NowPlayingScreen(
                                         .graphicsLayer { alpha = (1f - p() * 4f).coerceIn(0f, 1f) }
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(Color.White.copy(alpha = 0.08f))
-                                        .opensPage(song.albumId, onOpenAlbum),
+                                        .opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
                                 )
                                 Spacer(Modifier.width(12.dp))
                             }
@@ -4228,7 +4228,7 @@ fun NowPlayingScreen(
                                             onOverflowChange = { titleOverflowing = it },
                                             // Only the tracks YouTube hands us a browse id for
                                             // lead anywhere; the rest stay plain text.
-                                            modifier = Modifier.opensPage(song.albumId, onOpenAlbum),
+                                            modifier = Modifier.opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
                                         )
                                         ArtistCreditsMarquee(
                                             text = it.second,
@@ -4256,7 +4256,7 @@ fun NowPlayingScreen(
                                                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 16.sp),
                                                 color = chromeWhite(0.4f),
                                                 enabled = scrolling,
-                                                modifier = Modifier.opensPage(song.albumId, onOpenAlbum),
+                                                modifier = Modifier.opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
                                             )
                                         }
                                     }

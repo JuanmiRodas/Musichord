@@ -30,7 +30,14 @@ object AlbumAppearances {
         return "$t|$a"
     }
 
-    private class Index(val liked: List<Song>, val library: List<Song>, val byKey: Map<String, List<Song>>, val likedByKey: Map<String, Song>)
+    private class Index(val liked: List<Song>, val library: List<Song>, val byKey: Map<String, List<Song>>, val likedByKey: Map<String, List<Song>>)
+
+    private fun seconds(s: Song): Int? = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+        ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+
+    /** BitChord Audio: the same recording — not just the same title (see OwnFileMatcher.sameRecording). */
+    private fun same(a: Song, b: Song): Boolean = a.videoId == b.videoId ||
+        com.music.bitchord.data.sources.OwnFileMatcher.sameRecording(a.title, a.albumName, seconds(a), b.title, b.albumName, seconds(b))
 
     @Volatile
     private var index: Index? = null
@@ -64,8 +71,8 @@ object AlbumAppearances {
     private fun build(liked: List<Song>, library: List<Song>): Index {
         val byKey = HashMap<String, MutableList<Song>>()
         (liked + library).forEach { s -> keyOf(s.title, s.artist)?.let { byKey.getOrPut(it) { ArrayList() } += s } }
-        val likedByKey = HashMap<String, Song>()
-        liked.forEach { s -> keyOf(s.title, s.artist)?.let { likedByKey.putIfAbsent(it, s) } }
+        val likedByKey = HashMap<String, MutableList<Song>>()
+        liked.forEach { s -> keyOf(s.title, s.artist)?.let { likedByKey.getOrPut(it) { ArrayList() } += s } }
         return Index(liked, library, byKey, likedByKey).also { index = it }
     }
 
@@ -76,7 +83,8 @@ object AlbumAppearances {
     fun likedCopy(song: Song): Song? {
         if (LikeLookup.isLiked(song.videoId)) return song
         val key = keyOf(song.title, song.artist) ?: return null
-        return index().likedByKey[key]?.takeIf { LikeLookup.status(it.videoId) != com.music.bitchord.data.model.LikeStatus.INDIFFERENT }
+        return index().likedByKey[key].orEmpty()
+            .firstOrNull { same(song, it) && LikeLookup.status(it.videoId) != com.music.bitchord.data.model.LikeStatus.INDIFFERENT }
     }
 
     private fun albumOf(s: Song, source: String): Album? {
@@ -91,7 +99,7 @@ object AlbumAppearances {
     /** The albums [song] is known to be on, from what is on the phone already. */
     fun known(song: Song): List<Album> {
         val key = keyOf(song.title, song.artist)
-        val copies = listOf(song) + (key?.let { index().byKey[it] }.orEmpty())
+        val copies = listOf(song) + (key?.let { index().byKey[it] }.orEmpty()).filter { same(song, it) }
         return copies.mapNotNull { s -> albumOf(s, if (WebDavConfig.isWebDavId(s.videoId)) "pCloud" else "YouTube Music") }
             .distinctBy { norm(it.name) }
     }

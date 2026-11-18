@@ -59,10 +59,50 @@ object SourceMap {
     const val SAAVN_KBPS = 320
 
     /** The raw entry, JioSaavn part included, without the library checks. */
-    fun entry(videoId: String): Entry? = entries[videoId]
+    // BitChord Audio: a file link made by an older matcher is not trusted (it may be another
+    // recording — a live take for the studio cut): only JioSaavn's part is kept until re-matched.
+    fun entry(videoId: String): Entry? = entries[videoId]?.let { e -> if (e.gen % 100 != MATCHER_VERSION) e.copy(file = null) else e }
 
     /** BitChord Audio: the YouTube ids matched to your file [fileId] (cheap; no library matching). */
-    fun idsForFile(fileId: String): List<String> = entries.filterValues { it.file == fileId }.keys.toList()
+    fun idsForFile(fileId: String): List<String> =
+        entries.filterValues { it.file == fileId && it.gen % 100 == MATCHER_VERSION }.keys.toList()
+
+    @Volatile private var audited = false
+
+    /**
+     * BitChord Audio: once a run — every link between a liked song and a file of yours made
+     * by the older, looser matcher, weighed again by the same-recording rule; the ones that
+     * were two recordings (a live take for the studio cut, one concert for another, lengths
+     * apart) are logged and dropped, the rest re-matched as songs play.
+     */
+    fun audit(liked: List<Song>) {
+        if (audited || liked.isEmpty()) return
+        val library = WebDavRepository.library()
+        if (library.isEmpty()) return
+        audited = true
+        val files = library.associateBy { it.videoId }
+        val byId = liked.associateBy { it.videoId }
+        var kept = 0
+        val wrong = ArrayList<String>()
+        for ((id, e) in entries.entries.toList()) {
+            val fileId = e.file ?: continue
+            val song = byId[id] ?: continue
+            val file = files[fileId] ?: continue
+            val ok = OwnFileMatcher.sameRecording(song.title, song.albumName, seconds(song.durationText), file.title, file.albumName, seconds(file.durationText))
+            if (ok) {
+                kept++
+                if (e.gen % 100 != MATCHER_VERSION) entries[id] = e.copy(gen = gen())
+            } else {
+                wrong += "'${song.title}' (${song.albumName ?: "?"}, ${song.durationText ?: "?"}) ≠ '${file.title}' (${file.albumName ?: "?"}, ${file.durationText ?: "?"})"
+                entries[id] = e.copy(file = null, gen = -1)
+            }
+        }
+        counterparts.clear()
+        noCounterpart.clear()
+        TrackLog.d(TAG, "library audit: ${wrong.size} links were other recordings, $kept are the same song")
+        wrong.take(200).forEach { TrackLog.d(TAG, "library audit: unlinked $it") }
+        if (wrong.isNotEmpty()) save()
+    }
 
     private val entries = ConcurrentHashMap<String, Entry>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -91,7 +131,8 @@ object SourceMap {
     private fun gen(): Int = WebDavRepository.library().size * 100 + MATCHER_VERSION
 
     /** Bumped when matching improves: songs with no file then get another look. */
-    private const val MATCHER_VERSION = 7
+    // 8: the same-recording rule (live/acoustic/… both ways, the same live, 2 s) — everything re-matched.
+    private const val MATCHER_VERSION = 8
 
     /** The entry for [videoId], if it still holds for the library as it is. */
     fun lookup(videoId: String): Entry? {
@@ -145,19 +186,21 @@ object SourceMap {
         counterparts[file.videoId]?.let { id -> liked.firstOrNull { it.videoId == id }?.let { return it } }
         val mapped = entries.entries.firstOrNull { it.value.file == file.videoId }?.key
         val byMap = mapped?.let { id -> liked.firstOrNull { it.videoId == id } }
-            ?.takeIf { !OwnFileMatcher.otherRecording(it.title, it.albumName, file) }
+            ?.takeIf { s -> OwnFileMatcher.sameRecording(s.title, s.albumName, seconds(s.durationText), file.title, file.albumName, seconds(file.durationText)) }
         val found = byMap ?: run {
             val index = likedIndex?.takeIf { it.first.size == liked.size && it.first.firstOrNull()?.videoId == liked.firstOrNull()?.videoId }?.second ?: buildIndex(liked)
             val keys = OwnFileMatcher.titleKeys(file.title) + runCatching { OwnFileMatcher.soundKeys(file.title) }.getOrDefault(emptySet())
             val seconds = seconds(file.durationText)
             keys.flatMap { index[it].orEmpty() }.distinct()
                 .filter { OwnFileMatcher.sameArtist(file.artist, it.artist) || ArtistLinks.linked(it.artist, file.artist) }
-                .filter { !strict || !OwnFileMatcher.otherRecording(it.title, it.albumName, file) }
+                // BitChord Audio: the same recording, both ways (see OwnFileMatcher.sameRecording).
+                // In a Liked Music queue the length may differ (another upload), never the kind.
                 .filter { s ->
-                    if (!strict) return@filter true
-                    val a = seconds ?: return@filter false
-                    val b = seconds(s.durationText) ?: return@filter false
-                    kotlin.math.abs(a - b) <= 2
+                    if (strict) {
+                        OwnFileMatcher.sameRecording(s.title, s.albumName, seconds(s.durationText), file.title, file.albumName, seconds)
+                    } else {
+                        OwnFileMatcher.kindsOf(s.title, s.albumName) == OwnFileMatcher.kindsOf(file.title, file.albumName)
+                    }
                 }
                 .minByOrNull { s -> kotlin.math.abs((seconds(s.durationText) ?: 0) - (seconds ?: 0)) }
         }

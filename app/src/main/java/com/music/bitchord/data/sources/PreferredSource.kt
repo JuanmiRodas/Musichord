@@ -47,17 +47,35 @@ object PreferredSource {
         return "$t|$a"
     }
 
-    fun get(title: String, artist: String): Choice? {
+    fun get(title: String, artist: String, album: String? = null): Choice? {
         val key = keyOf(title, artist) ?: return null
         val v = prefs?.getString(key, null) ?: return null
-        return when {
+        val choice = when {
             v == YOUTUBE -> YouTube
             v.startsWith(SONG) -> songFrom(v.removePrefix(SONG))?.let(::Chosen)
             else -> File(v)
         }
+        // BitChord Audio: a pick is filed by title and artist, which a live take shares with the
+        // studio cut ("(Live)" is dropped from the key) — it only holds for the same kind of recording.
+        val kinds = OwnFileMatcher.kindsOf(title, album)
+        val picked: Song? = when (choice) {
+            is Chosen -> choice.song
+            is File -> libraryById()[choice.id]
+            else -> null
+        }
+        if (picked != null && OwnFileMatcher.kindsOf(picked.title, picked.albumName.takeIf { album != null }) != kinds) return null
+        return choice
     }
 
-    fun get(song: Song): Choice? = get(song.title, song.artist)
+    fun get(song: Song): Choice? = get(song.title, song.artist, song.albumName)
+
+    @Volatile private var libIndex: Pair<List<Song>, Map<String, Song>>? = null
+
+    private fun libraryById(): Map<String, Song> {
+        val library = com.music.bitchord.data.webdav.WebDavRepository.library()
+        libIndex?.takeIf { it.first === library }?.let { return it.second }
+        return library.associateBy { it.videoId }.also { libIndex = library to it }
+    }
 
     fun prefersYouTube(title: String, artist: String): Boolean = get(title, artist) == YouTube
 

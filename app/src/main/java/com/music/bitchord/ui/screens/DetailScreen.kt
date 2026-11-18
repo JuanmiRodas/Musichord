@@ -453,6 +453,14 @@ fun DetailScreen(
     // on an album that was closed and reopened would be a page that appears to
     // have lost most of its tracks.
     var query by rememberSaveable(page.browseId) { mutableStateOf("") }
+    // BitChord Audio: on an album's page, its rows show the album's own covers.
+    androidx.compose.runtime.DisposableEffect(page.browseId, page.type) {
+        val mine = page.browseId to page.title
+        if (page.type == BrowseType.ALBUM) com.music.bitchord.data.model.ArtworkOverrides.albumInView = mine
+        onDispose {
+            if (com.music.bitchord.data.model.ArtworkOverrides.albumInView == mine) com.music.bitchord.data.model.ArtworkOverrides.albumInView = null
+        }
+    }
     val keptSet by com.music.bitchord.download.KeptPlaylists.on.collectAsStateWithLifecycle()
     val keptOn = com.music.bitchord.download.KeptPlaylists.key(page.browseId) in keptSet
     // Whether the field still owes the keyboard an appearance. Held here rather

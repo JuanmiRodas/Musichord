@@ -31,8 +31,8 @@ import kotlin.math.abs
  */
 object OwnFileMatcher {
 
-    /** BitChord Audio: two songs are only the same when they last the same (to a few seconds). */
-    private const val MAX_DRIFT_SEC = 3
+    /** BitChord Audio: two songs are only the same when they last the same (to 2 seconds). */
+    private const val MAX_DRIFT_SEC = 2
     private const val UPLOADER_DRIFT_SEC = 2
     private val UPLOADER = Regex(
         """(\bchannel\b|vevo|\brecords?\b|\btopic\b|\bofficial\b|unknown artist|\bmusic\s+(japan|channel|entertainment)\b)""",
@@ -215,8 +215,10 @@ object OwnFileMatcher {
             .filter { file ->
                 val got = file.durationMillis().takeIf { it > 0 }?.let { (it / 1000).toInt() }
                 // A length not known on one side: only the same artist under
-                // the same name counts (checked below); no guessing past that.
-                if (durationSec == null || got == null) return@filter sameArtist(artist, file.artist)
+                // the same name counts (checked below), off the same release; no guessing past that.
+                if (durationSec == null || got == null) {
+                    return@filter sameArtist(artist, file.artist) && (album.isNullOrBlank() || sameAlbum(album, file.albumName))
+                }
                 val limit = if (videoUpload && got < durationSec && got >= durationSec * 6 / 10) {
                     maxOf(60, durationSec / 4)
                 } else {
@@ -260,6 +262,15 @@ object OwnFileMatcher {
             .filter { file -> VERSION_WORDS.none { it in versionNotes(file.title) && it !in versionNotes(title) } }
             // A live album, a tribute or covers album holds other recordings.
             .filter { file -> !otherRecording(title, album, file) }
+            // BitChord Audio: and the other way round — a live (or acoustic, remix…) song asked
+            // for is never the studio file, and one concert's take is not another's.
+            .filter { file ->
+                val wantedAlbum = album ?: if (VIDEO_UPLOAD.containsMatchIn(title)) null else album
+                sameRecording(title, wantedAlbum, null, file.title, file.albumName, null, lengthsChecked = true) ||
+                    // A row that names no album (a video upload) says nothing of a live release;
+                    // its title still has to say the same kind.
+                    (wantedAlbum.isNullOrBlank() && kindsOf(title, null) == kindsOf(file.title, null) && kindsOf(file.title, file.albumName).isEmpty())
+            }
             // BitChord Audio: the best copy of the recording wins, whichever
             // release it is filed under (a "Complete Best" at 320 kbps over the
             // original album at 160) — the versions that are other recordings
@@ -277,7 +288,57 @@ object OwnFileMatcher {
             )
     }
 
-    private const val CONFIRM_DRIFT_SEC = 3
+    private const val CONFIRM_DRIFT_SEC = 2
+
+    // ── BitChord Audio: one rule for "the same recording", used everywhere ──────────
+    // A title shared is not a song shared. What a release says it is — live (and which
+    // live), acoustic, remix, karaoke, a TV-size cut, a cover — has to agree on both
+    // sides, whichever side says it; and the lengths have to agree to 2 seconds.
+
+    private val KINDS = listOf(
+        "live" to Regex("""(?<!love )\blive\b|ライブ|ライヴ|\bin concert\b|\bconcert\b|コンサート|\ben vivo\b|\bdirecto\b|\bunplugged\b|\btour\b|ツアー|\bfes\.?\b|\bfestival\b|フェス|\bbudokan\b|武道館|\bsession\b"""),
+        "tribute" to Regex("""\btribute\b|トリビュート"""),
+        "cover" to Regex("""\bcovers?\b|カバー|カヴァー"""),
+        "remix" to Regex("""\bremix(es)?\b|リミックス|\bre-?mix\b"""),
+        "acoustic" to Regex("""\bacoustic\b|アコースティック"""),
+        "karaoke" to Regex("""\bkaraoke\b|カラオケ|\binstrumental\b|\binst\.?\b|インスト|\boff vocal\b"""),
+        "orchestra" to Regex("""\borchestra|\bsymphonic\b|オーケストラ|\bpiano (ver|collection)"""),
+        "short" to Regex("""\btv\s*size\b|tvサイズ|ｔｖサイズ|テレビサイズ|\bshort ver|\bradio edit\b"""),
+        "demo" to Regex("""\bdemo\b"""),
+    )
+
+    /** What kind of recording [title] off [album] is: "live", "remix"… — empty for the studio cut. */
+    fun kindsOf(title: String, album: String?): Set<String> {
+        // The title's bracketed notes and anything after a dash ("Song - Live at X"); the album whole.
+        val notes = versionNotesRaw(title) + " " + (SEPARATOR.split(title).drop(1).joinToString(" "))
+        val text = (notes + " " + album.orEmpty()).lowercase(Locale.ROOT)
+        return KINDS.filter { (_, re) -> re.containsMatchIn(text) }.map { it.first }.toSet()
+    }
+
+    /**
+     * Whether two copies are the same recording: the same kinds (see [kindsOf]); a live one
+     * off the same live release (two concerts are two recordings); and, when both lengths
+     * are known, within 2 seconds. A length unknown on a side needs the same release.
+     * Titles and artists are the caller's to have matched.
+     */
+    fun sameRecording(
+        titleA: String, albumA: String?, secondsA: Int?,
+        titleB: String, albumB: String?, secondsB: Int?,
+        lengthsChecked: Boolean = false,
+    ): Boolean {
+        val ka = kindsOf(titleA, albumA)
+        val kb = kindsOf(titleB, albumB)
+        if (ka != kb) return false
+        if ("live" in ka && !sameAlbum(albumA, albumB)) return false
+        if (lengthsChecked) return true
+        if (secondsA != null && secondsB != null) return abs(secondsA - secondsB) <= MAX_DRIFT_SEC
+        return sameAlbum(albumA, albumB) || (albumA.isNullOrBlank() && albumB.isNullOrBlank())
+    }
+
+    /** The bracketed notes of [title], as written (lower-cased). */
+    private fun versionNotesRaw(title: String): String =
+        Regex("""[(\[（【<＜]([^)\]）】>＞]*)[)\]）】>＞]""").findAll(title).joinToString(" ") { it.groupValues[1] } +
+            " " + (UNCLOSED.find(title)?.value?.trim()?.drop(1) ?: "")
 
     /** Whether your library has songs by [artist] (under that name) on [album]. */
     private fun hasOwnTracksOn(artist: String, album: String?): Boolean {
@@ -391,12 +452,12 @@ object OwnFileMatcher {
         youTubeRefused: Boolean = false,
     ): Verdict {
         // A copy picked by hand from another source holds without pCloud.
-        (PreferredSource.get(title, artist) as? PreferredSource.Chosen)
+        (PreferredSource.get(title, artist, album) as? PreferredSource.Chosen)
             ?.takeUnless { NotSame.blocked(videoId, it.song.videoId) }?.let { return Play(it.song) }
         if (!WebDavRepository.isConfigured()) return Keep("pCloud not connected")
         val library = WebDavRepository.library()
         if (library.isEmpty()) return Keep("pCloud library not loaded yet")
-        when (val choice = PreferredSource.get(title, artist)) {
+        when (val choice = PreferredSource.get(title, artist, album)) {
             PreferredSource.YouTube -> if (!youTubeRefused) return Keep("you chose YouTube for this song")
             is PreferredSource.Chosen -> if (!NotSame.blocked(videoId, choice.song.videoId)) return Play(choice.song)
             is PreferredSource.File -> library.firstOrNull { it.videoId == choice.id }?.let { return Play(it) }

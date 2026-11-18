@@ -215,7 +215,8 @@ data class Song(
  *
  * Video thumbnails carry no hint and are returned unchanged.
  */
-fun Song.artworkAt(px: Int): String? = (ArtworkOverrides.lookup?.invoke(title, artist) ?: thumbnailUrl).artworkAt(px)
+fun Song.artworkAt(px: Int): String? =
+    ((if (ArtworkOverrides.inAlbumInView(this)) null else ArtworkOverrides.lookup?.invoke(title, artist)) ?: thumbnailUrl).artworkAt(px)
 
 /**
  * BitChord Audio: a cover chosen for a song (by title and artist, so every
@@ -235,6 +236,19 @@ object ArtworkOverrides {
      * artist, album), or null when there are none — for what is shown only.
      */
     var edited: ((Song) -> Song?)? = null
+
+    /**
+     * BitChord Audio: the album page in front (its id and title), if any. A song is on
+     * several albums, each with its own cover: on an album's page its rows show that
+     * album's, not a cover picked for the song elsewhere.
+     */
+    var albumInView: Pair<String?, String?>? = null
+
+    fun inAlbumInView(song: Song): Boolean {
+        val (id, title) = albumInView ?: return false
+        return (id != null && song.albumId == id) ||
+            (title != null && song.albumName != null && song.albumName.equals(title, ignoreCase = true))
+    }
 }
 
 /** BitChord Audio: [this] as it is shown — your corrected details, if any. */

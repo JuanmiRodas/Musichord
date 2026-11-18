@@ -100,6 +100,9 @@ interface PlayerHost {
     /** BitChord Audio: the video shown in video mode (its thumbnail tints the controls edge to edge). */
     val videoModeShownVideoId: StateFlow<String?> get() = NoVideoLooking
 
+    /** BitChord Audio: the page of [song]'s album — YouTube Music's, else your pCloud album's. */
+    fun albumPageOf(song: com.music.bitchord.data.model.Song): String? = song.albumId
+
     /** BitChord Audio: video mode's lyrics size, as a scale. */
     val videoModeLyricsScale: StateFlow<Float> get() = NoVideoScale
 

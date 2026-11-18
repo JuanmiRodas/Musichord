@@ -164,6 +164,17 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override val videoModeLooks: StateFlow<com.music.bitchord.ui.player.VideoLooksUi?> get() = looksUi
     override val videoModeOver: StateFlow<Boolean> get() = MusicVideoEngine.over
     override val videoModeShownVideoId: StateFlow<String?> get() = MusicVideoEngine.shownVideoId
+    // BitChord Audio: an album YouTube Music doesn't have (a live release, one only in your
+    // pCloud) opens as your pCloud album's page.
+    override fun albumPageOf(song: com.music.bitchord.data.model.Song): String? = runCatching {
+        com.music.bitchord.data.webdav.PcloudAlbums.pageIdOf(song)
+            ?: song.albumId
+            ?: song.albumName?.takeIf { it.isNotBlank() }?.let { name ->
+                val library = com.music.bitchord.data.webdav.WebDavRepository.library()
+                library.firstOrNull { f -> com.music.bitchord.data.sources.OwnFileMatcher.sameAlbum(name, f.albumName) }?.albumName
+                    ?.let { com.music.bitchord.data.LocalGroups.albumPageId(com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID, it) }
+            }
+    }.getOrNull() ?: song.albumId
     override val videoModeLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.lyricsScale
     override val songLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.songLyricsScale
     override fun setSongLyricsScale(value: Float) = com.music.bitchord.data.video.VideoMode.setSongLyricsScale(value)

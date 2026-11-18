@@ -2014,6 +2014,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 swapLikedVideos(it)
                 // BitChord Audio: official Latin names for your likes, in the background.
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
+                // BitChord Audio: the links to your files made by the older matcher, checked once.
+                launch(Dispatchers.Default) { runCatching { com.music.bitchord.data.sources.SourceMap.audit(it) } }
             }
         }
         // BitChord Audio: lists kept downloaded (the switch at the top of a playlist, Liked Music
