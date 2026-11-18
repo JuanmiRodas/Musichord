@@ -148,6 +148,45 @@ object OwnLibrary {
 
     data class Merged(val songs: List<Song>, val sections: List<HomeShelf>)
 
+    // ── BitChord Audio: the Library tab with your music in it ─────────────────────────
+
+    /**
+     * [shelves] (YouTube Music's library) with your albums and artists added to its
+     * Albums and Artists shelves — each once (YouTube's card kept when it has it too),
+     * marked with the cloud — and new shelves when it has none.
+     */
+    fun mergeLibrary(shelves: List<HomeShelf>, albumsTitle: String, artistsTitle: String): List<HomeShelf> {
+        val pool = (WebDavRepository.library() + _uploads.value).filter { !it.albumName.isNullOrBlank() }
+        if (pool.isEmpty()) return shelves
+        val shown = shelves.flatMap { it.items }.map { it.title }
+        val albums = pool.groupBy { it.albumName!!.trim() + "|" + OwnFileMatcher.key(it.artist.split(PARTS).first()) }
+            .values.mapNotNull { tracks ->
+                val name = tracks.first().albumName!!.trim()
+                if (shown.any { sameAlbum(it, name) }) return@mapNotNull null
+                val id = pageOf(name, tracks) ?: return@mapNotNull null
+                ShelfItem(name, "$CLOUD " + tracks.first().artist.split(PARTS).first(), tracks.firstNotNullOfOrNull { it.thumbnailUrl }, null, id)
+            }.sortedBy { it.subtitle.lowercase() + it.title.lowercase() }
+        val artists = WebDavRepository.library().mapNotNull { s -> WebDavRepository.artistFolderOf(s.videoId) ?: s.artist.split(PARTS).firstOrNull() }
+            .map { it.trim() }.filter { it.isNotEmpty() }
+            .distinctBy { OwnFileMatcher.key(it) }
+            .filter { a -> shown.none { OwnFileMatcher.sameArtist(a, it) } }
+            .sortedBy { it.lowercase() }
+            .map { a ->
+                ShelfItem(a, "$CLOUD pCloud", WebDavRepository.library().firstOrNull { OwnFileMatcher.sameArtist(a, it.artist) }?.thumbnailUrl, null,
+                    LocalGroups.artistPageId(WebDavConfig.BROWSE_ID, a))
+            }
+        val out = shelves.toMutableList()
+        fun add(items: List<ShelfItem>, pattern: Regex, title: String) {
+            if (items.isEmpty()) return
+            val i = out.indexOfFirst { pattern.containsMatchIn(it.title) }
+            if (i >= 0) out[i] = out[i].copy(items = out[i].items + items) else out += HomeShelf(title = title, items = items)
+        }
+        add(albums, Regex("(?i)album|álbum|アルバム"), albumsTitle)
+        add(artists, Regex("(?i)artist|artista|アーティスト"), artistsTitle)
+        TrackLog.d(TAG, "own library: ${albums.size} of your albums and ${artists.size} of your artists in the Library")
+        return out
+    }
+
     // ── BitChord Audio: search over your own music ────────────────────────────────────
 
     data class Found(val songs: List<Song>, val albums: List<ShelfItem>)

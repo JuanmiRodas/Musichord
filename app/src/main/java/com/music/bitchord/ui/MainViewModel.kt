@@ -2648,8 +2648,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // this ViewModel's scope, so it is cancelled with the screen and
                 // a liked track past the first page still reads as liked.
                 page.likedContinuation?.let { token -> syncLikedMusic(identity, token) }
-                if (page.isEmpty) UiState.Error(text(R.string.library_empty))
-                else UiState.Success(page.copy(likedContinuation = null))
+                // BitChord Audio: your own albums and artists among YouTube Music's.
+                val shelves = withContext(Dispatchers.Default) {
+                    runCatching { com.music.bitchord.data.OwnLibrary.mergeLibrary(page.shelves, text(R.string.albums), text(R.string.artists)) }.getOrDefault(page.shelves)
+                }
+                if (page.isEmpty && shelves.isEmpty()) UiState.Error(text(R.string.library_empty))
+                else UiState.Success(page.copy(likedContinuation = null, shelves = shelves))
             },
             onFailure = { UiState.Error(it.friendly()) },
         )
