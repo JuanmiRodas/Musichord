@@ -175,6 +175,57 @@ object JapaneseRomanizer {
         }
     }
 
+    /** A token as read here: the dictionary's, or two of its joined under a reading of their own. */
+    private class Tok(
+        val surface: String,
+        val reading: String?,
+        val partOfSpeechLevel1: String,
+        val partOfSpeechLevel2: String,
+        val partOfSpeechLevel3: String,
+        val position: Int,
+    )
+
+    /**
+     * BitChord Audio: the reading a word most probably has in a song. The dictionary splits
+     * a number and its counter (二人 → 二 + 人, "ni nin") and picks rarer readings for some
+     * everyday words; these are read as they are sung — futari, hitori, otona, kyou…
+     */
+    private val USUAL = mapOf(
+        "一人" to "ヒトリ", "二人" to "フタリ", "大人" to "オトナ", "今日" to "キョウ", "昨日" to "キノウ",
+        "明日" to "アシタ", "一つ" to "ヒトツ", "二つ" to "フタツ", "三つ" to "ミッツ", "一緒" to "イッショ",
+        "一番" to "イチバン", "何故" to "ナゼ", "何処" to "ドコ", "貴方" to "アナタ", "貴女" to "アナタ",
+        "一瞬" to "イッシュン", "永遠" to "エイエン", "刹那" to "セツナ", "日々" to "ヒビ", "人々" to "ヒトビト",
+        "上手" to "ジョウズ", "下手" to "ヘタ", "大切" to "タイセツ", "一日" to "イチニチ", "今年" to "コトシ",
+        "眼差し" to "マナザシ", "微笑み" to "ホホエミ", "微笑ん" to "ホホエン", "微笑む" to "ホホエム",
+        "時計" to "トケイ", "景色" to "ケシキ", "宇宙" to "ウチュウ", "未来" to "ミライ", "世界" to "セカイ",
+        "一人きり" to "ヒトリキリ", "二人きり" to "フタリキリ", "誰か" to "ダレカ", "何度" to "ナンド",
+        "何時" to "イツ", "何もかも" to "ナニモカモ", "今夜" to "コンヤ", "今宵" to "コヨイ", "故郷" to "フルサト",
+    )
+    private val USUAL_SINGLE = mapOf("空" to "ソラ", "時" to "トキ", "心" to "ココロ", "瞳" to "ヒトミ", "涙" to "ナミダ", "誰" to "ダレ")
+
+    private fun readings(tokens: List<com.atilika.kuromoji.ipadic.Token>): List<Tok> {
+        val out = ArrayList<Tok>(tokens.size)
+        var i = 0
+        while (i < tokens.size) {
+            val t = tokens[i]
+            // Up to three tokens joined when together they are one of [USUAL].
+            val joined = (3 downTo 2).firstNotNullOfOrNull { n ->
+                if (i + n > tokens.size) return@firstNotNullOfOrNull null
+                val surface = tokens.subList(i, i + n).joinToString("") { it.surface }
+                USUAL[surface]?.let { n to Tok(surface, it, "名詞", "一般", "*", t.position) }
+            }
+            if (joined != null) {
+                out += joined.second
+                i += joined.first
+                continue
+            }
+            val reading = USUAL[t.surface] ?: USUAL_SINGLE[t.surface]?.takeIf { t.partOfSpeechLevel1 == "名詞" } ?: t.reading
+            out += Tok(t.surface, reading, t.partOfSpeechLevel1, t.partOfSpeechLevel2, t.partOfSpeechLevel3, t.position)
+            i++
+        }
+        return out
+    }
+
     private fun pieces(raw: String): List<Piece>? {
         val (prepared, fromAt, toAt) = prepareMapped(raw)
         // The dictionary loads in the background at start-up. Asked before it
@@ -196,13 +247,13 @@ object JapaneseRomanizer {
         // the romaji. Each one is swapped for its Japanese form first, one
         // character for one (so the timing map holds).
         val line = japaneseForms(prepared, tokenizer)
-        val tokens = runCatching { tokenizer.tokenize(line) }.getOrNull() ?: return null
+        val tokens = runCatching { tokenizer.tokenize(line) }.getOrNull()?.let(::readings) ?: return null
         val out = ArrayList<Piece>()
         var gap = false
         var carry = ""
         var previousPos: String? = null
         var previousNamed = false
-        fun spanOf(tok: com.atilika.kuromoji.ipadic.Token): Pair<Int, Int> {
+        fun spanOf(tok: Tok): Pair<Int, Int> {
             val a = tok.position.coerceIn(0, (fromAt.size - 1).coerceAtLeast(0))
             val b = (tok.position + tok.surface.length - 1).coerceIn(0, (toAt.size - 1).coerceAtLeast(0))
             return if (fromAt.isEmpty()) 0 to 0 else fromAt[a] to toAt[b]

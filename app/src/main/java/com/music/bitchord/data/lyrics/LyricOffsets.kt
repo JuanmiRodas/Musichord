@@ -56,7 +56,8 @@ object LyricOffsets {
     /** The shift for [trackId]: as set here, else its lyrics file's `[offset:]`. */
     fun flow(trackId: String): StateFlow<Long> {
         val initial = prefs?.takeIf { it.contains(trackId) }?.getLong(trackId, 0L)
-            ?: SidecarLyrics.fileOffset(trackId)?.let { -it }
+            // An "[offset:0]" (written by this app's own embedding) says nothing: the default holds.
+            ?: SidecarLyrics.fileOffset(trackId)?.takeIf { it != 0L }?.let { -it }
             ?: if (EditedLyrics.isHandTimed(trackId)) 0L else DEFAULT_SHIFT_MS
         return flows.getOrPut(trackId) { MutableStateFlow(initial) }.also {
             if (prefs?.contains(trackId) != true) it.value = initial

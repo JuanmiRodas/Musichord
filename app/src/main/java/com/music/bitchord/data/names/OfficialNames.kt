@@ -70,10 +70,13 @@ object OfficialNames {
             val root = JSONObject(f.readText())
             root.keys().forEach { key ->
                 val o = root.getJSONObject(key)
+                val source = runCatching { Source.valueOf(o.optString("s")) }.getOrDefault(Source.AUTO)
                 entries[key] = Entry(
                     original = o.optString("o"),
-                    latin = o.optString("l"),
-                    source = runCatching { Source.valueOf(o.optString("s")) }.getOrDefault(Source.AUTO),
+                    // BitChord Audio: a romanization kept from before is worked out again (the
+                    // readings improve: futari, not "ninin"); only official names are kept as stored.
+                    latin = if (source == Source.AUTO) "" else o.optString("l"),
+                    source = source,
                     checkedAt = o.optLong("t"),
                 )
             }
