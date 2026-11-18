@@ -482,6 +482,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // BitChord Audio: lyrics the app kept earlier (not ones you picked or
             // timed) are shown at once, but a better version is still looked for.
             var keptAuto: List<com.music.bitchord.data.lyrics.LyricLine>? = null
+            // BitChord Audio: playing your file of a liked song (or the other way round) — the
+            // lyrics kept for the other copy count too, so an upgrade there shows here.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    com.music.bitchord.data.lyrics.LyricsKeeper.adoptTwin(
+                        Song(videoId = videoId, title = title, artist = artist, thumbnailUrl = null, albumName = album,
+                            durationText = (durationMs / 1000).takeIf { it > 0 }?.let { "${it / 60}:${(it % 60).toString().padStart(2, '0')}" }),
+                    )
+                }
+            }
             com.music.bitchord.data.lyrics.EditedLyrics.get(videoId)?.let { mine ->
                 _lyrics.value = mine
                 _lyricsSource.value = null

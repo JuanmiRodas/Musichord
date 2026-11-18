@@ -102,7 +102,41 @@ object LyricsKeeper {
         scope.launch {
             if (upgrade || picked) runCatching { forgetEmbedded(song) }
             runCatching { embedInFiles(song, lines) }
+            // The same song under its other id (your pCloud file ↔ the liked track) gets them too.
+            runCatching { twinOf(song.videoId)?.let { adoptTwin(it) } }
         }
+    }
+
+    /**
+     * BitChord Audio: the same song under its other id — the liked track for one
+     * of your files, or the file for a liked track. Lyrics are kept per id, so a
+     * song that plays from your file had its own, older lyrics.
+     */
+    fun twinOf(videoId: String): Song? = runCatching {
+        if (com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(videoId)) {
+            com.music.bitchord.data.sources.SourceMap.fileSong(videoId)?.let(com.music.bitchord.data.sources.SourceMap::likedSongFor)
+        } else {
+            com.music.bitchord.data.sources.SourceMap.entry(videoId)?.file?.let(com.music.bitchord.data.sources.SourceMap::fileSong)
+        }
+    }.getOrNull()?.takeIf { it.videoId != videoId }
+
+    /**
+     * [song] takes its twin's kept lyrics when it has none, or when they are
+     * better and its own were the app's choice. True when they were taken.
+     */
+    suspend fun adoptTwin(song: Song): Boolean {
+        val twin = twinOf(song.videoId) ?: return false
+        val theirs = EditedLyrics.get(twin.videoId)?.takeIf { l -> l.any { it.timeMs > 0 } } ?: return false
+        val mine = EditedLyrics.get(song.videoId)
+        if (mine != null && (!mayUpgrade(song.videoId) || mine.map { it.text } == theirs.map { it.text })) return false
+        if (mine != null) {
+            val d = song.durationMillis().takeIf { it > 0 } ?: twin.durationMillis()
+            val japanese = LyricsSearchAll.namesJapanese(song) || LyricsQuality.looksJapanese(mine) || LyricsQuality.looksJapanese(theirs)
+            if (LyricsSearchAll.score(theirs, d, japanese) <= LyricsSearchAll.score(mine, d, japanese)) return false
+        }
+        keep(song, theirs, upgrade = mine != null)
+        TrackLog.d(TAG, "lyrics: '${song.title}' took the lyrics kept for its other copy")
+        return true
     }
 
     private const val AUTO = "auto:"
