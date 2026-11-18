@@ -39,9 +39,13 @@ object SongFamily {
         pool += LikedMusicCache.likedSongs.value
         pool += runCatching { com.music.bitchord.data.webdav.WebDavRepository.library() }.getOrDefault(emptyList())
         pool += OwnLibrary.uploads.value
-        val found = withTimeoutOrNull(8_000) {
+        // Asked with the artist, and by the title alone (other artists' versions).
+        val bare = song.title.replace(Regex("""\s*[(\[（【].*?[)\]）】]\s*"""), " ").trim()
+        val found = (withTimeoutOrNull(8_000) {
             YtMusicRepository.search("${song.title} ${song.artist}", SearchFilter.SONGS).getOrNull()
-        }.orEmpty().mapNotNull { r ->
+        }.orEmpty() + withTimeoutOrNull(8_000) {
+            YtMusicRepository.search(bare, SearchFilter.SONGS).getOrNull()
+        }.orEmpty()).mapNotNull { r ->
             when (r) {
                 is SearchResult.Track -> r.song
                 is SearchResult.TopTrack -> r.song
@@ -51,12 +55,23 @@ object SongFamily {
         pool += found
         pool.asSequence()
             .filter { it.videoId != song.videoId && !it.isVideo }
-            .filter { sameTitle(song.title, it.title) && OwnFileMatcher.sameArtist(song.artist, it.artist) }
+            .filter { sameTitle(song.title, it.title) && (OwnFileMatcher.sameArtist(song.artist, it.artist) || coverOf(song, it)) }
             .filter { !OwnFileMatcher.sameRecording(song.title, song.albumName, seconds(song), it.title, it.albumName, seconds(it)) }
             // One per recording: per kind, release and length.
             .distinctBy { OwnFileMatcher.kindsOf(it.title, it.albumName).sorted().joinToString() + "|" + it.albumName.orEmpty().lowercase() + "|" + ((seconds(it) ?: 0) / 3) }
             .take(20)
             .toList()
+    }
+
+    /**
+     * Whether [b] (another artist's) is a version of [a]: one of them is on a tribute or
+     * covers release, or says whose song it is ("原曲歌手", "originally by") — a shared
+     * title alone is not enough.
+     */
+    private fun coverOf(a: Song, b: Song): Boolean {
+        fun covers(s: Song) = OwnFileMatcher.kindsOf(s.title, s.albumName).let { "tribute" in it || "cover" in it } ||
+            Regex("""原曲|originally|オリジナル歌手|カバー""", RegexOption.IGNORE_CASE).containsMatchIn(s.title + " " + s.albumName.orEmpty())
+        return covers(a) || covers(b)
     }
 
     private val worksCache = ConcurrentHashMap<String, List<Other>>()

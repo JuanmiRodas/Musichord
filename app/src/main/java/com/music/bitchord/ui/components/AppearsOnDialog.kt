@@ -84,11 +84,11 @@ fun AppearsOnHost(onOpenAlbum: (String, String, String?) -> Unit, onPlay: (Song)
                 Heading(stringResource(R.string.appears_on_performances))
                 val p = performances
                 when {
-                    p == null -> Small(stringResource(R.string.cover_searching))
+                    p == null -> Small(stringResource(R.string.appears_on_looking))
                     p.isEmpty() -> Small(stringResource(R.string.appears_on_none))
                     else -> LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(p) { s ->
-                            Card(s.thumbnailUrl, s.title, listOfNotNull(s.albumName, s.durationText).joinToString(" · ")) {
+                            Card(s.thumbnailUrl, s.title, listOfNotNull(s.artist.takeIf { a -> !com.music.bitchord.data.sources.OwnFileMatcher.sameArtist(a, song.artist) }, s.albumName, s.durationText).joinToString(" · ")) {
                                 close()
                                 onPlay(s)
                             }
@@ -99,7 +99,7 @@ fun AppearsOnHost(onOpenAlbum: (String, String, String?) -> Unit, onPlay: (Song)
                 Heading(stringResource(R.string.appears_on_other_artists))
                 val o = others
                 when {
-                    o == null -> Small(stringResource(R.string.cover_searching))
+                    o == null -> Small(stringResource(R.string.appears_on_looking))
                     o.isEmpty() -> Small(stringResource(R.string.appears_on_no_work))
                     else -> o.forEach { other ->
                         Column(

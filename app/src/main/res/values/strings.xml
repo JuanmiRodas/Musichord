@@ -1696,4 +1696,5 @@
     <string name="cloud_copy_no_pcloud">Connect pCloud in Settings first</string>
     <string name="cloud_copy_wifi_only">Copy to pCloud over Wi-Fi only</string>
     <string name="cloud_copy_waiting">“%1$s” will be copied to pCloud when you are on Wi-Fi</string>
+    <string name="appears_on_looking">Looking…</string>
 </resources>
