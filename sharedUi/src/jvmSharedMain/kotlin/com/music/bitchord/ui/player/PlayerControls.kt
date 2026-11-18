@@ -979,32 +979,6 @@ private fun OutputPartyPill(
     onParty: () -> Unit,
     /** Who's in it, before the settings page — see [ListenTogetherMembersSheet]. */
     onOpenMembers: () -> Unit,
-    /** BitChord Audio: the playing song — its source (place · format · kbps) shares the line. */
-    song: Song? = null,
-) {
-    if (song != null) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            SourceLine(song, Modifier.weight(1f, fill = false), caption = true)
-            Spacer(Modifier.width(12.dp))
-            Box(Modifier.weight(1f, fill = false), contentAlignment = Alignment.CenterEnd) {
-                OutputCaptionText(accountName, onOpenOutput, onOpenMembers, fill = false)
-            }
-        }
-        return
-    }
-    OutputCaptionText(accountName, onOpenOutput, onOpenMembers, fill = true)
-}
-
-@Composable
-private fun OutputCaptionText(
-    accountName: String?,
-    onOpenOutput: () -> Unit,
-    onOpenMembers: () -> Unit,
-    fill: Boolean,
 ) {
     val badge = rememberPartyBadge()
     val shown by PlayerSettings.showListenTogetherButton.collectAsStateWithLifecycle()
@@ -1238,6 +1212,32 @@ internal fun OutputCaption(
     onOpenOutput: () -> Unit,
     /** Who's in it, before the settings page — see [ListenTogetherMembersSheet]. */
     onOpenMembers: () -> Unit,
+    /** BitChord Audio: the playing song — its source (place · format · kbps) shares the line. */
+    song: Song? = null,
+) {
+    if (song != null) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            SourceLine(song, Modifier.weight(1f, fill = false), caption = true)
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.weight(1f, fill = false), contentAlignment = Alignment.CenterEnd) {
+                OutputCaptionText(accountName, onOpenOutput, onOpenMembers, fill = false)
+            }
+        }
+        return
+    }
+    OutputCaptionText(accountName, onOpenOutput, onOpenMembers, fill = true)
+}
+
+@Composable
+private fun OutputCaptionText(
+    accountName: String?,
+    onOpenOutput: () -> Unit,
+    onOpenMembers: () -> Unit,
+    fill: Boolean,
 ) {
     val badge = rememberPartyBadge()
     val outputName = rememberAudioOutputName(accountName)
