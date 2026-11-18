@@ -209,8 +209,8 @@ object WebDavRepository {
         val u = AppSettings.webdavUsername.value
         val p = AppSettings.webdavPassword.value
         siblingTables(u, p).forEach { readAliasTable(it, u, p) }
-        val folders = LibraryFolders.folders.value.filter { it.enabled && it.kind == LibraryFolders.Kind.LYRICS }.map { it.url } +
-            autoLyricsFolders(u, p)
+        val folders = (LibraryFolders.folders.value.filter { it.enabled && it.kind == LibraryFolders.Kind.LYRICS }.map { it.url } +
+            autoLyricsFolders(u, p)).filterNot(::isServerRoot)
         if (folders.isEmpty()) return
         val found = folders.mapNotNull { WebDavClient.listLibrary(it, u, p).getOrNull() }
         if (found.isEmpty()) return
@@ -235,6 +235,11 @@ object WebDavRepository {
         val text = WebDavClient.readText(url, username, password, 4 * 1024 * 1024).getOrNull() ?: return
         com.music.bitchord.data.lyrics.LyricAliases.importCsv(text)
     }
+
+    /** A URL with no folder in it ("https://ewebdav.pcloud.com/"). */
+    fun isServerRoot(url: String): Boolean = runCatching {
+        java.net.URI(WebDavConfig.normalizeUrl(url)).path.orEmpty().trim('/').isEmpty()
+    }.getOrDefault(false)
 
     fun isConfigured(): Boolean =
         WebDavConfig.isConfigured(AppSettings.webdavUrl.value)
@@ -268,6 +273,10 @@ object WebDavRepository {
         // a setup from before folders existed is its one URL.
         val folders = LibraryFolders.folders.value.filter { it.enabled }
             .ifEmpty { listOf(LibraryFolders.Folder("legacy", "", url, true, LibraryFolders.Kind.BOTH)) }
+            // BitChord Audio: never the whole drive — a folder that is the server's root (a
+            // sign-in that left the address bare, the folder list not read yet) listed every
+            // folder in pCloud (thousands of requests, the memory full, playback stalled).
+            .filter { f -> !isServerRoot(f.url).also { root -> if (root) TrackLog.w(TAG, "WebDAV: not listing ${f.url} — it is the whole drive") } }
         val listed = folders.mapNotNull { folder ->
             WebDavClient.listLibrary(folder.url, username, password, maxFiles = 50_000)
                 .onFailure { TrackLog.w(TAG, "WebDAV: listing ${folder.url} failed: ${it.message}") }
@@ -277,7 +286,7 @@ object WebDavRepository {
                 }
         }
         if (listed.isEmpty()) return@withContext emptyList()
-        val autoLyrics = autoLyricsFolders(username, password)
+        val autoLyrics = autoLyricsFolders(username, password).filterNot(::isServerRoot)
             .mapNotNull { WebDavClient.listLibrary(it, username, password).getOrNull() }
         roots = listed.filter { it.first.hasMusic }.map { WebDavConfig.normalizeUrl(it.first.url).trimEnd('/') + "/" }
         val music = listed.filter { it.first.hasMusic }.map { it.second }

@@ -418,7 +418,8 @@ private data class SearchSection(val title: String?, val rows: List<SearchResult
 private fun searchSections(rows: List<SearchResult>, filter: SearchFilter): List<SearchSection> {
     if (filter != SearchFilter.ALL) return listOf(SearchSection(null, rows))
     return listOf(
-        SearchSection("Songs", rows.filterIsInstance<SearchResult.Track>()),
+        SearchSection("Songs", rows.filterIsInstance<SearchResult.Track>().filter { !it.song.isVideo }),
+        SearchSection("Videos", rows.filterIsInstance<SearchResult.Track>().filter { it.song.isVideo }),
         SearchSection("Artists", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.ARTIST }),
         SearchSection("Albums", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.ALBUM }),
         SearchSection("Playlists", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.PLAYLIST }),

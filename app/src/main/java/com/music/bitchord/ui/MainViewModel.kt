@@ -1316,7 +1316,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         withContext(Dispatchers.Default) {
             LikedMusicCache.load(profile)?.songs?.let { list ->
                 val at = list.indexOfFirst { it.videoId == video.videoId }
-                if (at >= 0) LikedMusicCache.place(song.videoId, list.drop(at + 1).firstOrNull { it.videoId != song.videoId }?.videoId)
+                // The next few likes after it: when one is un-liked later, the next one still holds the place.
+                if (at >= 0) LikedMusicCache.place(song.videoId, list.drop(at + 1).filter { it.videoId != song.videoId }.take(8).joinToString(",") { it.videoId }.ifEmpty { null })
                 LikedMusicCache.save(profile, swapIn(list))
             }
         }
@@ -3087,6 +3088,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // see [SourceResolver.substituteForYouTube] — which upgrades
                 // the ones it holds without any of them having to be a
                 // separate row to pick between.
+                // BitChord Audio: your own music searched at the same time, not after YouTube.
+                val ownAsync = viewModelScope.async(Dispatchers.Default) {
+                    runCatching {
+                        val downloaded = com.music.bitchord.download.Downloads.savedMetadataSongs()
+                        com.music.bitchord.data.OwnLibrary.search(request.query, downloaded)
+                    }.getOrNull()
+                }
                 val result = YtMusicRepository.searchPage(request.query, request.filter, request.anonymous)
                 // A search that has been superseded shouldn't land on screen,
                 // whether it succeeded or failed.
@@ -3094,12 +3102,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // BitChord Audio: your own music answers too (pCloud, uploads, downloads) — in
                 // the same list, after the top result, each only when YouTube Music hasn't it
                 // already; and on its own when YouTube can't be reached.
-                val own = withContext(Dispatchers.Default) {
-                    runCatching {
-                        val downloaded = com.music.bitchord.download.Downloads.savedMetadataSongs()
-                        com.music.bitchord.data.OwnLibrary.search(request.query, downloaded)
-                    }.getOrNull()
-                }
+                val own = kotlinx.coroutines.withTimeoutOrNull(1_500) { ownAsync.await() }.also { if (it == null) ownAsync.cancel() }
                 if (request.requestId != newestRequestId.get()) return@collectLatest
                 fun ownRows(yt: List<SearchResult>): List<SearchResult> {
                     own ?: return emptyList()

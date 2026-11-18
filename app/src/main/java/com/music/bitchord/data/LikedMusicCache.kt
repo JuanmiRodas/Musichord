@@ -89,7 +89,13 @@ object LikedMusicCache {
     /** [songs] with each placed song moved back to where its video was. */
     fun placed(songs: List<Song>): List<Song> {
         val all = placements?.all?.takeIf { it.isNotEmpty() } ?: return songs
-        val wanted = all.mapNotNull { (k, v) -> (v as? String)?.takeIf { it.isNotEmpty() }?.let { k to it } }.toMap()
+        // BitChord Audio: each placement names the likes that followed it ("a,b,c"): the first
+        // still liked holds the place — an older one naming only one is kept as it was.
+        val present = songs.mapTo(HashSet()) { it.videoId }
+        val wanted = all.mapNotNull { (k, v) ->
+            (v as? String)?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() && it != k }
+                ?.let { ids -> (ids.firstOrNull { it in present } ?: ids.firstOrNull())?.let { k to it } }
+        }.toMap()
         if (wanted.isEmpty()) return songs
         val moving = songs.filter { it.videoId in wanted }
         if (moving.isEmpty()) return songs
@@ -105,8 +111,16 @@ object LikedMusicCache {
             pending = left
             if (pending.isEmpty()) return out
         }
-        // Whatever it followed is gone too: it keeps YouTube's place, at the top.
-        return pending + out
+        // Whatever it followed is gone: the placement is forgotten (it was pinning the song to
+        // the top for good) and the song keeps the place YouTube gives it.
+        pending.forEach { placements?.edit()?.remove(it.videoId)?.apply() }
+        val fresh = songs.map { it.videoId }
+        val back = out.toMutableList()
+        for (song in pending) {
+            val i = fresh.indexOf(song.videoId).coerceAtMost(back.size)
+            back.add(i, song)
+        }
+        return back
     }
 
     private fun file(profile: String?): File? {

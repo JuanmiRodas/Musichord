@@ -341,6 +341,7 @@ object YtMusicRepository {
             InnertubeParser.parseSearchPage(
                 Innertube.search(query, filter.params, anonymous),
                 includeVideos = filter == SearchFilter.VIDEOS,
+                mixed = filter == SearchFilter.ALL,
             ).let { page ->
                 SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
             }
