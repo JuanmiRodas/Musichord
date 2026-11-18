@@ -82,6 +82,13 @@ object LocalLikes {
 
     fun youTubeOf(id: String): String? = _links.value[id]
 
+    /** BitChord Audio: every id known to be the same song as [id] (your file, other uploads, the liked one). */
+    fun sameAs(id: String): Set<String> {
+        val links = _links.value
+        val roots = setOfNotNull(id, links[id])
+        return roots + links.filter { (k, v) -> v in roots || k in roots }.flatMap { listOf(it.key, it.value) }
+    }
+
     /** BitChord Audio: [a] and [b] are not the same song — a heart on one isn't on the other. */
     fun unlink(a: String, b: String) {
         val drop = _links.value.filter { (k, v) -> (k == a && v == b) || (k == b && v == a) }.keys

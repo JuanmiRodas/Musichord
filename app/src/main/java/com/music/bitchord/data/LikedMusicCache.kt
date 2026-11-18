@@ -36,6 +36,41 @@ object LikedMusicCache {
     fun init(context: Context) {
         dir = File(context.filesDir, "liked_music_cache").apply { mkdirs() }
         placements = context.getSharedPreferences("bitchord_liked_placements", Context.MODE_PRIVATE)
+        unliked = context.getSharedPreferences("bitchord_unliked", Context.MODE_PRIVATE)
+    }
+
+    // ── BitChord Audio: un-likes that stay un-liked ──────────────────────
+    // An un-like is remembered (for [UNLIKE_DAYS]); a song un-liked is kept out of
+    // Liked Music wherever the list comes from — YouTube's pages, the saved list,
+    // the song-version swap — and if YouTube still lists it, it is un-liked there again.
+
+    private var unliked: android.content.SharedPreferences? = null
+    private const val UNLIKE_DAYS = 90L
+
+    /** Told when YouTube still lists songs un-liked here, so they are un-liked there again. */
+    @Volatile
+    var onStillLiked: ((List<Song>) -> Unit)? = null
+
+    fun markUnliked(ids: Collection<String>) {
+        val now = System.currentTimeMillis()
+        unliked?.edit()?.apply { ids.forEach { putLong(it, now) } }?.apply()
+    }
+
+    fun clearUnliked(id: String) {
+        if (unliked?.contains(id) == true) unliked?.edit()?.remove(id)?.apply()
+    }
+
+    fun isUnliked(id: String): Boolean {
+        val at = unliked?.getLong(id, 0L) ?: 0L
+        return at > 0L && System.currentTimeMillis() - at < UNLIKE_DAYS * 86_400_000L
+    }
+
+    /** [songs] without the ones un-liked here; those still listed are reported. */
+    fun alive(songs: List<Song>): List<Song> {
+        if (unliked?.all.isNullOrEmpty()) return songs
+        val (gone, kept) = songs.partition { isUnliked(it.videoId) }
+        if (gone.isNotEmpty()) onStillLiked?.invoke(gone)
+        return kept
     }
 
     private var placements: android.content.SharedPreferences? = null
@@ -81,7 +116,7 @@ object LikedMusicCache {
     fun load(profile: String?): Saved? {
         val f = file(profile) ?: return null
         val saved = SongListStore.load(f) ?: return null
-        return Saved(saved.songs.distinctBy { it.videoId }, saved.savedAt).takeIf { it.songs.isNotEmpty() }
+        return Saved(saved.songs.distinctBy { it.videoId }.filterNot { isUnliked(it.videoId) }, saved.savedAt).takeIf { it.songs.isNotEmpty() }
             ?.also {
                 // The first list read this run is the account's, until one is saved.
                 if (lastProfile == null) lastProfile = profile
@@ -115,7 +150,7 @@ object LikedMusicCache {
 
     fun save(profile: String?, songs0: List<Song>) {
         // BitChord Audio: one row per liked song, whatever the pages said.
-        val songs = placed(songs0.distinctBy { it.videoId })
+        val songs = placed(alive(songs0.distinctBy { it.videoId }))
         if (songs.isEmpty()) return
         lastProfile = profile
         publish(songs)
@@ -140,7 +175,8 @@ object LikedMusicCache {
      * page (which takes care of songs un-liked near the top), and everything
      * after it is kept as it was.
      */
-    fun merge(fresh: List<Song>, saved: List<Song>): List<Song>? {
+    fun merge(fresh0: List<Song>, saved: List<Song>): List<Song>? {
+        val fresh = alive(fresh0)
         if (fresh.isEmpty()) return null
         val savedIndex = HashMap<String, Int>(saved.size * 2)
         saved.forEachIndexed { i, s -> savedIndex.putIfAbsent(s.videoId, i) }

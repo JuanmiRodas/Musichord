@@ -1025,6 +1025,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * registered, and people tap again.
      */
     fun setLike(videoId: String, status: LikeStatus, shown: LikeStatus? = null) {
+        // BitChord Audio: an un-like takes the song out everywhere it is liked — every copy of
+        // it (your file, its YouTube upload, a local like) — and stays (see LikedMusicCache.alive).
+        // Taking it out of only the copy playing let the others bring it back to Liked Music.
+        if (status != LikeStatus.LIKE) {
+            val same = com.music.bitchord.data.LocalLikes.sameAs(videoId)
+            com.music.bitchord.data.TrackLog.d("BitChord", "like: un-liked $videoId (same song: ${same.joinToString()})")
+            LikedMusicCache.markUnliked(same)
+            val local = com.music.bitchord.data.LocalLikes
+            same.forEach { id ->
+                if (id != videoId) {
+                    local.liked.value[id]?.let { local.setLocal(it, false) }
+                    LikeState.set(id, status)
+                    dropFromLikedLists(id)
+                    if (local.isYouTubeId(id) && id in LikedMusicCache.likedIds.value) {
+                        viewModelScope.launch { YtMusicRepository.rate(id, LikeStatus.INDIFFERENT) }
+                    }
+                }
+            }
+        } else {
+            com.music.bitchord.data.LocalLikes.sameAs(videoId).forEach(LikedMusicCache::clearUnliked)
+            com.music.bitchord.data.TrackLog.d("BitChord", "like: liked $videoId")
+        }
         // BitChord Audio: a song that isn't YouTube's (your pCloud file, a
         // JioSaavn copy) is liked on YouTube when it's there — so Liked Music
         // stays the one list — and here, on the device, when it isn't.
@@ -1198,6 +1220,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** BitChord Audio: [song] liked in [video]'s place (the like moved, its spot in Liked Music kept). */
     private suspend fun swapLike(video: Song, song: Song): Song? {
         if (song.videoId == video.videoId) return null
+        // A song you un-liked is never liked again on its own.
+        if (LikedMusicCache.isUnliked(song.videoId)) return null
         if (YtMusicRepository.rate(song.videoId, LikeStatus.LIKE).isFailure) return null
         LikeState.set(song.videoId, LikeStatus.LIKE)
         if (YtMusicRepository.rate(video.videoId, LikeStatus.INDIFFERENT).isSuccess) {
@@ -1967,7 +1991,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 
+    // BitChord Audio: songs un-liked here that YouTube still lists — un-liked there again, once a run.
+    private val unlikedAgain = java.util.Collections.synchronizedSet(HashSet<String>())
+
     init {
+        LikedMusicCache.onStillLiked = { songs ->
+            val todo = songs.filter { unlikedAgain.add(it.videoId) }
+            if (todo.isNotEmpty() && _signedIn.value) viewModelScope.launch {
+                for (s in todo) {
+                    com.music.bitchord.data.TrackLog.d("BitChord", "like: '${s.title}' was un-liked here but YouTube still lists it — un-liking it again")
+                    YtMusicRepository.rate(s.videoId, LikeStatus.INDIFFERENT)
+                    LikeState.set(s.videoId, LikeStatus.INDIFFERENT)
+                }
+            }
+        }
         // BitChord Audio: liked music videos become their songs, on their own and by hand.
         com.music.bitchord.data.SongVersions.manual = { useSongVersion(it) }
         com.music.bitchord.ui.components.LikeVersionPicker.onPick = { from, to -> linkLikeTo(from, to) }
@@ -3518,8 +3555,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     pageState = UiState.Success(merged)
                     more = null
                     LikedMusicCache.save(likedProfile, merged)
-                } else if (more == null) {
-                    LikedMusicCache.save(likedProfile, state.data)
+                } else {
+                    pageState = UiState.Success(LikedMusicCache.alive(state.data))
+                    if (more == null) LikedMusicCache.save(likedProfile, state.data)
                 }
                 // BitChord Audio: songs liked here because YouTube doesn't have
                 // them — added after the merge, which would otherwise drop them.
