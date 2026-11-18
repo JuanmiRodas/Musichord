@@ -132,7 +132,9 @@ object AlbumAppearances {
                 is SearchResult.TopTrack -> r.song
                 else -> null
             } ?: return@mapNotNull null
-            if (keyOf(s.title, s.artist) != key) return@mapNotNull null
+            // BitChord Audio: the same recording, not just the same title (a tribute, a live
+            // album, a re-recording of other length are other recordings).
+            if (keyOf(s.title, s.artist) != key || !same(song, s)) return@mapNotNull null
             albumOf(s, "YouTube Music")
         }
         (known + found).distinctBy { norm(it.name) }
