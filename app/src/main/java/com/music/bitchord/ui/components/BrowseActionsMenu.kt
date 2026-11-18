@@ -192,6 +192,19 @@ fun BrowseActionsMenu(
                 stringResource(R.string.add_to_queue),
                 onClick = onAddToQueue,
             )
+            // BitChord Audio: copy the album or playlist to your pCloud (Artist/Album).
+            if (target.songs.isNotEmpty() && (target.type == BrowseType.ALBUM || target.type == BrowseType.PLAYLIST)) {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                ActionRow(
+                    SfIcons.Cloud,
+                    stringResource(R.string.cloud_copy_action),
+                ) {
+                    com.music.bitchord.data.webdav.CloudCopies.copy(
+                        ctx, target.songs, target.songs.firstOrNull()?.artist ?: target.subtitle, target.title,
+                        playlist = target.type == BrowseType.PLAYLIST,
+                    )
+                }
+            }
             onDownloadAll?.let { download ->
                 // Saying which of the three it is, rather than offering the same row
                 // whatever the state — this is where a release is asked for now that

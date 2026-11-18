@@ -74,13 +74,22 @@ object WebDavUploads {
         return uri.scheme == "content" || uri.scheme == "file"
     }
 
-    suspend fun upload(context: Context, songs: List<Song>): Summary = withContext(Dispatchers.IO) {
+    /**
+     * [folder]: BitChord Audio — a path under the library ("Artist/Album"), made on the
+     * server when missing; the files go there instead of the top.
+     */
+    suspend fun upload(context: Context, songs: List<Song>, folder: List<String> = emptyList()): Summary = withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
         val url = com.music.bitchord.data.settings.AppSettings.webdavUrl.value
         val username = com.music.bitchord.data.settings.AppSettings.webdavUsername.value
         val password = com.music.bitchord.data.settings.AppSettings.webdavPassword.value
-        val root = WebDavConfig.normalizeUrl(url)
-        require(WebDavConfig.isConfigured(root)) { "WebDAV is not configured" }
+        val top = WebDavConfig.normalizeUrl(url)
+        require(WebDavConfig.isConfigured(top)) { "WebDAV is not configured" }
+        var root = top
+        for (segment in folder.map { it.replace(Regex("""[\\/:*?"<>|]"""), " ").trim() }.filter { it.isNotEmpty() }) {
+            root = WebDavClient.joinUrl(root, segment)
+            WebDavClient.ensureCollection(root, username, password).getOrThrow()
+        }
 
         val queue = songs.filter { isUploadable(it) }
         var uploaded = 0

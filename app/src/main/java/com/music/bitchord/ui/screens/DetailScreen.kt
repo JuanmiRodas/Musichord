@@ -56,6 +56,7 @@ import androidx.compose.material.icons.rounded.Check
 import com.music.bitchord.data.model.LibraryState
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreVert
@@ -462,6 +463,7 @@ fun DetailScreen(
         }
     }
     val keptSet by com.music.bitchord.download.KeptPlaylists.on.collectAsStateWithLifecycle()
+    val cloudContext = androidx.compose.ui.platform.LocalContext.current
     val keptOn = com.music.bitchord.download.KeptPlaylists.key(page.browseId) in keptSet
     // Whether the field still owes the keyboard an appearance. Held here rather
     // than in the field, which is a row in a lazy list: scrolled out of sight it
@@ -625,6 +627,14 @@ fun DetailScreen(
                         onToggleKept = {
                             com.music.bitchord.download.KeptPlaylists.set(page.browseId, !keptOn, songs, page.title)
                         },
+                        onCloudCopy = if (folder == null && !page.browseId.startsWith("local:") && (page.type == BrowseType.PLAYLIST || page.type == BrowseType.ALBUM || page.browseId in com.music.bitchord.data.LikedMusicCache.IDS)) {
+                            {
+                                com.music.bitchord.data.webdav.CloudCopies.copy(
+                                    cloudContext, songs, songs.firstOrNull()?.artist ?: page.subtitle, page.title,
+                                    playlist = page.type != BrowseType.ALBUM,
+                                )
+                            }
+                        } else null,
                     )
                 }
             }
@@ -1055,6 +1065,7 @@ private fun ReleaseHeader(
     /** BitChord Audio: kept downloaded (Spotify's switch); null hides it. */
     keptDownloaded: Boolean? = null,
     onToggleKept: () -> Unit = {},
+    onCloudCopy: (() -> Unit)? = null,
 ) {
     val (credit, meta) = page.headerLines(songs.size, songs.playtime())
     // Every row on a release carries the same credit — see [pageCredit] — so
@@ -1283,6 +1294,15 @@ private fun ReleaseHeader(
                         contentDescription = stringResource(if (keptDownloaded) R.string.kept_downloaded_on else R.string.kept_downloaded_off),
                         onClick = onToggleKept,
                         haptic = if (keptDownloaded) Haptic.ToggleOff else Haptic.ToggleOn,
+                        size = RELEASE_SIDE_BUTTON,
+                    )
+                }
+                // BitChord Audio: copy this album / playlist to your pCloud (Artist/Album).
+                if (onCloudCopy != null) {
+                    CircleIconButton(
+                        icon = Icons.Rounded.CloudUpload,
+                        contentDescription = stringResource(R.string.cloud_copy_action),
+                        onClick = onCloudCopy,
                         size = RELEASE_SIDE_BUTTON,
                     )
                 }

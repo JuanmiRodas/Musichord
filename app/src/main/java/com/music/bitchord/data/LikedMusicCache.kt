@@ -45,7 +45,9 @@ object LikedMusicCache {
     // the song-version swap — and if YouTube still lists it, it is un-liked there again.
 
     private var unliked: android.content.SharedPreferences? = null
-    private const val UNLIKE_DAYS = 90L
+    // Only while YouTube catches up: after that, what YouTube lists is the truth (a song
+    // liked again elsewhere must come back, not be hidden for months).
+    private const val UNLIKE_MS = 30 * 60_000L
 
     /** Told when YouTube still lists songs un-liked here, so they are un-liked there again. */
     @Volatile
@@ -62,7 +64,7 @@ object LikedMusicCache {
 
     fun isUnliked(id: String): Boolean {
         val at = unliked?.getLong(id, 0L) ?: 0L
-        return at > 0L && System.currentTimeMillis() - at < UNLIKE_DAYS * 86_400_000L
+        return at > 0L && System.currentTimeMillis() - at < UNLIKE_MS
     }
 
     /** [songs] without the ones un-liked here; those still listed are reported. */
@@ -150,7 +152,13 @@ object LikedMusicCache {
 
     fun save(profile: String?, songs0: List<Song>) {
         // BitChord Audio: one row per liked song, whatever the pages said.
-        val songs = placed(alive(songs0.distinctBy { it.videoId }))
+        // BitChord Audio: YouTube's list only — songs liked just here (a file of yours YouTube
+        // hasn't) are drawn in on the page, never saved into it: saved, the next merge with
+        // YouTube's page dropped them, and they came and went.
+        val localOnly = runCatching {
+            LocalLikes.liked.value.keys.filterTo(HashSet()) { !LocalLikes.isYouTubeId(it) }
+        }.getOrDefault(emptySet<String>())
+        val songs = placed(alive(songs0.distinctBy { it.videoId }.filterNot { it.videoId in localOnly }))
         if (songs.isEmpty()) return
         lastProfile = profile
         publish(songs)

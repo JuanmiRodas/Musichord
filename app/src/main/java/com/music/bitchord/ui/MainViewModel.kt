@@ -408,6 +408,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * is on disk — and one that fails outright with the connection off, which
      * is what made a downloaded song show nothing offline.
      */
+    /**
+     * BitChord Audio: after a like or un-like, Liked Music's first page is read again (a few
+     * seconds later — YouTube is not instant) and merged in, so the change shows at once; a
+     * like YouTube doesn't list yet is asked for once more. Every outcome is logged.
+     */
+    private fun verifyLike(videoId: String, status: LikeStatus) {
+        viewModelScope.launch {
+            for (attempt in 1..2) {
+                kotlinx.coroutines.delay(if (attempt == 1) 4_000 else 15_000)
+                val fresh = YtMusicRepository.browseSongs(YtMusicRepository.LIKED_MUSIC).getOrNull()?.songs ?: return@launch
+                val listed = fresh.any { it.videoId == videoId }
+                val profile = _activeProfileId.value
+                val saved = LikedMusicCache.load(profile)?.songs.orEmpty()
+                LikedMusicCache.merge(fresh, saved)?.let { LikedMusicCache.save(profile, it) }
+                val ok = (status == LikeStatus.LIKE) == listed
+                com.music.bitchord.data.TrackLog.d(
+                    "BitChord",
+                    "like: $videoId ${if (status == LikeStatus.LIKE) "liked" else "un-liked"} — " +
+                        if (ok) "Liked Music agrees" else "Liked Music doesn't show it yet (try $attempt)",
+                )
+                if (ok) return@launch
+                if (attempt == 1) YtMusicRepository.rate(videoId, status)
+            }
+        }
+    }
+
+    /** BitChord Audio: Liked Music as shown — YouTube's list with your local likes placed in. */
+    private fun withLocalLikes(list: List<Song>): List<Song> {
+        val local = com.music.bitchord.data.LocalLikes
+        val mine = local.liked.value.values.filter { m -> list.none { it.videoId == m.videoId } }.map(local::withCover)
+        return if (mine.isEmpty()) list else local.placeAmong(mine, list)
+    }
+
     private var lyricsShownFor: String? = null
     private val lyricsUpgradedThisRun = java.util.Collections.synchronizedSet(HashSet<String>())
 
@@ -1029,7 +1062,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // it (your file, its YouTube upload, a local like) — and stays (see LikedMusicCache.alive).
         // Taking it out of only the copy playing let the others bring it back to Liked Music.
         if (status != LikeStatus.LIKE) {
+            // Your own copies of it (files, local likes) — never another YouTube song: a
+            // link to one (the song version a video was swapped for, another upload) made
+            // un-liking one take the other out of Liked Music too.
             val same = com.music.bitchord.data.LocalLikes.sameAs(videoId)
+                .filter { it == videoId || !com.music.bitchord.data.LocalLikes.isYouTubeId(it) }.toSet()
             com.music.bitchord.data.TrackLog.d("BitChord", "like: un-liked $videoId (same song: ${same.joinToString()})")
             LikedMusicCache.markUnliked(same)
             val local = com.music.bitchord.data.LocalLikes
@@ -1070,6 +1107,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 onSuccess = {
                     // Liked Music is now out of date either way.
                     libraryStale = true
+                    // BitChord Audio: checked against Liked Music itself, and shown there at once.
+                    verifyLike(videoId, status)
                     if (status != LikeStatus.LIKE) dropFromLikedLists(videoId)
                     // Clearing the heart means forgetting the song, not
                     // demoting it — see [forgetFromLibrary].
@@ -1351,6 +1390,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (YtMusicRepository.setSaved(current.playlistId, target).isSuccess) {
                 // The Library tab's Albums/Playlists shelf is now out of date.
                 libraryStale = true
+                // BitChord Audio: an album saved to your library is copied to your pCloud too.
+                val page = _detailStack.value.firstOrNull { it.browseId == browseId }
+                val songs = (page?.songs as? UiState.Success)?.data.orEmpty()
+                if (target && page?.type == com.music.bitchord.data.model.BrowseType.ALBUM && songs.isNotEmpty() &&
+                    com.music.bitchord.data.webdav.WebDavRepository.isConfigured()
+                ) {
+                    com.music.bitchord.data.webdav.CloudCopies.copy(getApplication(), songs, songs.first().artist, page.title, playlist = false)
+                }
             } else {
                 setSavedOnPage(browseId, current.saved)
             }
@@ -1995,16 +2042,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val unlikedAgain = java.util.Collections.synchronizedSet(HashSet<String>())
 
     init {
-        LikedMusicCache.onStillLiked = { songs ->
-            val todo = songs.filter { unlikedAgain.add(it.videoId) }
-            if (todo.isNotEmpty() && _signedIn.value) viewModelScope.launch {
-                for (s in todo) {
-                    com.music.bitchord.data.TrackLog.d("BitChord", "like: '${s.title}' was un-liked here but YouTube still lists it — un-liking it again")
-                    YtMusicRepository.rate(s.videoId, LikeStatus.INDIFFERENT)
-                    LikeState.set(s.videoId, LikeStatus.INDIFFERENT)
-                }
-            }
-        }
+        // BitChord Audio: an un-like is only hidden while YouTube catches up (see
+        // LikedMusicCache.markUnliked) — never un-liked again behind your back: a song
+        // you liked once more elsewhere stays liked.
+        LikedMusicCache.onStillLiked = null
         // BitChord Audio: liked music videos become their songs, on their own and by hand.
         com.music.bitchord.data.SongVersions.manual = { useSongVersion(it) }
         com.music.bitchord.ui.components.LikeVersionPicker.onPick = { from, to -> linkLikeTo(from, to) }
@@ -3457,7 +3498,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (likedSaved != null) {
                 _detailStack.value = _detailStack.value.map {
-                    if (it.browseId == browseId && it.songs is UiState.Loading) it.copy(songs = UiState.Success(likedSaved.songs)) else it
+                    if (it.browseId == browseId && it.songs is UiState.Loading) it.copy(songs = UiState.Success(withLocalLikes(likedSaved.songs))) else it
                 }
             }
             // BitChord Audio: any other playlist or album as last seen goes up at
@@ -3952,7 +3993,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // BitChord Audio: a complete walk of Liked Music is what gets saved.
             if (browseId in LikedMusicCache.IDS) {
                 (_detailStack.value.lastOrNull { it.browseId == browseId }?.songs as? UiState.Success)
-                    ?.data?.let { LikedMusicCache.save(_activeProfileId.value, it) }
+                    ?.data?.let { walked ->
+                        LikedMusicCache.save(_activeProfileId.value, walked)
+                        // Your local likes stay in the page shown, wherever they were liked.
+                        val shown = withLocalLikes(walked)
+                        if (shown.size != walked.size) {
+                            _detailStack.value = _detailStack.value.map { p ->
+                                if (p.browseId == browseId) p.copy(songs = UiState.Success(shown)) else p
+                            }
+                        }
+                    }
             }
         }.also { job ->
             job.invokeOnCompletion {

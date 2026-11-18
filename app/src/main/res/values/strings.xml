@@ -1691,4 +1691,7 @@
     <string name="appears_on_other_artists">By other artists</string>
     <string name="appears_on_none">No other performances found</string>
     <string name="appears_on_no_work">MusicBrainz doesn\'t know this song as a work, so other artists\' versions can\'t be confirmed</string>
+    <string name="cloud_copy_action">Copy to pCloud</string>
+    <string name="cloud_copy_started">Copying “%1$s” to your pCloud…</string>
+    <string name="cloud_copy_no_pcloud">Connect pCloud in Settings first</string>
 </resources>

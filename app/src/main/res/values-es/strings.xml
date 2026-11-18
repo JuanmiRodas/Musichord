@@ -1779,4 +1779,7 @@
     <string name="appears_on_other_artists">Por otros artistas</string>
     <string name="appears_on_none">No hay otras interpretaciones</string>
     <string name="appears_on_no_work">MusicBrainz no tiene esta canción como obra, así que no se pueden confirmar versiones de otros artistas</string>
+    <string name="cloud_copy_action">Copiar a pCloud</string>
+    <string name="cloud_copy_started">Copiando «%1$s» a tu pCloud…</string>
+    <string name="cloud_copy_no_pcloud">Conecta pCloud en Ajustes primero</string>
 </resources>
