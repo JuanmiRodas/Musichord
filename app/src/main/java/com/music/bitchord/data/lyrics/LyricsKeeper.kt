@@ -90,10 +90,9 @@ object LyricsKeeper {
         // or by you (never replaced) — see [isAutoKept].
         prefs?.edit()?.remove(song.videoId)?.apply {
             when {
-                picked -> remove(AUTO + song.videoId)
-                // A pick upgraded stays a pick (so only word sync replaces it again).
+                picked -> remove(AUTO + song.videoId).putLong(PICKED + song.videoId, System.currentTimeMillis())
                 wasPicked -> putLong(PICKED + song.videoId, System.currentTimeMillis())
-                else -> putLong(AUTO + song.videoId, System.currentTimeMillis())
+                else -> putLong(AUTO + song.videoId, System.currentTimeMillis()).remove(PICKED + song.videoId)
             }
         }?.apply()
         scope.launch { runCatching { writeToFolder(song, lines) } }
@@ -147,19 +146,18 @@ object LyricsKeeper {
         prefs?.edit()?.putLong(PICKED + videoId, System.currentTimeMillis())?.remove(AUTO + videoId)?.apply()
     }
 
-    fun isPicked(videoId: String): Boolean {
-        val at = prefs?.getLong(PICKED + videoId, 0L) ?: 0L
-        if (at <= 0L) return false
-        val saved = EditedLyrics.savedAt(videoId)
-        return saved == 0L || saved <= at + 5_000
-    }
+    // BitChord Audio: a pick stays a pick whatever rewrites the file later (a shift, a copy
+    // for the song's other id, a restore from pCloud) — the app's own saves clear the mark.
+    fun isPicked(videoId: String): Boolean = (prefs?.getLong(PICKED + videoId, 0L) ?: 0L) > 0L
 
     /**
      * BitChord Audio: whether a better version may replace the kept lyrics on
      * its own — the app's choice, or one you picked from the search (then only
      * by word-by-word lyrics of the same song). Lyrics you timed never.
      */
-    fun mayUpgrade(videoId: String): Boolean = !EditedLyrics.isHandTimed(videoId) && isAutoKept(videoId)
+    // Yours only when picked from the search or timed by hand. Kept lyrics with no mark
+    // (kept before the marks existed, or whose file was rewritten since) were the app's own.
+    fun mayUpgrade(videoId: String): Boolean = !EditedLyrics.isHandTimed(videoId) && !isPicked(videoId)
 
     /**
      * Whether the lyrics kept for [videoId] were chosen by the app (the best

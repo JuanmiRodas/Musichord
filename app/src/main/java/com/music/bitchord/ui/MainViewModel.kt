@@ -686,7 +686,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // that was told apart) gives way only to word-by-word lyrics of the same song.
                 // Only the app's own choice gets here (mayUpgrade): your picks are final.
                 val keptScore = linesScore(keptAuto!!)
-                val pickedByYou = !com.music.bitchord.data.lyrics.LyricsKeeper.isAutoKept(videoId)
+                val pickedByYou = !com.music.bitchord.data.lyrics.LyricsKeeper.mayUpgrade(videoId)
                 val sameSong = best != null && sameLyrics(best.result.lines, keptAuto!!)
                 val wordByWord = best != null && best.result.lines.any { it.isWordSynced }
                 if (best != null && !pickedByYou && videoId !in lyricsUpgradedThisRun &&

@@ -188,6 +188,7 @@ fun LyricAliasDialog(song: Song, onDismiss: () -> Unit) {
                         searching?.cancel()
                         EditedLyrics.restorePrevious(song)
                         com.music.bitchord.data.lyrics.LyricsKeeper.notePicked(song.videoId)
+                        com.music.bitchord.data.lyrics.LyricsKeeper.notePicked(song.videoId)
                         onDismiss()
                     }) { Text(stringResource(R.string.lyric_restore_previous)) }
                 }
