@@ -408,27 +408,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * is on disk — and one that fails outright with the connection off, which
      * is what made a downloaded song show nothing offline.
      */
-    private val likedDownloadTried = java.util.Collections.synchronizedSet(HashSet<String>())
-
-    private suspend fun downloadAllLiked(songs: List<Song>) {
-        if (songs.isEmpty() || !com.music.bitchord.data.settings.AppSettings.downloadsAllowedNow) return
-        val Downloads = com.music.bitchord.download.Downloads
-        val missing = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val active = Downloads.active.value
-            songs.filter { s ->
-                !s.videoId.startsWith("content:") && !s.videoId.startsWith("file:") &&
-                    s.videoId !in likedDownloadTried &&
-                    active[s.videoId] !is com.music.bitchord.download.DownloadState.Queued &&
-                    active[s.videoId] !is com.music.bitchord.download.DownloadState.Running &&
-                    runCatching { Downloads.localCopyOf(s.videoId) }.getOrNull() == null
-            }
-        }
-        if (missing.isEmpty()) return
-        likedDownloadTried += missing.map { it.videoId }
-        com.music.bitchord.data.TrackLog.d("BitChord", "downloads: ${missing.size} liked songs not on the phone yet — downloading them")
-        Downloads.enqueueAll(getApplication(), missing, getApplication<Application>().getString(R.string.liked_music_pin_title))
-    }
-
     private var lyricsShownFor: String? = null
     private val lyricsUpgradedThisRun = java.util.Collections.synchronizedSet(HashSet<String>())
 
@@ -2037,18 +2016,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
             }
         }
-        // BitChord Audio: every liked song downloaded to the phone — new likes too, and songs
-        // that also live on pCloud or JioSaavn (a stand-in from the network is not offline).
-        // Retried when the connection comes back; a song that failed waits for the next run.
+        // BitChord Audio: lists kept downloaded (the switch at the top of a playlist, Liked Music
+        // included; off until turned on): Liked Music follows your likes as they change, and every
+        // kept list is topped up when the connection allows it again.
         viewModelScope.launch {
             @OptIn(kotlinx.coroutines.FlowPreview::class)
             kotlinx.coroutines.flow.combine(
                 LikedMusicCache.likedSongs,
+                com.music.bitchord.download.KeptPlaylists.on,
                 com.music.bitchord.data.settings.AppSettings.meteredConnection,
                 com.music.bitchord.data.settings.AppSettings.wifiOnlyDownloads,
-            ) { songs, _, _ -> songs }
+            ) { songs, on, _, _ -> songs to on }
                 .debounce(5_000)
-                .collect { songs -> downloadAllLiked(songs) }
+                .collect { (songs, on) ->
+                    val kept = com.music.bitchord.download.KeptPlaylists
+                    kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        if (songs.isNotEmpty()) kept.sync(kept.LIKED, songs, complete = true, title = getApplication<Application>().getString(R.string.liked_music_pin_title))
+                        for (k in on - kept.LIKED) {
+                            val list = com.music.bitchord.data.PlaylistPageCache.load("VL$k") ?: com.music.bitchord.data.PlaylistPageCache.load(k) ?: continue
+                            kept.sync(k, list, complete = false, title = null)
+                        }
+                    }
+                }
         }
         // BitChord Audio: covers of downloaded songs kept for offline, as likes and downloads change.
         viewModelScope.launch {
@@ -3613,7 +3602,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (pageSaved != null || resolved == BrowseType.PLAYLIST || resolved == BrowseType.ALBUM) {
                 if (browseId !in LikedMusicCache.IDS && !browseId.startsWith("local:") && localPlaylist == null) {
                     (pageState as? UiState.Success)?.data?.takeIf { more == null || pageSaved == null || it.size >= pageSaved.size }?.let { songs ->
-                        launch(Dispatchers.IO) { com.music.bitchord.data.PlaylistPageCache.save(browseId, songs) }
+                        launch(Dispatchers.IO) {
+                            com.music.bitchord.data.PlaylistPageCache.save(browseId, songs)
+                            com.music.bitchord.download.KeptPlaylists.sync(browseId, songs, complete = false, title = null)
+                        }
                     }
                 }
             }
@@ -3942,7 +3934,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val walked = _detailStack.value.lastOrNull { it.browseId == browseId }
             if (walked != null && browseId !in LikedMusicCache.IDS && (walked.type == BrowseType.PLAYLIST || walked.type == BrowseType.ALBUM)) {
                 (walked.songs as? UiState.Success)?.data?.let { songs ->
-                    withContext(Dispatchers.IO) { com.music.bitchord.data.PlaylistPageCache.save(browseId, songs) }
+                    withContext(Dispatchers.IO) {
+                        com.music.bitchord.data.PlaylistPageCache.save(browseId, songs)
+                        // The whole list: songs no longer in it are let go of too.
+                        com.music.bitchord.download.KeptPlaylists.sync(browseId, songs, complete = true, title = walked.title)
+                    }
                 }
             }
             // BitChord Audio: a complete walk of Liked Music is what gets saved.

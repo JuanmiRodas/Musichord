@@ -56,6 +56,7 @@ import androidx.compose.material.icons.rounded.Check
 import com.music.bitchord.data.model.LibraryState
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
@@ -452,6 +453,8 @@ fun DetailScreen(
     // on an album that was closed and reopened would be a page that appears to
     // have lost most of its tracks.
     var query by rememberSaveable(page.browseId) { mutableStateOf("") }
+    val keptSet by com.music.bitchord.download.KeptPlaylists.on.collectAsStateWithLifecycle()
+    val keptOn = com.music.bitchord.download.KeptPlaylists.key(page.browseId) in keptSet
     // Whether the field still owes the keyboard an appearance. Held here rather
     // than in the field, which is a row in a lazy list: scrolled out of sight it
     // is disposed, and a field that asks for focus every time it is composed
@@ -610,6 +613,10 @@ fun DetailScreen(
                         onArtistClick = onArtistClick.takeIf { folder == null },
                         onToggleLibrary = onToggleLibrary,
                         onDownloadAll = folder?.onDownload?.let { download -> { download(songs) } },
+                        keptDownloaded = keptOn.takeIf { folder == null && !page.browseId.startsWith("local:") && (page.type == BrowseType.PLAYLIST || page.type == BrowseType.ALBUM || page.browseId in com.music.bitchord.data.LikedMusicCache.IDS) },
+                        onToggleKept = {
+                            com.music.bitchord.download.KeptPlaylists.set(page.browseId, !keptOn, songs, page.title)
+                        },
                     )
                 }
             }
@@ -1037,6 +1044,9 @@ private fun ReleaseHeader(
     onToggleLibrary: (() -> Unit)?,
     /** The Cached songs folder's: saves every track on it to Downloads. Null hides it. */
     onDownloadAll: (() -> Unit)? = null,
+    /** BitChord Audio: kept downloaded (Spotify's switch); null hides it. */
+    keptDownloaded: Boolean? = null,
+    onToggleKept: () -> Unit = {},
 ) {
     val (credit, meta) = page.headerLines(songs.size, songs.playtime())
     // Every row on a release carries the same credit — see [pageCredit] — so
@@ -1257,6 +1267,17 @@ private fun ReleaseHeader(
                     size = RELEASE_SIDE_BUTTON,
                     modifier = Modifier.weight(1f),
                 )
+                // BitChord Audio: keep this list downloaded — every song, and new ones as they
+                // are added; songs that leave it are deleted from the phone.
+                if (keptDownloaded != null) {
+                    CircleIconButton(
+                        icon = if (keptDownloaded) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
+                        contentDescription = stringResource(if (keptDownloaded) R.string.kept_downloaded_on else R.string.kept_downloaded_off),
+                        onClick = onToggleKept,
+                        haptic = if (keptDownloaded) Haptic.ToggleOff else Haptic.ToggleOn,
+                        size = RELEASE_SIDE_BUTTON,
+                    )
+                }
                 if (library != null) {
                     CircleIconButton(
                         // A tick, not a filled-in plus: the pair reads as

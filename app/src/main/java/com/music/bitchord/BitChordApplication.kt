@@ -224,6 +224,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         // What's already saved to Downloads, so the song menu can say so
         // without a media-store query per row.
         Downloads.init(this)
+        com.music.bitchord.download.KeptPlaylists.init(this)
         Downloads.exportExisting(this) // BitChord Audio: finishes moving downloads out to Music/BitChord
         Downloads.backfillArtwork(this) // BitChord Audio: covers for downloads saved without one
         com.music.bitchord.data.covers.OfflineCovers.sweep(this, afterMs = 40_000) // and in every list, offline

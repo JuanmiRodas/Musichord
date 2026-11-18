@@ -1771,4 +1771,6 @@
     <string name="like_version_title">Elegir la versión a la que dar me gusta…</string>
     <string name="like_version_none">No se ha encontrado nada: cambia los términos de búsqueda</string>
     <string name="like_version_failed">YouTube no ha aceptado el me gusta; inténtalo otra vez</string>
+    <string name="kept_downloaded_on">Descargada — toca para dejar de guardarla en el móvil</string>
+    <string name="kept_downloaded_off">Descargar esta lista y mantenerla al día</string>
 </resources>
