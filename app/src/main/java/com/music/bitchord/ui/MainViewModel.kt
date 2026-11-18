@@ -408,6 +408,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * is on disk — and one that fails outright with the connection off, which
      * is what made a downloaded song show nothing offline.
      */
+    private val likedDownloadTried = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    private suspend fun downloadAllLiked(songs: List<Song>) {
+        if (songs.isEmpty() || !com.music.bitchord.data.settings.AppSettings.downloadsAllowedNow) return
+        val Downloads = com.music.bitchord.download.Downloads
+        val missing = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val active = Downloads.active.value
+            songs.filter { s ->
+                !s.videoId.startsWith("content:") && !s.videoId.startsWith("file:") &&
+                    s.videoId !in likedDownloadTried &&
+                    active[s.videoId] !is com.music.bitchord.download.DownloadState.Queued &&
+                    active[s.videoId] !is com.music.bitchord.download.DownloadState.Running &&
+                    runCatching { Downloads.localCopyOf(s.videoId) }.getOrNull() == null
+            }
+        }
+        if (missing.isEmpty()) return
+        likedDownloadTried += missing.map { it.videoId }
+        com.music.bitchord.data.TrackLog.d("BitChord", "downloads: ${missing.size} liked songs not on the phone yet — downloading them")
+        Downloads.enqueueAll(getApplication(), missing, getApplication<Application>().getString(R.string.liked_music_pin_title))
+    }
+
     private var lyricsShownFor: String? = null
     private val lyricsUpgradedThisRun = java.util.Collections.synchronizedSet(HashSet<String>())
 
@@ -2015,6 +2036,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // BitChord Audio: official Latin names for your likes, in the background.
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
             }
+        }
+        // BitChord Audio: every liked song downloaded to the phone — new likes too, and songs
+        // that also live on pCloud or JioSaavn (a stand-in from the network is not offline).
+        // Retried when the connection comes back; a song that failed waits for the next run.
+        viewModelScope.launch {
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            kotlinx.coroutines.flow.combine(LikedMusicCache.likedSongs, com.music.bitchord.data.settings.AppSettings.meteredConnection) { songs, _ -> songs }
+                .debounce(20_000)
+                .collect { songs -> downloadAllLiked(songs) }
         }
         // BitChord Audio: covers of downloaded songs kept for offline, as likes and downloads change.
         viewModelScope.launch {
