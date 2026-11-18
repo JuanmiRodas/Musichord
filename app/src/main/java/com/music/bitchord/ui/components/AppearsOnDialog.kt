@@ -58,11 +58,11 @@ fun AppearsOnHost(onOpenAlbum: (String, String, String?) -> Unit, onPlay: (Song)
     val albums by produceState(AlbumAppearances.known(song), song.videoId) {
         value = runCatching { AlbumAppearances.search(song) }.getOrDefault(value)
     }
-    val performances by produceState<List<Song>?>(null, song.videoId) {
-        value = runCatching { SongFamily.performances(song) }.getOrDefault(emptyList())
+    val performances by produceState(SongFamily.cachedPerformances(song), song.videoId) {
+        value = runCatching { SongFamily.performances(song) }.getOrDefault(value ?: emptyList())
     }
-    val others by produceState<List<SongFamily.Other>?>(null, song.videoId) {
-        value = runCatching { SongFamily.byOtherArtists(song) }.getOrDefault(emptyList())
+    val others by produceState(SongFamily.cachedOthers(song), song.videoId) {
+        value = runCatching { SongFamily.byOtherArtists(song) }.getOrDefault(value ?: emptyList())
     }
     AlertDialog(
         onDismissRequest = close,

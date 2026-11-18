@@ -107,6 +107,10 @@ object SourceMap {
     }
 
     private val entries = ConcurrentHashMap<String, Entry>()
+
+    /** BitChord Audio: the liked track ↔ your file links the current matcher made. */
+    fun fileLinks(): Map<String, String> =
+        entries.filterValues { it.file != null && it.gen % 100 == MATCHER_VERSION }.mapValues { it.value.file!! }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
 

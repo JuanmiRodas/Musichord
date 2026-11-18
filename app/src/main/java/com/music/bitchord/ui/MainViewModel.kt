@@ -2068,6 +2068,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 swapLikedVideos(it)
                 // BitChord Audio: official Latin names for your likes, in the background.
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
+                // BitChord Audio: every song's other performances, mapped in the background.
+                com.music.bitchord.data.SongFamily.mapAll()
+                // BitChord Audio: missing details (album, artist, cover) filled into your files.
+                com.music.bitchord.data.covers.MetadataFill.start(getApplication())
                 // BitChord Audio: the links to your files made by the older matcher, checked once.
                 launch(Dispatchers.Default) { runCatching { com.music.bitchord.data.sources.SourceMap.audit(it) } }
             }
