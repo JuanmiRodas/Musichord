@@ -1065,6 +1065,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * on a round trip before the heart fills reads as the tap not having
      * registered, and people tap again.
      */
+    private val KARAOKE_TITLE = Regex("""(?i)カラオケ|\bkaraoke\b|\boff[\s-]?vocal\b|オフ・?ボーカル|オリジナル・?カラオケ""")
+    @Volatile private var karaokeSweep: kotlinx.coroutines.Job? = null
+
+    /**
+     * BitChord Audio: takes the karaoke versions (カラオケ, Karaoke, Off Vocal) out of your
+     * liked songs, once — later likes of one are yours to keep.
+     */
+    private fun dropKaraokeLikes() {
+        if (karaokeSweep?.isActive == true) return
+        val prefs = getApplication<android.app.Application>().getSharedPreferences("bitchord_cleanup", android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean("karaoke_likes_v1", false)) return
+        karaokeSweep = viewModelScope.launch {
+            kotlinx.coroutines.delay(30_000)
+            val liked = LikedMusicCache.likedSongs.value
+            if (liked.size < 50) return@launch // not loaded yet: next time
+            val karaoke = liked.filter { KARAOKE_TITLE.containsMatchIn(it.title) }
+            com.music.bitchord.data.TrackLog.d("BitChord", "cleanup: ${karaoke.size} karaoke versions in your likes")
+            for (s in karaoke) {
+                com.music.bitchord.data.TrackLog.d("BitChord", "cleanup: un-liking karaoke '${s.title}' by ${s.artist}")
+                setLike(s.videoId, LikeStatus.INDIFFERENT)
+                kotlinx.coroutines.delay(1_500)
+            }
+            prefs.edit().putBoolean("karaoke_likes_v1", true).apply()
+        }
+    }
+
     fun setLike(videoId: String, status: LikeStatus, shown: LikeStatus? = null) {
         // BitChord Audio: an un-like takes the song out everywhere it is liked — every copy of
         // it (your file, its YouTube upload, a local like) — and stays (see LikedMusicCache.alive).
@@ -2070,6 +2096,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
                 // BitChord Audio: every song's other performances, mapped in the background.
                 com.music.bitchord.data.SongFamily.mapAll()
+                // BitChord Audio: karaoke versions out of your likes (asked for once).
+                dropKaraokeLikes()
                 // BitChord Audio: every link to your files heard, as Shazam would, before it is trusted.
                 com.music.bitchord.playback.smart.AudioCheck.start()
                 // BitChord Audio: missing details (album, artist, cover) filled into your files.
