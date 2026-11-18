@@ -24,6 +24,60 @@ object CloudCopies {
     private const val TAG = "BitChord"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // ── BitChord Audio: Wi-Fi only (the default) — asked on mobile data, a copy waits for Wi-Fi ──
+    private var prefs: android.content.SharedPreferences? = null
+    private var dir: java.io.File? = null
+    private var app: Context? = null
+    private const val SEP = "\u0001"
+    val wifiOnly = kotlinx.coroutines.flow.MutableStateFlow(true)
+
+    fun init(context: Context) {
+        app = context.applicationContext
+        prefs = context.getSharedPreferences("bitchord_cloud_copies", Context.MODE_PRIVATE)
+        dir = java.io.File(context.filesDir, "cloud-copies").apply { mkdirs() }
+        wifiOnly.value = prefs?.getBoolean("wifi_only", true) ?: true
+        // Waiting copies go as soon as the phone is on Wi-Fi (or the rule is turned off).
+        scope.launch {
+            kotlinx.coroutines.flow.combine(com.music.bitchord.data.settings.AppSettings.meteredConnection, wifiOnly) { m, w -> m == false || (!w && m != null) }
+                .collect { allowed -> if (allowed) runWaiting() }
+        }
+    }
+
+    fun setWifiOnly(on: Boolean) {
+        wifiOnly.value = on
+        prefs?.edit()?.putBoolean("wifi_only", on)?.apply()
+    }
+
+    private fun allowedNow(): Boolean {
+        val metered = com.music.bitchord.data.settings.AppSettings.meteredConnection.value
+        return metered == false || (!wifiOnly.value && metered != null)
+    }
+
+    private fun keepForLater(songs: List<Song>, artist: String, title: String, playlist: Boolean) {
+        val d = dir ?: return
+        val name = "job-" + System.currentTimeMillis()
+        runCatching { com.music.bitchord.data.SongListStore.save(java.io.File(d, "$name.json"), songs) }
+        prefs?.edit()?.putString(name, listOf(artist, title, playlist.toString()).joinToString(SEP))?.apply()
+        TrackLog.d(TAG, "cloud copy: '$title' kept for Wi-Fi")
+    }
+
+    private fun runWaiting() {
+        val p = prefs ?: return
+        val d = dir ?: return
+        val ctx = app ?: return
+        p.all.keys.filter { it.startsWith("job-") }.forEach { name ->
+            val meta = p.getString(name, null)?.split(SEP) ?: return@forEach
+            val f = java.io.File(d, "$name.json")
+            val songs = com.music.bitchord.data.SongListStore.load(f)?.songs.orEmpty()
+            p.edit().remove(name).apply()
+            f.delete()
+            if (songs.isNotEmpty() && meta.size >= 3) {
+                TrackLog.d(TAG, "cloud copy: '${meta[1]}' — on Wi-Fi now, starting")
+                start(ctx, songs, meta[0], meta[1], meta[2].toBoolean())
+            }
+        }
+    }
+
     private fun seconds(s: Song): Int? = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
         ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
 
@@ -33,7 +87,16 @@ object CloudCopies {
             android.widget.Toast.makeText(app, app.getString(com.music.bitchord.R.string.cloud_copy_no_pcloud), android.widget.Toast.LENGTH_LONG).show()
             return
         }
+        if (!allowedNow()) {
+            keepForLater(songs, artist, title, playlist)
+            android.widget.Toast.makeText(app, app.getString(com.music.bitchord.R.string.cloud_copy_waiting, title), android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         android.widget.Toast.makeText(app, app.getString(com.music.bitchord.R.string.cloud_copy_started, title), android.widget.Toast.LENGTH_SHORT).show()
+        start(app, songs, artist, title, playlist)
+    }
+
+    private fun start(app: Context, songs: List<Song>, artist: String, title: String, playlist: Boolean) {
         scope.launch {
             val library = WebDavRepository.library()
             val todo = songs.filter { s ->

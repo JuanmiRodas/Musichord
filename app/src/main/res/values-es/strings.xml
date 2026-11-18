@@ -1782,4 +1782,6 @@
     <string name="cloud_copy_action">Copiar a pCloud</string>
     <string name="cloud_copy_started">Copiando «%1$s» a tu pCloud…</string>
     <string name="cloud_copy_no_pcloud">Conecta pCloud en Ajustes primero</string>
+    <string name="cloud_copy_wifi_only">Copiar a pCloud solo con Wi-Fi</string>
+    <string name="cloud_copy_waiting">«%1$s» se copiará a pCloud cuando tengas Wi-Fi</string>
 </resources>

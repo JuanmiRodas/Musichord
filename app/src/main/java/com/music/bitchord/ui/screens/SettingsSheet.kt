@@ -756,6 +756,16 @@ fun SettingsScreen(
                     badge = stringResource(R.string.blocking).takeIf { wifiOnlyDownloads && metered == true },
                 )
             }
+            // BitChord Audio: copies to pCloud (albums, playlists) wait for Wi-Fi.
+            val cloudWifiTitle = stringResource(R.string.cloud_copy_wifi_only)
+            row(cloudWifiTitle, "pcloud", "wi-fi", divided = false) {
+                val cloudWifi by com.music.bitchord.data.webdav.CloudCopies.wifiOnly.collectAsStateWithLifecycle()
+                SettingsSubRow(
+                    title = cloudWifiTitle,
+                    checked = cloudWifi,
+                    onCheckedChange = com.music.bitchord.data.webdav.CloudCopies::setWifiOnly,
+                )
+            }
             val exportDownloadsTitle = stringResource(R.string.export_compatible_downloads)
             row(exportDownloadsTitle, "music folder") {
                 SettingsSubRow(
