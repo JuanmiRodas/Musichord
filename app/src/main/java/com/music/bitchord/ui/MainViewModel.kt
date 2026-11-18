@@ -1267,6 +1267,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             LikeState.set(video.videoId, LikeStatus.INDIFFERENT)
         }
         android.util.Log.i("BitChord", "song version: liked '${song.title}' (${song.videoId}) in place of the video '${video.title}' (${video.videoId})")
+        // BitChord Audio: playing now — it becomes the version you chose, title and heart included.
+        withContext(Dispatchers.Main) { onLikeMoved?.invoke(video, song) }
         // In the video's place, wherever Liked Music is shown or kept.
         fun swapIn(list: List<Song>): List<Song> {
             val at = list.indexOfFirst { it.videoId == video.videoId }
@@ -1324,6 +1326,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ).show()
         }
     }
+
+    /** BitChord Audio: set by the activity — the playing item switched to the version a like moved to. */
+    @Volatile var onLikeMoved: ((from: Song, to: Song) -> Unit)? = null
 
     private var songVersionPass: kotlinx.coroutines.Job? = null
 

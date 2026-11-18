@@ -5866,6 +5866,16 @@ private fun BitChordApp(
         // BitChord Audio: "Appears on…" — other albums, performances, other artists.
         // BitChord Audio: "Go to artist" with several artists — which one.
         com.music.bitchord.ui.components.ArtistPickerHost()
+        // BitChord Audio: a like moved to another version (the album one for a clip) switches
+        // the song playing to it — its title, cover and heart — not only Liked Music.
+        androidx.compose.runtime.SideEffect {
+            viewModel.onLikeMoved = { from, to ->
+                val c = controller
+                if (c != null && c.currentMediaItem?.mediaId == from.videoId) {
+                    runCatching { c.swapToVersion(to) }
+                }
+            }
+        }
         androidx.compose.runtime.SideEffect {
             com.music.bitchord.ui.components.ArtistPicker.open = { id ->
                 dismissPlayer()

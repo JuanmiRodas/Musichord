@@ -88,7 +88,9 @@ object SourceMap {
             val fileId = e.file ?: continue
             val song = byId[id] ?: continue
             val file = files[fileId] ?: continue
-            val ok = OwnFileMatcher.sameRecording(song.title, song.albumName, seconds(song.durationText), file.title, file.albumName, seconds(file.durationText))
+            // A music video runs longer than the song (intro, outro): its length isn't the test.
+            val video = runCatching { com.music.bitchord.data.SongVersions.looksLikeVideo(song) }.getOrDefault(false)
+            val ok = OwnFileMatcher.sameRecording(song.title, song.albumName, seconds(song.durationText), file.title, file.albumName, seconds(file.durationText), lengthsChecked = video)
             if (ok) {
                 kept++
                 if (e.gen % 100 != MATCHER_VERSION) entries[id] = e.copy(gen = gen())
