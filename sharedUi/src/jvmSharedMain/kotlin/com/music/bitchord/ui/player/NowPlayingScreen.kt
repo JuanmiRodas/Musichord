@@ -2171,13 +2171,6 @@ fun NowPlayingScreen(
                             onScrub = onScrub,
                             onScrubFinished = onScrubFinished,
                         ) {
-                            PlaybackQualityLabel(
-                                song = song,
-                                isLoading = isLoading,
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .padding(horizontal = 8.dp),
-                            )
                         }
                     },
                     transport = {
@@ -2393,13 +2386,6 @@ fun NowPlayingScreen(
                                     onScrub = onScrub,
                                     onScrubFinished = onScrubFinished,
                                 ) {
-                                    PlaybackQualityLabel(
-                                        song = song,
-                                        isLoading = isLoading,
-                                        modifier = Modifier
-                                            .align(Alignment.Center)
-                                            .padding(horizontal = 8.dp),
-                                    )
                                 }
                             },
                             transport = {
@@ -4113,7 +4099,6 @@ fun NowPlayingScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .washTint({ videoWash }, { videoWashAmount })
                                 // Collapsed, this row shares the header with the sleeve
                                 // rather than sitting under it, and the two are not the
                                 // same height — centring the credits in the taller of
@@ -4148,7 +4133,10 @@ fun NowPlayingScreen(
                                 // from the sleeve so the gap between the two is inside
                                 // the band as well: it is a gap in one block, not a seam
                                 // between two, and a finger should not be able to find it.
-                                .onGloballyPositioned { dismissBandBottom = it.boundsInRoot().bottom },
+                                .onGloballyPositioned { dismissBandBottom = it.boundsInRoot().bottom }
+                                // Last, after the offset: a layer earlier in the chain clipped
+                                // the moved row away (the title and its buttons vanished).
+                                .washTint({ videoWash }, { videoWashAmount }),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(
@@ -4626,13 +4614,6 @@ fun NowPlayingScreen(
                         onScrub = onScrub,
                         onScrubFinished = onScrubFinished,
                     ) {
-                        PlaybackQualityLabel(
-                            song = song,
-                            isLoading = isLoading,
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(horizontal = 8.dp),
-                        )
                     }
 
                     val transport: @Composable () -> Unit = {
