@@ -1777,4 +1777,9 @@
     <string name="assistant_history">What it wrote</string>
     <string name="assistant_undone">Undone</string>
     <string name="assistant_undo">Undo</string>
+    <string name="assistant_videos">Videos you like</string>
+    <string name="assistant_video_swapped">Like moved to the official song</string>
+    <string name="assistant_video_edited">Not on YouTube Music: shown with the right details</string>
+    <string name="assistant_video_asked">Asked you</string>
+    <string name="assistant_video_official">Official already</string>
 </resources>

@@ -65,7 +65,7 @@ object SettingsSync {
     )
 
     /** Files in the app's own storage that follow you. */
-    private val FILES = listOf("lyric_aliases.json", com.music.bitchord.data.names.OfficialNames.FILE, com.music.bitchord.data.SongFamily.FILE, com.music.bitchord.playback.smart.AudioCheck.FILE, com.music.bitchord.data.cleanup.LibraryCleanup.FILE, com.music.bitchord.data.cleanup.Assistant.FILE)
+    private val FILES = listOf("lyric_aliases.json", com.music.bitchord.data.names.OfficialNames.FILE, com.music.bitchord.data.SongFamily.FILE, com.music.bitchord.playback.smart.AudioCheck.FILE, com.music.bitchord.data.cleanup.LibraryCleanup.FILE, com.music.bitchord.data.cleanup.Assistant.FILE, com.music.bitchord.data.cleanup.LikedVideos.FILE)
 
     private val SKIP_EXACT = setOf(
         "sources", "onboarding_complete", "last_version_code", "last_player_screen",

@@ -2102,6 +2102,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // BitChord Audio: every link to your files heard, as Shazam would, before it is trusted.
                 com.music.bitchord.playback.smart.AudioCheck.start()
                 // BitChord Audio: the library assistant, on its own at night.
+                com.music.bitchord.data.cleanup.LikedVideos.swapLike = { v, s -> swapLike(v, s) }
                 com.music.bitchord.data.cleanup.Assistant.start()
                 // BitChord Audio: missing details (album, artist, cover) filled into your files.
                 com.music.bitchord.data.covers.MetadataFill.start(getApplication())

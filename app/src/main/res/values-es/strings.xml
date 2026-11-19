@@ -1865,4 +1865,9 @@
     <string name="assistant_history">Lo que ha escrito</string>
     <string name="assistant_undone">Deshecho</string>
     <string name="assistant_undo">Deshacer</string>
+    <string name="assistant_videos">Vídeos que te gustan</string>
+    <string name="assistant_video_swapped">Me gusta pasado a la canción oficial</string>
+    <string name="assistant_video_edited">No está en YouTube Music: se muestra con los datos correctos</string>
+    <string name="assistant_video_asked">Te ha preguntado</string>
+    <string name="assistant_video_official">Ya era oficial</string>
 </resources>

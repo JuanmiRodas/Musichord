@@ -334,6 +334,33 @@ private fun AssistantPane(modifier: Modifier) {
                 Text(stringResource(R.string.assistant_send))
             }
         }
+        val videos by com.music.bitchord.data.cleanup.LikedVideos.results.collectAsStateWithLifecycle()
+        if (videos.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text(stringResource(R.string.assistant_videos), style = MaterialTheme.typography.titleMedium)
+            videos.take(200).forEach { r ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(r.videoTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            listOfNotNull(r.title, r.artist, r.album, r.year).joinToString(" · ").ifBlank { "—" },
+                            style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        val label = when (r.status) {
+                            com.music.bitchord.data.cleanup.LikedVideos.Status.SWAPPED -> stringResource(R.string.assistant_video_swapped)
+                            com.music.bitchord.data.cleanup.LikedVideos.Status.EDITED -> stringResource(R.string.assistant_video_edited)
+                            com.music.bitchord.data.cleanup.LikedVideos.Status.ASKED -> stringResource(R.string.assistant_video_asked)
+                            com.music.bitchord.data.cleanup.LikedVideos.Status.OFFICIAL -> stringResource(R.string.assistant_video_official)
+                            com.music.bitchord.data.cleanup.LikedVideos.Status.FAILED -> r.reason ?: "—"
+                        }
+                        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                    if (r.status == com.music.bitchord.data.cleanup.LikedVideos.Status.EDITED) {
+                        TextButton(onClick = { com.music.bitchord.data.cleanup.LikedVideos.undo(r) }) { Text(stringResource(R.string.assistant_undo)) }
+                    }
+                }
+            }
+        }
         if (a.history.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
             Text(stringResource(R.string.assistant_history), style = MaterialTheme.typography.titleMedium)

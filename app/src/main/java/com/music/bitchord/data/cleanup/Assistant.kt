@@ -119,7 +119,33 @@ object Assistant {
 
     // ── Working on its own ──
 
+    @Volatile private var watcher: Job? = null
+
+    /** Phase 2: a video you just liked is looked at within minutes, whatever the hour. */
+    private fun watchNewLikes() {
+        if (watcher?.isActive == true) return
+        watcher = scope.launch {
+            delay(60_000)
+            while (true) {
+                if (_state.value.on && Gemini.ready) {
+                    rollDay()
+                    val (fresh, _) = LikedVideos.todo()
+                    for (v in fresh.take(5)) {
+                        if (_state.value.callsToday >= DAILY_CALLS) break
+                        count()
+                        _state.value = _state.value.copy(current = v.title)
+                        runCatching { LikedVideos.handle(v, ::askAbout) }
+                            .onFailure { TrackLog.w(TAG, "liked videos: '${v.title}' failed: ${it.message}") }
+                        delay(15_000)
+                    }
+                }
+                delay(2 * 60_000L)
+            }
+        }
+    }
+
     fun start() {
+        watchNewLikes()
         if (job?.isActive == true) return
         val context = app ?: return
         job = scope.launch {
@@ -131,6 +157,16 @@ object Assistant {
                 if (w != null) { delay(5 * 60_000L); continue }
                 rollDay()
                 if (_state.value.callsToday >= DAILY_CALLS) { delay(30 * 60_000L); continue }
+                // Phase 2 first: the videos you liked long ago, one at a time.
+                val backlog = LikedVideos.todo().second.firstOrNull()
+                if (backlog != null) {
+                    _state.value = _state.value.copy(running = true, current = backlog.title)
+                    count()
+                    runCatching { LikedVideos.handle(backlog, ::askAbout) }
+                        .onFailure { TrackLog.w(TAG, "liked videos: '${backlog.title}' failed: ${it.message}") }
+                    delay(20_000)
+                    continue
+                }
                 val asked = _state.value.questions.map { it.key }.toSet()
                 val g = runCatching { LibraryCleanup.groups() }.getOrDefault(emptyList())
                     .firstOrNull { !LibraryCleanup.isDone(it.key) && !LibraryCleanup.waiting.containsKey(it.key) && it.key !in asked }
@@ -171,11 +207,13 @@ object Assistant {
         }
     }
 
-    private fun ask(g: LibraryCleanup.Group, text: String) {
-        val qs = (_state.value.questions.filterNot { it.key == g.key } + Question(g.key, g.path, text, System.currentTimeMillis()))
+    private fun ask(g: LibraryCleanup.Group, text: String) = askAbout(g.key, g.path, text)
+
+    private fun askAbout(key: String, path: String, text: String) {
+        val qs = (_state.value.questions.filterNot { it.key == key } + Question(key, path, text, System.currentTimeMillis()))
         _state.value = _state.value.copy(questions = qs, reviewCount = LibraryCleanup.waiting.size)
         _attention.value = qs.size
-        TrackLog.d(TAG, "assistant: asks about ${g.path}: $text")
+        TrackLog.d(TAG, "assistant: asks about $path: $text")
         save()
     }
 
@@ -300,6 +338,12 @@ Use the exact paths from the list. Several actions are fine; none is fine.
 
     /** An answer to one of its questions, from the review screen. */
     fun answer(q: Question, text: String) {
+        if (q.key.startsWith("video:")) {
+            LikedVideos.answer(q.key.removePrefix("video:"), text)
+            forget(q.key)
+            start()
+            return
+        }
         addHint(q.path, text)
         reopenFor(q.path)
         save()
