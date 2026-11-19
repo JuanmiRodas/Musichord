@@ -26,7 +26,43 @@ import java.util.concurrent.TimeUnit
 object Gemini {
 
     private const val TAG = "BitChord"
-    private const val MODEL = "gemini-2.5-flash"
+    /**
+     * BitChord Audio: the model is not fixed — Google retires them (gemini-2.5-flash is no
+     * longer open to new keys). The newest stable "Flash" your key can use is picked from
+     * Google's own list, and picked again when the one in use goes away.
+     */
+    private val FALLBACK = listOf("gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview")
+    @Volatile private var model: String? = null
+
+    private fun version(name: String): Double =
+        Regex("""gemini-(\d+(?:\.\d+)?)""").find(name)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+
+    /** The newest stable Flash model this key can generate with, from Google's list. */
+    private fun pickModel(): String {
+        model?.let { return it }
+        val listed = runCatching {
+            val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200")
+                .header("x-goog-api-key", _key.value).build()
+            client.newCall(req).execute().use { r ->
+                val o = JSONObject(r.body?.string().orEmpty())
+                val a = o.optJSONArray("models") ?: JSONArray()
+                (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+                    .filter { m ->
+                        val methods = m.optJSONArray("supportedGenerationMethods")
+                        methods != null && (0 until methods.length()).any { methods.optString(it) == "generateContent" }
+                    }
+                    .map { it.optString("name").removePrefix("models/") }
+            }
+        }.getOrDefault(emptyList())
+        val flash = listed.filter { n ->
+            Regex("""^gemini-\d+(\.\d+)?-flash$""").matches(n)
+        }.sortedByDescending(::version)
+        val preview = listed.filter { n -> Regex("""^gemini-\d+(\.\d+)?-flash-preview$""").matches(n) }.sortedByDescending(::version)
+        val chosen = flash.firstOrNull() ?: listed.firstOrNull { it == "gemini-flash-latest" } ?: preview.firstOrNull() ?: FALLBACK.first()
+        TrackLog.d(TAG, "assistant: using $chosen (of ${listed.size} models offered)")
+        model = chosen
+        return chosen
+    }
     private val _key = MutableStateFlow("")
     val key: StateFlow<String> = _key
     private var prefs: android.content.SharedPreferences? = null
@@ -38,6 +74,7 @@ object Gemini {
 
     fun setKey(k: String) {
         _key.value = k.trim()
+        model = null
         prefs?.edit()?.putString("gemini_key", k.trim())?.apply()
     }
 
@@ -74,7 +111,14 @@ object Gemini {
      * Asks with [prompt] (and [image], the folder's cover, when there is one); the JSON
      * object in the answer, or null. Searches the web when it needs to.
      */
-    suspend fun ask(prompt: String, image: ByteArray?, imageMime: String?, search: Boolean = true): JSONObject? = withContext(Dispatchers.IO) {
+    suspend fun ask(prompt: String, image: ByteArray?, imageMime: String?, search: Boolean = true): JSONObject? {
+        val first = askOnce(prompt, image, imageMime, search)
+        // A retired model (404): once more with the one picked in its place.
+        if (first == null && model == null) return askOnce(prompt, image, imageMime, search)
+        return first
+    }
+
+    private suspend fun askOnce(prompt: String, image: ByteArray?, imageMime: String?, search: Boolean): JSONObject? = withContext(Dispatchers.IO) {
         if (!ready) return@withContext null
         val parts = JSONArray().put(JSONObject().put("text", prompt))
         if (image != null) {
@@ -86,14 +130,17 @@ object Gemini {
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
             .apply { if (search) put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject()))) }
             .put("generationConfig", JSONObject().put("temperature", 0.2))
+        val name = pickModel()
         val req = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$name:generateContent")
             .header("x-goog-api-key", _key.value)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         runCatching {
             client.newCall(req).execute().use { r ->
                 val text = r.body?.string().orEmpty()
+                // The model went away (retired, not offered to this key): another one, next time.
+                if (r.code == 404) model = null
                 if (r.code !in 200..299) {
                     TrackLog.w(TAG, "assistant: Gemini answered ${r.code}: ${text.take(300)}")
                     _lastError.value = why(r.code, text)
