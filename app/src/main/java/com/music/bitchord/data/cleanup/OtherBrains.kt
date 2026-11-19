@@ -28,7 +28,9 @@ object OtherBrains {
     enum class Provider(val label: String, val base: String, val prefKey: String, val prefer: List<Regex>) {
         EXPERIENTIAL(
             "Experiential Labs", "https://api.experientiallabs.ai/v1", "experiential_key",
-            listOf(Regex("(?i)deepseek"), Regex("(?i)luna"), Regex("(?i)clef")),
+            // Its free core pool: DeepSeek V4.1 Flash, GPT-6 Luna, Clef — chat models, not the
+            // OCR, reasoning-only or vision ones that share a name with them.
+            listOf(Regex("(?i)deepseek[^/]*v4\\.?1[^/]*flash"), Regex("(?i)gpt-?6[^/]*luna|(^|/)luna"), Regex("(?i)(^|/)clef")),
         ),
         MISTRAL(
             "Mistral", "https://api.mistral.ai/v1", "mistral_key",
@@ -69,7 +71,10 @@ object OtherBrains {
     }
 
     /** The free models (by name): Experiential's free core pool; for Mistral every model is in the free plan. */
-    fun isFree(p: Provider, id: String) = p == Provider.MISTRAL || p.prefer.any { it.containsMatchIn(id) }
+    fun isFree(p: Provider, id: String) = p == Provider.MISTRAL || (p.prefer.any { it.containsMatchIn(id) } && !NOT_CHAT.containsMatchIn(id))
+
+    /** Models that are not for a chat answer (reading images, embeddings, speech…). */
+    private val NOT_CHAT = Regex("(?i)ocr|embed|tts|whisper|image|vision|moderation|audio|transcri|guard|rerank|-vl\\b")
 
     /** The models your key can use, for picking one by hand. */
     fun listModels(p: Provider): List<String> = runCatching {
@@ -109,8 +114,11 @@ object OtherBrains {
                 (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("id") }.filter { it.isNotBlank() }
             }
         }.getOrDefault(emptyList())
-        val chosen = p.prefer.firstNotNullOfOrNull { re -> ids.firstOrNull { re.containsMatchIn(it) } }
-            ?: ids.firstOrNull { !Regex("(?i)embed|tts|whisper|image|moderation|ocr|audio").containsMatchIn(it) }
+        val chat = ids.filterNot { NOT_CHAT.containsMatchIn(it) }
+        val chosen = p.prefer.firstNotNullOfOrNull { re -> chat.firstOrNull { re.containsMatchIn(it) } }
+            // Not a free one found by name: a quick chat model, never a slow reasoning one first.
+            ?: chat.firstOrNull { Regex("(?i)deepseek.*(chat|v\\d)").containsMatchIn(it) && !Regex("(?i)r1|reason").containsMatchIn(it) }
+            ?: chat.firstOrNull()
             ?: return null
         TrackLog.d(TAG, "assistant: ${p.label} — using $chosen (of ${ids.size} models)")
         models[p] = chosen
@@ -137,6 +145,8 @@ object OtherBrains {
             val body = JSONObject()
                 .put("model", model)
                 .put("temperature", 0.2)
+                // Ask for JSON outright where the service supports it.
+                .put("response_format", JSONObject().put("type", "json_object"))
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content",
                     prompt + "\nYou cannot browse the web here: answer from what you know and the data above; lower your confidence when unsure.")))
             val req = Request.Builder().url("${p.base}/chat/completions")
@@ -151,6 +161,15 @@ object OtherBrains {
                         lastError[p] = "sin cuota ahora mismo (429)"
                         resting[p] = now + 3_600_000L
                         return@use null
+                    }
+                    // A service that refuses "response_format": once more without it.
+                    if (r.code == 400 && text.contains("response_format", true)) {
+                        body.remove("response_format")
+                        val retry = Request.Builder().url("${p.base}/chat/completions").header("Authorization", "Bearer $key")
+                            .post(body.toString().toRequestBody("application/json".toMediaType())).build()
+                        return@use client.newCall(retry).execute().use { r2 ->
+                            if (r2.code in 200..299) JSONObject(r2.body?.string().orEmpty()).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content") else null
+                        }
                     }
                     if (r.code == 404 || r.code == 400) models.remove(p)
                     if (r.code !in 200..299) {
@@ -175,10 +194,20 @@ object OtherBrains {
         return null
     }
 
-    private fun jsonIn(text: String): JSONObject? {
-        val start = text.indexOf('{')
+    /**
+     * The JSON object in an answer: past a reasoning model's "<think>…</think>", out of a
+     * code fence, the last whole {…} that parses.
+     */
+    internal fun jsonIn(raw: String): JSONObject? {
+        val text = raw.replace(Regex("(?s)<think>.*?</think>"), "").replace(Regex("```(?:json)?"), "")
+        runCatching { return JSONObject(text.trim()) }
         val end = text.lastIndexOf('}')
-        if (start < 0 || end <= start) return null
-        return runCatching { JSONObject(text.substring(start, end + 1)) }.getOrNull()
+        if (end < 0) return null
+        var start = text.lastIndexOf('{', end)
+        while (start >= 0) {
+            runCatching { return JSONObject(text.substring(start, end + 1)) }
+            start = text.lastIndexOf('{', start - 1)
+        }
+        return null
     }
 }
