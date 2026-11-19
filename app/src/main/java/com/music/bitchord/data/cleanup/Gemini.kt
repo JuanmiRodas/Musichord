@@ -27,19 +27,25 @@ object Gemini {
 
     private const val TAG = "BitChord"
     /**
-     * BitChord Audio: the model is not fixed — Google retires them (gemini-2.5-flash is no
-     * longer open to new keys). The newest stable "Flash" your key can use is picked from
-     * Google's own list, and picked again when the one in use goes away.
+     * BitChord Audio: the model is not fixed — Google retires them and the newest ones have
+     * no free allowance. The models your key can use are read from Google's list and tried
+     * in order: stable Flash (newest first), then Flash-Lite (the most generous free
+     * allowance), then the rest. One that answers "quota" (429) or "gone" (404) is set
+     * aside for a few hours and the next is tried, at once.
      */
-    private val FALLBACK = listOf("gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview")
-    @Volatile private var model: String? = null
+    private val FALLBACK = listOf("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+    @Volatile private var ranked: List<String>? = null
+    private val restingUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** Models that answered without the web search tool only (the search has its own allowance). */
+    private val noSearch = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    @Volatile var model: String? = null
+        private set
 
     private fun version(name: String): Double =
         Regex("""gemini-(\d+(?:\.\d+)?)""").find(name)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
 
-    /** The newest stable Flash model this key can generate with, from Google's list. */
-    private fun pickModel(): String {
-        model?.let { return it }
+    private fun models(): List<String> {
+        ranked?.let { return it }
         val listed = runCatching {
             val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200")
                 .header("x-goog-api-key", _key.value).build()
@@ -54,14 +60,22 @@ object Gemini {
                     .map { it.optString("name").removePrefix("models/") }
             }
         }.getOrDefault(emptyList())
-        val flash = listed.filter { n ->
-            Regex("""^gemini-\d+(\.\d+)?-flash$""").matches(n)
-        }.sortedByDescending(::version)
-        val preview = listed.filter { n -> Regex("""^gemini-\d+(\.\d+)?-flash-preview$""").matches(n) }.sortedByDescending(::version)
-        val chosen = flash.firstOrNull() ?: listed.firstOrNull { it == "gemini-flash-latest" } ?: preview.firstOrNull() ?: FALLBACK.first()
-        TrackLog.d(TAG, "assistant: using $chosen (of ${listed.size} models offered)")
-        model = chosen
-        return chosen
+        fun matching(re: String) = listed.filter { Regex(re).matches(it) }.sortedByDescending(::version)
+        val order = (
+            matching("""^gemini-\d+(\.\d+)?-flash$""") +
+                listOf("gemini-flash-latest").filter { it in listed } +
+                matching("""^gemini-\d+(\.\d+)?-flash-lite$""") +
+                listOf("gemini-flash-lite-latest").filter { it in listed } +
+                matching("""^gemini-\d+(\.\d+)?-flash(-lite)?-preview(-[\d-]+)?$""")
+            ).distinct().ifEmpty { FALLBACK }
+        TrackLog.d(TAG, "assistant: models to try — ${order.take(8).joinToString()} (of ${listed.size} offered)")
+        ranked = order
+        return order
+    }
+
+    private fun usable(): List<String> {
+        val now = System.currentTimeMillis()
+        return models().filter { (restingUntil[it] ?: 0L) < now }
     }
     private val _key = MutableStateFlow("")
     val key: StateFlow<String> = _key
@@ -74,7 +88,9 @@ object Gemini {
 
     fun setKey(k: String) {
         _key.value = k.trim()
-        model = null
+        ranked = null
+        restingUntil.clear()
+        noSearch.clear()
         prefs?.edit()?.putString("gemini_key", k.trim())?.apply()
     }
 
@@ -97,7 +113,7 @@ object Gemini {
         return when (code) {
             400 -> if (msg.contains("API key", true)) "la clave no es válida" else "petición rechazada: ${msg.take(120)}"
             401, 403 -> "la clave no tiene permiso (${msg.take(80)})"
-            429 -> "límite del plan gratuito alcanzado por ahora; se reintenta más tarde"
+            429 -> "los modelos gratuitos de esta clave no tienen cuota ahora mismo; se reintenta más tarde"
             in 500..599 -> "Gemini no responde ahora ($code)"
             else -> "error $code: ${msg.take(120)}"
         }
@@ -111,15 +127,39 @@ object Gemini {
      * Asks with [prompt] (and [image], the folder's cover, when there is one); the JSON
      * object in the answer, or null. Searches the web when it needs to.
      */
-    suspend fun ask(prompt: String, image: ByteArray?, imageMime: String?, search: Boolean = true): JSONObject? {
-        val first = askOnce(prompt, image, imageMime, search)
-        // A retired model (404): once more with the one picked in its place.
-        if (first == null && model == null) return askOnce(prompt, image, imageMime, search)
-        return first
+    /** What a request ended with: the answer, "try another model", or a plain failure. */
+    private sealed interface Outcome {
+        data class Answer(val o: JSONObject?) : Outcome
+        data class Quota(val withSearch: Boolean) : Outcome
+        data object Gone : Outcome
+        data object Failed : Outcome
     }
 
-    private suspend fun askOnce(prompt: String, image: ByteArray?, imageMime: String?, search: Boolean): JSONObject? = withContext(Dispatchers.IO) {
+    suspend fun ask(prompt: String, image: ByteArray?, imageMime: String?, search: Boolean = true): JSONObject? = withContext(Dispatchers.IO) {
         if (!ready) return@withContext null
+        for (name in usable().take(6)) {
+            var withSearch = search && name !in noSearch
+            repeat(2) {
+                when (val out = askOnce(name, prompt, image, imageMime, withSearch)) {
+                    is Outcome.Answer -> {
+                        model = name
+                        return@withContext out.o
+                    }
+                    is Outcome.Quota -> {
+                        // The web search's own allowance first: the same model without it.
+                        if (out.withSearch) { noSearch += name; withSearch = false }
+                        else { restingUntil[name] = System.currentTimeMillis() + 3 * 3_600_000L; return@repeat }
+                    }
+                    Outcome.Gone -> { restingUntil[name] = Long.MAX_VALUE; return@repeat }
+                    Outcome.Failed -> return@withContext null
+                }
+            }
+        }
+        if (_lastError.value == null) _lastError.value = "ningún modelo disponible con esta clave ahora mismo"
+        null
+    }
+
+    private fun askOnce(name: String, prompt: String, image: ByteArray?, imageMime: String?, search: Boolean): Outcome {
         val parts = JSONArray().put(JSONObject().put("text", prompt))
         if (image != null) {
             parts.put(JSONObject().put("inline_data", JSONObject()
@@ -130,34 +170,45 @@ object Gemini {
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
             .apply { if (search) put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject()))) }
             .put("generationConfig", JSONObject().put("temperature", 0.2))
-        val name = pickModel()
         val req = Request.Builder()
             .url("https://generativelanguage.googleapis.com/v1beta/models/$name:generateContent")
             .header("x-goog-api-key", _key.value)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        runCatching {
+        return runCatching {
             client.newCall(req).execute().use { r ->
                 val text = r.body?.string().orEmpty()
-                // The model went away (retired, not offered to this key): another one, next time.
-                if (r.code == 404) model = null
-                if (r.code !in 200..299) {
-                    TrackLog.w(TAG, "assistant: Gemini answered ${r.code}: ${text.take(300)}")
-                    _lastError.value = why(r.code, text)
-                    return@runCatching null
+                when {
+                    r.code == 429 -> {
+                        TrackLog.w(TAG, "assistant: $name${if (search) " + search" else ""} — no allowance left (429); trying another way")
+                        _lastError.value = why(429, text)
+                        Outcome.Quota(search)
+                    }
+                    r.code == 404 || (r.code == 400 && search && text.contains("tool", true)) -> {
+                        TrackLog.w(TAG, "assistant: $name not usable (${r.code}): ${text.take(160)}")
+                        if (r.code == 400) Outcome.Quota(true) else Outcome.Gone
+                    }
+                    r.code !in 200..299 -> {
+                        TrackLog.w(TAG, "assistant: Gemini answered ${r.code}: ${text.take(300)}")
+                        _lastError.value = why(r.code, text)
+                        Outcome.Failed
+                    }
+                    else -> {
+                        _lastError.value = null
+                        _lastOk.value = System.currentTimeMillis()
+                        val answer = JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)
+                            ?.optJSONObject("content")?.optJSONArray("parts")
+                            ?.let { p -> (0 until p.length()).joinToString("") { p.optJSONObject(it)?.optString("text").orEmpty() } }
+                            .orEmpty()
+                        Outcome.Answer(jsonIn(answer))
+                    }
                 }
-                _lastError.value = null
-                _lastOk.value = System.currentTimeMillis()
-                val answer = JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)
-                    ?.optJSONObject("content")?.optJSONArray("parts")
-                    ?.let { p -> (0 until p.length()).joinToString("") { p.optJSONObject(it)?.optString("text").orEmpty() } }
-                    .orEmpty()
-                jsonIn(answer)
             }
-        }.onFailure {
+        }.getOrElse {
             TrackLog.w(TAG, "assistant: Gemini failed: ${it.message}")
             _lastError.value = "sin conexión con Gemini (${it.message?.take(80)})"
-        }.getOrNull()
+            Outcome.Failed
+        }
     }
 
     /** The outermost {…} of [text] (an answer may wrap it in prose or a code fence). */

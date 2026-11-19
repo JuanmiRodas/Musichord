@@ -132,7 +132,7 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                 Text(
                     when {
                         testing -> stringResource(R.string.gemini_testing)
-                        tested == "" -> stringResource(R.string.gemini_ok)
+                        tested == "" -> stringResource(R.string.gemini_ok) + (Gemini.model?.let { " · $it" } ?: "")
                         tested != null -> stringResource(R.string.gemini_error, tested!!)
                         err != null -> stringResource(R.string.gemini_error, err!!)
                         else -> stringResource(R.string.gemini_saved)
