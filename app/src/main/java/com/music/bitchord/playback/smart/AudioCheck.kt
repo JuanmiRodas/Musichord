@@ -67,7 +67,111 @@ object AudioCheck {
         val different: Int = 0,
         val unsure: Int = 0,
         val current: String? = null,
+        /** Why it is not listening right now: see [Wait]. */
+        val waiting: Wait? = null,
+        val paused: Boolean = false,
+        val lastRun: Long = 0L,
     )
+
+    /** BitChord Audio: what the run is waiting for. */
+    sealed interface Wait {
+        data object Wifi : Wait
+        data class Network(val names: Set<String>) : Wait
+        data class Hours(val from: Int, val to: Int) : Wait
+        data object Charging : Wait
+        data object Paused : Wait
+    }
+
+    /** When the check may run: any Wi-Fi by default; or the [wifiNames] given, between [fromHour] and [toHour], charging. */
+    data class Schedule(
+        val on: Boolean = false,
+        val wifiNames: Set<String> = emptySet(),
+        val fromHour: Int = 1,
+        val toHour: Int = 7,
+        val chargingOnly: Boolean = false,
+    )
+
+    /** BitChord Audio: one link heard — what, against which copy, the verdict, and how different it sounded. */
+    data class Heard(val title: String, val copy: String, val verdict: Verdict, val ber: Double?, val at: Long)
+
+    private val _history = MutableStateFlow<List<Heard>>(emptyList())
+    /** What has been heard, newest first (the last 2000). */
+    val history: StateFlow<List<Heard>> = _history.asStateFlow()
+    private val _pending = MutableStateFlow<List<String>>(emptyList())
+    /** What this pass still has to hear, in order. */
+    val pending: StateFlow<List<String>> = _pending.asStateFlow()
+    @Volatile private var historyFile: File? = null
+    @Volatile private var lastBer: Double? = null
+
+    private fun loadHistory() {
+        val text = runCatching { historyFile?.takeIf { it.isFile }?.readText() }.getOrNull() ?: return
+        runCatching {
+            val a = org.json.JSONArray(text)
+            _history.value = (0 until a.length()).mapNotNull { i ->
+                val o = a.optJSONObject(i) ?: return@mapNotNull null
+                Heard(o.optString("t"), o.optString("c"), runCatching { Verdict.valueOf(o.optString("v")) }.getOrDefault(Verdict.UNKNOWN),
+                    o.optDouble("b").takeIf { !it.isNaN() }, o.optLong("at"))
+            }
+        }
+    }
+
+    private fun saveHistory() {
+        val a = org.json.JSONArray()
+        _history.value.forEach { h ->
+            a.put(JSONObject().put("t", h.title).put("c", h.copy).put("v", h.verdict.name).put("at", h.at).apply { h.ber?.let { put("b", it) } })
+        }
+        runCatching { historyFile?.writeText(a.toString()) }
+    }
+
+    /** A readable name for [copy]: the pCloud file's path in the library, or "Download". */
+    private fun copyName(copy: String): String =
+        if (copy.startsWith("download:")) "download"
+        else WebDavConfig.fileUrlOf(copy)?.let { u -> runCatching { java.net.URLDecoder.decode(u.substringAfterLast('/'), "UTF-8") }.getOrNull() } ?: copy
+
+    private val _schedule = MutableStateFlow(Schedule())
+    val schedule: StateFlow<Schedule> = _schedule.asStateFlow()
+    private var prefs: android.content.SharedPreferences? = null
+
+    fun setSchedule(s: Schedule) {
+        _schedule.value = s
+        prefs?.edit()?.apply {
+            putBoolean("on", s.on); putStringSet("wifi", s.wifiNames)
+            putInt("from", s.fromHour); putInt("to", s.toHour); putBoolean("charging", s.chargingOnly)
+        }?.apply()
+        app?.let { AudioCheckWorker.schedule(it) }
+    }
+
+    fun setPaused(paused: Boolean) {
+        prefs?.edit()?.putBoolean("paused", paused)?.apply()
+        _progress.value = _progress.value.copy(paused = paused)
+        if (!paused) start(now = true)
+    }
+
+    /** The Wi-Fi network the phone is on, by name; null when not on Wi-Fi or the name is hidden (no location permission). */
+    @Suppress("DEPRECATION")
+    fun currentWifi(context: Context): String? = runCatching {
+        val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        wm.connectionInfo?.ssid?.trim('"')?.takeIf { it.isNotBlank() && it != "<unknown ssid>" && it != "0x" }
+    }.getOrNull()
+
+    private fun charging(context: Context): Boolean = runCatching {
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+        bm.isCharging
+    }.getOrDefault(false)
+
+    /** Null when it may listen now; else what it waits for. */
+    private fun waitingFor(context: Context, force: Boolean): Wait? {
+        if (prefs?.getBoolean("paused", false) == true) return Wait.Paused
+        if (!wifi()) return Wait.Wifi
+        val sc = _schedule.value
+        if (!sc.on || force) return null
+        if (sc.wifiNames.isNotEmpty() && currentWifi(context)?.let { it in sc.wifiNames } != true) return Wait.Network(sc.wifiNames)
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val inHours = if (sc.fromHour == sc.toHour) true else if (sc.fromHour < sc.toHour) h in sc.fromHour until sc.toHour else h >= sc.fromHour || h < sc.toHour
+        if (!inHours) return Wait.Hours(sc.fromHour, sc.toHour)
+        if (sc.chargingOnly && !charging(context)) return Wait.Charging
+        return null
+    }
 
     private val _progress = MutableStateFlow(Progress())
     val progress: StateFlow<Progress> = _progress.asStateFlow()
@@ -92,8 +196,20 @@ object AudioCheck {
     fun init(context: Context) {
         app = context.applicationContext
         store = File(context.filesDir, FILE)
+        prefs = context.applicationContext.getSharedPreferences("bitchord_audio_check", Context.MODE_PRIVATE).also { p ->
+            _schedule.value = Schedule(
+                on = p.getBoolean("on", false),
+                wifiNames = p.getStringSet("wifi", emptySet()).orEmpty().toSet(),
+                fromHour = p.getInt("from", 1),
+                toHour = p.getInt("to", 7),
+                chargingOnly = p.getBoolean("charging", false),
+            )
+            _progress.value = _progress.value.copy(paused = p.getBoolean("paused", false), lastRun = p.getLong("last", 0L))
+        }
+        AudioCheckWorker.schedule(context.applicationContext)
         cache = File(context.cacheDir, "audio-check").apply { mkdirs() }
-        scope.launch { load() }
+        historyFile = File(context.filesDir, "audio_checks_history.json")
+        scope.launch { load(); loadHistory() }
     }
 
     /** Read again (after a restore from pCloud). */
@@ -132,11 +248,21 @@ object AudioCheck {
      * Listens through every link of your library — liked songs ↔ pCloud files, and
      * downloads that came from another source than YouTube — a pair at a time, quietly.
      */
-    fun start() {
+    /** Listening now, outside the schedule's hours and Wi-Fi (still on Wi-Fi), until this pass ends. */
+    @Volatile private var forced = false
+
+    fun runNow() {
+        forced = true
+        prefs?.edit()?.putBoolean("paused", false)?.apply()
+        _progress.value = _progress.value.copy(paused = false)
+        start(now = true)
+    }
+
+    fun start(now: Boolean = false) {
         if (job?.isActive == true) return
         val context = app ?: return
         job = scope.launch {
-            delay(120_000)
+            if (!now) delay(120_000)
             val week = 7L * 24 * 3600 * 1000
             val now = System.currentTimeMillis()
             fun due(k: String) = verdicts[k]?.let { (v, at) -> v == Verdict.UNKNOWN && now - at > week } ?: true
@@ -152,11 +278,14 @@ object AudioCheck {
                 if (due(key(m.videoId, copy))) pairs += Triple(m.videoId, copy, m.title)
             }
             _progress.value = _progress.value.copy(running = true, done = 0, total = pairs.size)
+            _pending.value = pairs.map { it.third }
             TrackLog.d(TAG, "audio check: ${pairs.size} links to listen to")
             for ((i, p) in pairs.withIndex()) {
-                while (!wifi()) {
-                    _progress.value = _progress.value.copy(current = null)
-                    delay(60_000)
+                while (true) {
+                    val w = waitingFor(context, force = forced)
+                    _progress.value = _progress.value.copy(waiting = w, current = if (w == null) _progress.value.current else null)
+                    if (w == null) break
+                    delay(30_000)
                 }
                 val (song, copy, title) = p
                 _progress.value = _progress.value.copy(current = title)
@@ -164,23 +293,38 @@ object AudioCheck {
                     .onFailure { TrackLog.w(TAG, "audio check: '$title' failed: ${it.message}") }
                     .getOrDefault(Verdict.UNKNOWN)
                 verdicts[key(song, copy)] = verdict to System.currentTimeMillis()
+                _history.value = (listOf(Heard(title, copyName(copy), verdict, lastBer, System.currentTimeMillis())) + _history.value).take(2000)
+                _pending.value = pairs.drop(i + 1).map { it.third }
+                lastBer = null
+                saveHistory()
                 if (verdict == Verdict.DIFFERENT && !copy.startsWith("download:")) {
                     SourceMap.forget(song)
                     TrackLog.d(TAG, "audio check: '$title' — your file is another recording; unlinked")
                 } else if (verdict == Verdict.DIFFERENT) {
                     TrackLog.d(TAG, "audio check: '$title' — the download is another recording")
                 }
-                if (i % 10 == 9) save()
+                save()
                 refreshCounts()
                 _progress.value = _progress.value.copy(done = i + 1)
                 delay(2_000)
             }
             save()
-            _progress.value = _progress.value.copy(running = false, current = null)
+            val last = System.currentTimeMillis()
+            prefs?.edit()?.putLong("last", last)?.apply()
+            forced = false
+            _progress.value = _progress.value.copy(running = false, current = null, waiting = null, lastRun = last)
             // What was heard to be the same can now take its details.
             com.music.bitchord.data.covers.MetadataFill.start(context)
             TrackLog.d(TAG, "audio check: done — ${_progress.value.same} same, ${_progress.value.different} other recordings, ${_progress.value.unsure} unsure")
         }
+    }
+
+    /** For the background job: runs (or joins) a pass, waiting at most [maxMs]. */
+    suspend fun runFor(maxMs: Long) {
+        val context = app ?: return
+        if (waitingFor(context, force = false) != null) return
+        start(now = true)
+        kotlinx.coroutines.withTimeoutOrNull(maxMs) { job?.join() }
     }
 
     // ── Listening ──
@@ -204,6 +348,7 @@ object AudioCheck {
                 print(FileSource(fileCopy))
             } ?: return Verdict.UNKNOWN
             val ber = bestBer(songPrint, copyPrint) ?: return Verdict.UNKNOWN
+            lastBer = ber
             val title = WebDavRepository.library().firstOrNull { it.videoId == copy }?.title ?: songId
             TrackLog.d(TAG, "audio check: '$title' bit error ${"%.2f".format(ber)}")
             return when {
@@ -348,6 +493,40 @@ object AudioCheck {
                 i += len
             }
             len = len shl 1
+        }
+    }
+}
+
+
+/**
+ * BitChord Audio: the listening check when the app is closed — every hour, on an unmetered
+ * network (and charging when asked); it listens only inside the schedule's hours and on its
+ * Wi-Fi, for up to 9 minutes a time, carrying on where it left off.
+ */
+class AudioCheckWorker(context: Context, params: androidx.work.WorkerParameters) : androidx.work.CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        AudioCheck.runFor(9 * 60_000L)
+        return Result.success()
+    }
+
+    companion object {
+        private const val NAME = "bitchord-audio-check"
+
+        fun schedule(context: Context) {
+            val sc = AudioCheck.schedule.value
+            val wm = androidx.work.WorkManager.getInstance(context)
+            if (!sc.on) {
+                wm.cancelUniqueWork(NAME)
+                return
+            }
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.UNMETERED)
+                .setRequiresCharging(sc.chargingOnly)
+                .build()
+            val req = androidx.work.PeriodicWorkRequestBuilder<AudioCheckWorker>(1, java.util.concurrent.TimeUnit.HOURS)
+                .setConstraints(constraints)
+                .build()
+            wm.enqueueUniquePeriodicWork(NAME, androidx.work.ExistingPeriodicWorkPolicy.UPDATE, req)
         }
     }
 }

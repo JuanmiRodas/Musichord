@@ -816,6 +816,7 @@ fun SettingsScreen(
                         }
                     },
                     value = if (p.running && p.total > 0) "${p.done * 100 / p.total} %" else null,
+                    onClick = { com.music.bitchord.ui.components.LinkCheck.open() },
                 )
             }
             val exportDownloadsTitle = stringResource(R.string.export_compatible_downloads)
