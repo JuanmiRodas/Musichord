@@ -1843,4 +1843,26 @@
     <string name="link_check_download">Descarga</string>
     <string name="link_check_match">%1$d%% parecido</string>
     <string name="link_check_more">…y %1$d más</string>
+    <string name="cleanup_tab_review">Revisar</string>
+    <string name="assistant_menu">Asistente de la biblioteca</string>
+    <string name="assistant_menu_asks">Asistente de la biblioteca · %1$d preguntas</string>
+    <string name="cleanup_album">Álbum</string>
+    <string name="cleanup_artist">Artista</string>
+    <string name="cleanup_year">Año</string>
+    <string name="cleanup_edit">Editar</string>
+    <string name="assistant_on">Trabajar por su cuenta</string>
+    <string name="assistant_off">Desactivado</string>
+    <string name="assistant_needs_key">Necesita una clave de Gemini (pestaña Revisar, arriba)</string>
+    <string name="assistant_waits">Esperando a su horario, Wi-Fi o a que cargue (lo de la comprobación de la biblioteca)</string>
+    <string name="assistant_working">Trabajando en %1$s</string>
+    <string name="assistant_idle">Nada que hacer ahora mismo</string>
+    <string name="assistant_counts">%1$d escritos · %2$d para que revises · %3$d peticiones hoy</string>
+    <string name="assistant_questions">Te pregunta</string>
+    <string name="assistant_send">Enviar</string>
+    <string name="assistant_chat">Háblale</string>
+    <string name="assistant_chat_hint">Por ejemplo: «deja la carpeta Documents», «los de Anime/Naruto son los openings y endings», «mira otra vez la carpeta Harvest».</string>
+    <string name="assistant_talk">Mensaje</string>
+    <string name="assistant_history">Lo que ha escrito</string>
+    <string name="assistant_undone">Deshecho</string>
+    <string name="assistant_undo">Deshacer</string>
 </resources>

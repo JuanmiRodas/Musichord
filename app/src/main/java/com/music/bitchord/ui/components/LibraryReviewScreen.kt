@@ -65,7 +65,9 @@ import kotlinx.coroutines.launch
 /** BitChord Audio: the pCloud library cleanup — one album card at a time, swiped. */
 object LibraryReview {
     internal val shown = MutableStateFlow(false)
-    fun open() {
+    internal val tab = MutableStateFlow(0)
+    fun open(assistant: Boolean = false) {
+        tab.value = if (assistant) 1 else 0
         shown.value = true
         LibraryCleanup.open()
     }
@@ -85,6 +87,7 @@ fun LibraryReviewHost() {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun LibraryReviewContent(onClose: () -> Unit) {
     val st by LibraryCleanup.state.collectAsStateWithLifecycle()
@@ -130,9 +133,23 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                 }
             }
         }
+        // BitChord Audio: the cards, and the assistant (its questions, the chat, what it did).
+        val tab by LibraryReview.tab.collectAsStateWithLifecycle()
+        val asks by com.music.bitchord.data.cleanup.Assistant.attention.collectAsStateWithLifecycle()
+        androidx.compose.material3.SecondaryTabRow(selectedTabIndex = tab) {
+            androidx.compose.material3.Tab(selected = tab == 0, onClick = { LibraryReview.tab.value = 0 }, text = { Text(stringResource(R.string.cleanup_tab_review)) })
+            androidx.compose.material3.Tab(selected = tab == 1, onClick = { LibraryReview.tab.value = 1 }, text = {
+                Text(if (asks > 0) stringResource(R.string.assistant_menu_asks, asks) else stringResource(R.string.assistant_menu))
+            })
+        }
+        if (tab == 1) {
+            AssistantPane(Modifier.weight(1f).padding(top = 8.dp))
+            return@Column
+        }
         Spacer(Modifier.height(12.dp))
         val g = st.current
         val p = st.proposal
+        var editing by remember(g?.key) { mutableStateOf(false) }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 g == null && !st.loading -> Text(stringResource(R.string.cleanup_all_done), Modifier.align(Alignment.Center))
@@ -177,10 +194,15 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                                     } else {
                                         Text(stringResource(R.string.cleanup_nothing), style = MaterialTheme.typography.bodyMedium)
                                     }
+                                } else if (editing) {
+                                    OutlinedTextField(p.album, { LibraryCleanup.edit(p.copy(album = it)) }, singleLine = true, label = { Text(stringResource(R.string.cleanup_album)) })
+                                    OutlinedTextField(p.artist, { LibraryCleanup.edit(p.copy(artist = it, albumArtist = it)) }, singleLine = true, label = { Text(stringResource(R.string.cleanup_artist)) })
+                                    OutlinedTextField(p.year.orEmpty(), { LibraryCleanup.edit(p.copy(year = it.ifBlank { null })) }, singleLine = true, label = { Text(stringResource(R.string.cleanup_year)) })
                                 } else {
                                     Text(p.album.ifBlank { stringResource(R.string.cleanup_loose) }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                     Text(p.artist, style = MaterialTheme.typography.bodyMedium)
                                     Text(listOfNotNull(p.year, p.genre, p.source).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    TextButton(onClick = { editing = true }) { Text(stringResource(R.string.cleanup_edit)) }
                                 }
                             }
                         }
@@ -196,7 +218,13 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                                 Row(Modifier.padding(vertical = 3.dp)) {
                                     Text("${t.track ?: "–"}", Modifier.width(28.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Column(Modifier.weight(1f)) {
-                                        Text(t.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (editing) {
+                                            OutlinedTextField(t.title, { v ->
+                                                LibraryCleanup.edit(p.copy(tracks = p.tracks.map { if (it.id == t.id) it.copy(title = v) else it }))
+                                            }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                        } else {
+                                            Text(t.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
                                         if (t.album != null) {
                                             Text(listOfNotNull(t.album, t.year).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
@@ -241,5 +269,85 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+
+/** BitChord Audio: the assistant — its switch, where it is, its questions, the chat and what it did. */
+@Composable
+private fun AssistantPane(modifier: Modifier) {
+    val a by com.music.bitchord.data.cleanup.Assistant.state.collectAsStateWithLifecycle()
+    var message by remember { mutableStateOf("") }
+    val time = remember { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault()) }
+    Column(modifier.verticalScroll(rememberScrollState())) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.assistant_on), style = MaterialTheme.typography.titleMedium)
+                val status = when {
+                    !a.on -> stringResource(R.string.assistant_off)
+                    !Gemini.ready -> stringResource(R.string.assistant_needs_key)
+                    a.waiting != null -> stringResource(R.string.assistant_waits)
+                    a.running && a.current != null -> stringResource(R.string.assistant_working, a.current!!)
+                    else -> stringResource(R.string.assistant_idle)
+                }
+                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.assistant_counts, a.history.count { !it.undone }, com.music.bitchord.data.cleanup.LibraryCleanup.waiting.size, a.callsToday),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            androidx.compose.material3.Switch(checked = a.on, onCheckedChange = { com.music.bitchord.data.cleanup.Assistant.setOn(it) })
+        }
+        if (a.questions.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text(stringResource(R.string.assistant_questions), style = MaterialTheme.typography.titleMedium)
+            a.questions.forEach { q ->
+                var answer by remember(q.key) { mutableStateOf("") }
+                Surface(shape = RoundedCornerShape(16.dp), tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(q.path, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(q.text, style = MaterialTheme.typography.bodyMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(answer, { answer = it }, Modifier.weight(1f), singleLine = true)
+                            TextButton(onClick = { com.music.bitchord.data.cleanup.Assistant.answer(q, answer); answer = "" }, enabled = answer.isNotBlank()) {
+                                Text(stringResource(R.string.assistant_send))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.assistant_chat), style = MaterialTheme.typography.titleMedium)
+        if (a.chat.isEmpty()) Text(stringResource(R.string.assistant_chat_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        a.chat.takeLast(40).forEach { m ->
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = if (m.fromMe) Arrangement.End else Arrangement.Start) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (m.fromMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                ) { Text(m.text, Modifier.padding(10.dp), style = MaterialTheme.typography.bodyMedium) }
+            }
+        }
+        if (a.thinking) CircularProgressIndicator(Modifier.padding(top = 8.dp).size(20.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+            OutlinedTextField(message, { message = it }, Modifier.weight(1f), maxLines = 4, label = { Text(stringResource(R.string.assistant_talk)) })
+            TextButton(onClick = { com.music.bitchord.data.cleanup.Assistant.send(message); message = "" }, enabled = message.isNotBlank() && !a.thinking) {
+                Text(stringResource(R.string.assistant_send))
+            }
+        }
+        if (a.history.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text(stringResource(R.string.assistant_history), style = MaterialTheme.typography.titleMedium)
+            a.history.take(200).forEach { d ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("${d.artist} — ${d.album}", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${d.path} · ${time.format(java.util.Date(d.at))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (d.undone) Text(stringResource(R.string.assistant_undone), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else TextButton(onClick = { com.music.bitchord.data.cleanup.Assistant.undo(d) }) { Text(stringResource(R.string.assistant_undo)) }
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
     }
 }

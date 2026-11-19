@@ -554,6 +554,9 @@ fun TopBarAccountButton(
             },
     ) {
         val photo = account?.thumbnailUrl
+        // BitChord Audio: the library assistant has a question — a small dot on the photo.
+        val asks by com.music.bitchord.data.cleanup.Assistant.attention.collectAsStateWithLifecycle()
+        Box {
         if (photo != null) {
             AsyncImage(
                 model = photo,
@@ -580,6 +583,16 @@ fun TopBarAccountButton(
                     modifier = Modifier.size(18.dp),
                 )
             }
+        }
+        if (asks > 0) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
         }
     }
 }

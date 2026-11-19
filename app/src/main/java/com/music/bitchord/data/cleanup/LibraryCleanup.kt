@@ -99,6 +99,10 @@ object LibraryCleanup {
         val tracks: List<TrackFix>,
         val reason: String,
         val source: String,
+        /** How sure the assistant is (0–1). */
+        val confidence: Double = 0.5,
+        /** What it would need to know, when it is lost. */
+        val question: String? = null,
     )
 
     data class State(
@@ -140,6 +144,22 @@ object LibraryCleanup {
         app?.let { com.music.bitchord.data.sync.SettingsSync.changed(it) }
     }
 
+    /** BitChord Audio: for the assistant — folders it decided ("auto"), and the review queue it left. */
+    fun isDone(key: String) = done.containsKey(key)
+    fun markDone(key: String, how: String) { done[key] = how; save() }
+    fun reopen(key: String) { done.remove(key); save() }
+    internal fun groups(): List<Group> = buildGroups()
+    internal suspend fun proposeFor(g: Group, hint: String?): Proposal? = proposalFor(g, hint)
+    internal suspend fun write(g: Group, p: Proposal, convert: Boolean) = apply(g, p, convert)
+
+    /** Proposals the assistant left for you, by folder (shown first, as it left them). */
+    val waiting = java.util.concurrent.ConcurrentHashMap<String, Proposal>()
+
+    /** The proposal on the card, as you edited it. */
+    fun edit(p: Proposal) {
+        _state.value = _state.value.copy(proposal = p)
+    }
+
     private fun dirOf(id: String) = WebDavConfig.fileUrlOf(id)?.substringBeforeLast('/')
     private fun ext(id: String) = WebDavConfig.fileUrlOf(id)?.substringAfterLast('.')?.substringBefore('?')?.lowercase().orEmpty()
     private fun decode(s: String) = runCatching { URLDecoder.decode(s, "UTF-8") }.getOrDefault(s)
@@ -174,7 +194,10 @@ object LibraryCleanup {
                 val root = rootOf(dir)
                 Group(dir, decode(if (root != null) dir.removePrefix(root) else dir).trim('/'), files, issues)
             }
-            .sortedWith(compareByDescending<Group> { it.issues.size }.thenBy { it.path })
+            // Not the folders you told the assistant to leave alone.
+            .filter { g -> !Assistant.excluded(g.path) }
+            // What the assistant left for you first, then the most in need.
+            .sortedWith(compareByDescending<Group> { waiting.containsKey(it.key) }.thenByDescending { it.issues.size }.thenBy { it.path })
     }
 
     /** Opens the review: the folders, and a proposal for the first. */
@@ -191,7 +214,11 @@ object LibraryCleanup {
     private fun next() {
         val g = _state.value.groups.firstOrNull { !done.containsKey(it.key) }
         _state.value = _state.value.copy(current = g, proposal = null, left = _state.value.groups.count { !done.containsKey(it.key) })
-        if (g != null) propose(g, null)
+        if (g == null) return
+        // The assistant's own proposal when it left one.
+        val ready = waiting[g.key]
+        if (ready != null) _state.value = _state.value.copy(proposal = ready, loading = false)
+        else propose(g, Assistant.hintFor(g.path))
     }
 
     private fun propose(g: Group, hint: String?) {
@@ -212,6 +239,8 @@ object LibraryCleanup {
         val g = _state.value.current ?: return
         val p = _state.value.proposal ?: return
         done[g.key] = "applied"
+        waiting.remove(g.key)
+        Assistant.forget(g.key)
         save()
         queue.trySend(g to p)
         startWorker()
@@ -222,13 +251,18 @@ object LibraryCleanup {
     fun reject(hint: String?) {
         val g = _state.value.current ?: return
         _state.value.proposal?.let { rejected.getOrPut(g.key) { ArrayList() } += it }
-        propose(g, hint?.takeIf { it.isNotBlank() })
+        waiting.remove(g.key)
+        // What you wrote is remembered for the folder (the assistant uses it too).
+        hint?.takeIf { it.isNotBlank() }?.let { Assistant.addHint(g.path, it) }
+        propose(g, Assistant.hintFor(g.path))
     }
 
     /** Left as it is (and not shown again). */
     fun keep() {
         val g = _state.value.current ?: return
         done[g.key] = "kept"
+        waiting.remove(g.key)
+        Assistant.forget(g.key)
         save()
         next()
     }
@@ -312,6 +346,8 @@ object LibraryCleanup {
             artist = artist, albumArtist = artist, album = c.title, year = yearOf(c.subtitle), genre = null,
             coverUrl = bigCover(c.thumb), ytAlbumId = c.browseId, tracks = mapTracks(g, c, artist),
             reason = "YouTube Music", source = "YouTube Music",
+            // Every file matched by title and length on one release: as sure as it gets without the assistant.
+            confidence = if (fit(g, c) >= 1.4) 0.8 else 0.5,
         )
     }
 
@@ -394,6 +430,8 @@ Answer ONLY a JSON object:
  "youtubeAlbumId": "one of the ids above when it is the same release, else null",
  "coverUrl": "a direct image URL of the official cover (large) or null",
  "reason": "one short sentence, in Spanish, why",
+ "confidence": 0.0-1.0 (how sure you are this is right; 0.9+ only when titles, lengths and the release all agree),
+ "question": "in Spanish, what you would need the owner to tell you, when you are not sure; else null",
  "tracks": [{"i": 0, "title": "...", "artist": "...", "track": 1, "disc": null, "album": "only for loose songs, else null", "year": null, "coverUrl": null}]}
 Every file index must appear once in tracks.
 """.trimIndent()
@@ -431,6 +469,8 @@ Every file index must appear once in tracks.
             tracks = tracks,
             reason = o.optString("reason").takeIf { it.isNotBlank() && it != "null" } ?: "Gemini",
             source = "Gemini",
+            confidence = o.optDouble("confidence", 0.5).takeIf { !it.isNaN() } ?: 0.5,
+            question = o.optString("question").takeIf { it.isNotBlank() && it != "null" },
         )
     }
 
@@ -461,7 +501,8 @@ Every file index must appear once in tracks.
         }
     }
 
-    private suspend fun apply(g: Group, p: Proposal) {
+    private suspend fun apply(g: Group, p: Proposal, convert: Boolean = true) {
+        Assistant.recordUndo(g, p)
         val context = app ?: return
         val covers = HashMap<String, CoverWriter.Image?>()
         suspend fun coverAt(url: String?) = url?.let { u -> covers.getOrPut(u) { runCatching { CoverWriter.fetch(u) }.getOrNull() } }
@@ -482,7 +523,7 @@ Every file index must appear once in tracks.
                 )
             }.getOrNull()
             val change = TagWriter.Change(text = text, discNumber = t.disc?.toString(), lyrics = lyrics?.let { it.enhanced ?: it.plain }, cover = coverAt(t.cover ?: p.coverUrl))
-            val result = if (f.ext in LOSSLESS) toAac(context, f, change, u, pw) else when (val o = TagWriter.intoPcloud(context, f.id, change)) {
+            val result = if (convert && f.ext in LOSSLESS) toAac(context, f, change, u, pw) else when (val o = TagWriter.intoPcloud(context, f.id, change)) {
                 is CoverWriter.Outcome.Saved -> "Saved"
                 else -> o.toString()
             }

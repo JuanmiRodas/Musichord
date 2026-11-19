@@ -159,6 +159,9 @@ object AudioCheck {
         bm.isCharging
     }.getOrDefault(false)
 
+    /** BitChord Audio: the same conditions, for other night work (the library assistant). */
+    fun waitFor(context: Context): Wait? = waitingFor(context, force = false)
+
     /** Null when it may listen now; else what it waits for. */
     private fun waitingFor(context: Context, force: Boolean): Wait? {
         if (prefs?.getBoolean("paused", false) == true) return Wait.Paused

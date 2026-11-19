@@ -1,6 +1,7 @@
 package com.music.bitchord.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -140,6 +141,15 @@ fun AccountProfileSelector(
                 }
                 item { SelectorAction(SfIcons.Add, stringResource(R.string.add_account), onClick = onAddAccount) }
                 item { SelectorAction(SfIcons.Close, stringResource(R.string.manage_accounts)) { managing = !managing } }
+                item {
+                    // BitChord Audio: the library assistant, with what it is asking.
+                    val asks by com.music.bitchord.data.cleanup.Assistant.attention.collectAsStateWithLifecycle()
+                    SelectorAction(
+                        androidx.compose.material.icons.Icons.Rounded.AutoAwesome,
+                        if (asks > 0) stringResource(R.string.assistant_menu_asks, asks) else stringResource(R.string.assistant_menu),
+                        onClick = { onDismiss(); LibraryReview.open(assistant = true) },
+                    )
+                }
                 item { SelectorAction(SfIcons.Settings, stringResource(R.string.settings), onClick = onOpenSettings) }
             }
         }

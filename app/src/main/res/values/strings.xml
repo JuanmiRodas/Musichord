@@ -1755,4 +1755,26 @@
     <string name="link_check_download">Download</string>
     <string name="link_check_match">%1$d%% alike</string>
     <string name="link_check_more">…and %1$d more</string>
+    <string name="cleanup_tab_review">Review</string>
+    <string name="assistant_menu">Library assistant</string>
+    <string name="assistant_menu_asks">Library assistant · %1$d questions</string>
+    <string name="cleanup_album">Album</string>
+    <string name="cleanup_artist">Artist</string>
+    <string name="cleanup_year">Year</string>
+    <string name="cleanup_edit">Edit</string>
+    <string name="assistant_on">Work on its own</string>
+    <string name="assistant_off">Off</string>
+    <string name="assistant_needs_key">Needs a Gemini key (Review tab, at the top)</string>
+    <string name="assistant_waits">Waiting for its hours, Wi-Fi or charging (as set for the library check)</string>
+    <string name="assistant_working">Working on %1$s</string>
+    <string name="assistant_idle">Nothing to do right now</string>
+    <string name="assistant_counts">%1$d written · %2$d left for you · %3$d requests today</string>
+    <string name="assistant_questions">It asks</string>
+    <string name="assistant_send">Send</string>
+    <string name="assistant_chat">Talk to it</string>
+    <string name="assistant_chat_hint">E.g. “leave the Documents folder alone”, “those in Anime/Naruto are the openings and endings”, “look at the Harvest folder again”.</string>
+    <string name="assistant_talk">Message</string>
+    <string name="assistant_history">What it wrote</string>
+    <string name="assistant_undone">Undone</string>
+    <string name="assistant_undo">Undo</string>
 </resources>
