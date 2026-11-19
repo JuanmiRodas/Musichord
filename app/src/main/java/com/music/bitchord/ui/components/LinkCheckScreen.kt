@@ -71,6 +71,7 @@ fun LinkCheckHost() {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun LinkCheckContent(onClose: () -> Unit) {
     val context = LocalContext.current
