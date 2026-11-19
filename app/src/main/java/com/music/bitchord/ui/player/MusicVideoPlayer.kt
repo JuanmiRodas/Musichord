@@ -245,6 +245,9 @@ object MusicVideoEngine {
 
     private val playerListener = object : Player.Listener {
         override fun onRenderedFirstFrame() {
+            frameWatch?.cancel()
+            if (preparedAt > 0L) TrackLog.d(TAG, "video: first frame ${System.currentTimeMillis() - preparedAt}ms after it was found", about = loadedId)
+            preparedAt = 0L
             _frameOn.value = top()
             _shownVideoId.value = loadedFor
             applySound()
@@ -626,7 +629,10 @@ object MusicVideoEngine {
     /** The height asked for: the held one, else what Auto opens at for this connection. */
     private fun capFor(videoId: String): Int {
         val metered = AppSettings.meteredConnection.value == true
-        val auto = if (metered) METERED_HEIGHT else AUTO_HEIGHT
+        // BitChord Audio: 720p by default — the picture behind a song on a phone; it starts
+        // in a fraction of the time 1080p takes. Held qualities are kept as chosen.
+        val auto = if (metered) METERED_HEIGHT else OPEN_HEIGHT
+        if (videoId in smallOnce) return 360
         val held = _quality.value.held ?: return auto
         return if (videoId in stepDown) minOf(held, AUTO_HEIGHT) else held
     }
@@ -643,7 +649,10 @@ object MusicVideoEngine {
      * [InnerTubeXResolver.extractVideo]. A video that needed it is asked that
      * way from the start next time.
      */
-    private val RESOLVE_TIMEOUT_MS = 25_000L
+    private val RESOLVE_TIMEOUT_MS = 15_000L
+    @Volatile private var frameWatch: kotlinx.coroutines.Job? = null
+    @Volatile private var preparedAt = 0L
+    private val smallOnce: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     private suspend fun resolve(videoId: String, cap: Int): InnerTubeXResolver.VideoStream? {
         val skip = refused[videoId].orEmpty().toSet()
@@ -730,6 +739,7 @@ object MusicVideoEngine {
                 return@launch
             }
             val exo = player ?: return@launch
+            TrackLog.d(TAG, "video: found at ${stream.height}p", about = videoId)
             val upstream = OkHttpDataSource.Factory(Http.client)
                 .setDefaultRequestProperties(stream.headers)
             val factory = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
@@ -776,6 +786,31 @@ object MusicVideoEngine {
             exo.setMediaSource(source, start + seekLeadMs)
             exo.playWhenReady = controller?.isPlaying == true
             exo.prepare()
+            // BitChord Audio: a picture that never shows (a stream that stalls) is not waited on
+            // for ever — once more at 360p, then the song's next video.
+            preparedAt = System.currentTimeMillis()
+            frameWatch?.cancel()
+            frameWatch = scope.launch {
+                // Counted only while the song plays: a paused song keeps its picture waiting.
+                var waited = 0L
+                while (waited < FIRST_FRAME_MS) {
+                    delay(500)
+                    if (loadedId != videoId) return@launch
+                    if (controller?.isPlaying == true) waited += 500
+                }
+                if (loadedId != videoId || preparedAt == 0L) return@launch
+                if (stepDown.add(videoId) || loadedCap > 360) {
+                    TrackLog.w(TAG, "video: no picture after ${FIRST_FRAME_MS / 1000}s at ${loadedCap}p — trying 360p", about = videoId)
+                    streams.remove(videoId)
+                    smallOnce += videoId
+                    reload()
+                } else {
+                    TrackLog.w(TAG, "video: no picture at 360p either — the next video", about = videoId)
+                    noPicture += videoId
+                    loadedFor?.let { com.music.bitchord.data.video.VideoMode.failed(it, ref) }
+                    unload()
+                }
+            }
             lastSeekAt = System.currentTimeMillis()
             seekStartedAt = lastSeekAt
             startSync()
@@ -821,6 +856,7 @@ object MusicVideoEngine {
     }
 
     private fun unload() {
+        preparedAt = 0L
         loadJob?.cancel()
         loadJob = null
         syncJob?.cancel()
@@ -938,6 +974,12 @@ object MusicVideoEngine {
 
     /** Where Auto opens, as on the web player: the top of YouTube's H.264 ladder. */
     private const val AUTO_HEIGHT = 1080
+
+    /** BitChord Audio: where Auto opens. */
+    private const val OPEN_HEIGHT = 720
+
+    /** BitChord Audio: a picture with no first frame this long after it was found is retried smaller, then given up. */
+    private const val FIRST_FRAME_MS = 12_000L
 
     /** BitChord Audio: how long a picture waits for its song to start. */
     private const val AUDIO_FIRST_WAIT_MS = 4_000L

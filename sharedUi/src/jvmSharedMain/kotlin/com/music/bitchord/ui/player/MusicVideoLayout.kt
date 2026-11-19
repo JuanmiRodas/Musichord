@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -307,6 +308,8 @@ internal fun VideoLoadingBackdrop(
     /** BitChord Audio: the song's animated cover, shown in its place when there is one. */
     canvas: com.music.bitchord.data.canvas.CanvasArtwork? = null,
     isPlaying: Boolean = true,
+    /** The rounding of the card the light runs round. */
+    edgeRadius: androidx.compose.ui.unit.Dp = 10.dp,
 ) {
     if (artRequest == null && canvas == null) {
         Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
@@ -318,17 +321,59 @@ internal fun VideoLoadingBackdrop(
         }
         return
     }
-    val breath = androidx.compose.animation.core.rememberInfiniteTransition(label = "videoWait")
-    val alpha by breath.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 0.95f,
+    // BitChord Audio: the cover stays still; a soft light runs slowly round its edge, faintly
+    // breathing, until the picture lands — the wait shown at the border, not over the art.
+    val wait = androidx.compose.animation.core.rememberInfiniteTransition(label = "videoWait")
+    val phase by wait.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
         animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            tween<Float>(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            tween<Float>(3600, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "videoWaitPhase",
+    )
+    val glow by wait.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.6f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            tween<Float>(1800, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             androidx.compose.animation.core.RepeatMode.Reverse,
         ),
-        label = "videoWaitAlpha",
+        label = "videoWaitGlow",
     )
-    Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
+    Box(
+        modifier
+            .background(Color.Black)
+            .drawWithContent {
+                drawContent()
+                // A highlight on a sweep round the centre, built from stops so it can turn.
+                val n = 36
+                val stops = Array(n + 1) { i ->
+                    val x = i / n.toFloat()
+                    val d = kotlin.math.abs(x - phase).let { minOf(it, 1f - it) }
+                    val a = (1f - d / 0.16f).coerceIn(0f, 1f)
+                    x to Color.White.copy(alpha = a * a * glow)
+                }
+                val stroke = 1.5.dp.toPx()
+                val radius = edgeRadius.toPx()
+                drawRoundRect(
+                    brush = androidx.compose.ui.graphics.Brush.sweepGradient(*stops, center = center),
+                    topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
+                    size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+                )
+                // And a much fainter inner haze along the same light.
+                drawRoundRect(
+                    brush = androidx.compose.ui.graphics.Brush.sweepGradient(*stops.map { (x, c) -> x to c.copy(alpha = c.alpha * 0.35f) }.toTypedArray(), center = center),
+                    topLeft = androidx.compose.ui.geometry.Offset(stroke * 2, stroke * 2),
+                    size = androidx.compose.ui.geometry.Size(size.width - stroke * 4, size.height - stroke * 4),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke * 4),
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
         if (canvas != null) {
             CanvasArtworkPlayer(canvas = canvas, isPlaying = isPlaying, modifier = Modifier.fillMaxSize())
         } else if (artRequest != null) {
@@ -336,7 +381,7 @@ internal fun VideoLoadingBackdrop(
                 model = artRequest,
                 contentDescription = null,
                 contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha },
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }

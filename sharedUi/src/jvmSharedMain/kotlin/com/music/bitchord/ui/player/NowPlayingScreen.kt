@@ -3790,6 +3790,7 @@ fun NowPlayingScreen(
                                             artRequest = art.request.takeIf { videoOverlay },
                                             canvas = canvasAny.takeIf { videoOverlay },
                                             isPlaying = isPlaying,
+                                            edgeRadius = if (videoEdge) 0.dp else 10.dp,
                                         )
                                     }
                                     // BitChord Audio: in the album square or out to the
