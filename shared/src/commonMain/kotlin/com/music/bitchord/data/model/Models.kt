@@ -216,14 +216,14 @@ data class Song(
  * Video thumbnails carry no hint and are returned unchanged.
  */
 fun Song.artworkAt(px: Int): String? =
-    ((if (ArtworkOverrides.inAlbumInView(this)) null else ArtworkOverrides.lookup?.invoke(title, artist)) ?: thumbnailUrl).artworkAt(px)
+    ((if (ArtworkOverrides.inAlbumInView(this)) null else ArtworkOverrides.lookup?.invoke(this)) ?: thumbnailUrl).artworkAt(px)
 
 /**
  * BitChord Audio: a cover chosen for a song (by title and artist, so every
  * copy of it — YouTube, your file, JioSaavn — shows it), set up by the app.
  */
 object ArtworkOverrides {
-    var lookup: ((title: String, artist: String) -> String?)? = null
+    var lookup: ((song: Song) -> String?)? = null
 
     /**
      * How a row shows [Song]: the copy you picked for it (your file's title,

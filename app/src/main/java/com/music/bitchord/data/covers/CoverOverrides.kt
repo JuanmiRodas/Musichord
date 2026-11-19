@@ -41,7 +41,7 @@ object CoverOverrides {
 
     fun init(context: Context) {
         local = File(context.filesDir, FILE)
-        ArtworkOverrides.lookup = { title, artist -> if (covers.isEmpty()) null else get(title, artist) }
+        ArtworkOverrides.lookup = { song -> if (covers.isEmpty()) null else get(song) }
         ArtworkOverrides.display = { song -> runCatching { pickedCopyOf(song) }.getOrNull() }
         scope.launch {
             runCatching { local?.takeIf { it.isFile }?.readText() }.getOrNull()?.let { read(it, replace = true) }
@@ -75,17 +75,46 @@ object CoverOverrides {
         return copy.copy(isVideo = false)
     }
 
+    /**
+     * BitChord Audio: a cover is picked for one version of a song — the song on that album
+     * ("Lacrimosa" on the live album), not every song of that name: the studio take on its
+     * own album keeps its cover. Covers picked before this were by title and artist alone;
+     * they still show where no version of the song has one of its own, and go when one is
+     * picked again.
+     */
+    private fun albumKey(s: Song): String? = s.albumName?.takeIf { it.isNotBlank() }
+        ?.let { com.music.bitchord.data.sources.OwnFileMatcher.key(it) }?.takeIf { it.isNotEmpty() }
+
+    private fun keyOf(s: Song): String? {
+        val base = PreferredSource.keyOf(s.title, s.artist) ?: return null
+        return albumKey(s)?.let { "$base@$it" } ?: base
+    }
+
     fun get(title: String, artist: String): String? = PreferredSource.keyOf(title, artist)?.let { covers[it] }
 
-    fun get(song: Song): String? = get(song.title, song.artist)
+    fun get(song: Song): String? {
+        val base = PreferredSource.keyOf(song.title, song.artist) ?: return null
+        albumKey(song)?.let { a -> covers["$base@$a"]?.let { return it } }
+        val legacy = covers[base] ?: return null
+        // An old title-and-artist cover: not on a version that has its own elsewhere.
+        if (albumKey(song) != null && covers.keys.any { it.startsWith("$base@") }) return null
+        return legacy
+    }
 
     fun set(songs: List<Song>, url: String) {
-        songs.forEach { s -> PreferredSource.keyOf(s.title, s.artist)?.let { covers[it] = url } }
+        songs.forEach { s ->
+            keyOf(s)?.let { covers[it] = url }
+            // The old cover for every version of the name goes: it was the one spilling over.
+            if (albumKey(s) != null) PreferredSource.keyOf(s.title, s.artist)?.let { covers.remove(it) }
+        }
         changed()
     }
 
     fun clear(songs: List<Song>) {
-        songs.forEach { s -> PreferredSource.keyOf(s.title, s.artist)?.let { covers.remove(it) } }
+        songs.forEach { s ->
+            keyOf(s)?.let { covers.remove(it) }
+            PreferredSource.keyOf(s.title, s.artist)?.let { covers.remove(it) }
+        }
         changed()
     }
 
