@@ -92,13 +92,30 @@ object CoverOverrides {
 
     fun get(title: String, artist: String): String? = PreferredSource.keyOf(title, artist)?.let { covers[it] }
 
+    /** Answers by song, worked out once (rows, the queue and the player ask on every frame). */
+    private val answers = ConcurrentHashMap<String, String>()
+    private const val NONE = "\u0000"
+    @Volatile private var scopedBases: Set<String>? = null
+
+    private fun scoped(): Set<String> = scopedBases ?: covers.keys.mapNotNullTo(HashSet()) { k ->
+        k.indexOf('@').takeIf { it > 0 }?.let { k.substring(0, it) }
+    }.also { scopedBases = it }
+
     fun get(song: Song): String? {
-        val base = PreferredSource.keyOf(song.title, song.artist) ?: return null
-        albumKey(song)?.let { a -> covers["$base@$a"]?.let { return it } }
-        val legacy = covers[base] ?: return null
-        // An old title-and-artist cover: not on a version that has its own elsewhere.
-        if (albumKey(song) != null && covers.keys.any { it.startsWith("$base@") }) return null
-        return legacy
+        if (covers.isEmpty()) return null
+        val cacheKey = song.title + "\u0001" + song.artist + "\u0001" + song.albumName.orEmpty()
+        answers[cacheKey]?.let { return it.takeIf { v -> v != NONE } }
+        val found = run {
+            val base = PreferredSource.keyOf(song.title, song.artist) ?: return@run null
+            val album = albumKey(song)
+            album?.let { a -> covers["$base@$a"]?.let { return@run it } }
+            val legacy = covers[base] ?: return@run null
+            // An old title-and-artist cover: not on a version that has its own elsewhere.
+            if (album != null && base in scoped()) null else legacy
+        }
+        if (answers.size > 20_000) answers.clear()
+        answers[cacheKey] = found ?: NONE
+        return found
     }
 
     fun set(songs: List<Song>, url: String) {
@@ -119,6 +136,8 @@ object CoverOverrides {
     }
 
     private fun changed() {
+        answers.clear()
+        scopedBases = null
         _version.value++
         val text = JSONObject(covers as Map<*, *>).toString()
         local?.let { f -> runCatching { f.writeText(text) } }
@@ -135,6 +154,8 @@ object CoverOverrides {
     private fun read(text: String, replace: Boolean) = runCatching {
         val o = JSONObject(text)
         o.keys().forEach { k -> if (replace) covers[k] = o.getString(k) else covers.putIfAbsent(k, o.getString(k)) }
+        answers.clear()
+        scopedBases = null
     }
 
     private fun remoteDir(): String? {

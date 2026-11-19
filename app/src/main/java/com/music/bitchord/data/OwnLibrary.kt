@@ -42,8 +42,6 @@ object OwnLibrary {
     fun init(context: Context) {
         file = File(context.filesDir, "uploads.json")
         scope.launch { file?.let { SongListStore.load(it) }?.songs?.let { _uploads.value = it } }
-        // The search text of your library worked out once, a minute in, at low priority.
-        scope.launch { kotlinx.coroutines.delay(60_000); warmSearch() }
     }
 
     /** Your uploads, read again from YouTube Music (signed in) at most every 6 hours. */
