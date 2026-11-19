@@ -162,6 +162,14 @@ object CleanNow {
     /** One song, its proposal (null when it could not tell). */
     private suspend fun propose(song: Song, albumHint: String? = null): Proposal? {
         val shown = MetadataEdits.applied(song) ?: song
+        // Everything the song itself says: the video's description, your files' names.
+        step("Leyendo lo que dice la propia canción (descripción, archivos)…")
+        val description = if (com.music.bitchord.data.LocalLikes.isYouTubeId(song.videoId))
+            runCatching { com.music.bitchord.data.SongInfoRepository.load(song).description }.getOrNull()?.take(1500) else null
+        val fileNames = runCatching { com.music.bitchord.data.covers.CoverSources.filesOf(song) }.getOrDefault(emptyList())
+            .mapNotNull { WebDavConfig.fileUrlOf(it.videoId)?.let { u -> java.net.URLDecoder.decode(u.substringAfter("/Música/", u.substringAfterLast('/')), "UTF-8") } }
+            .take(3)
+
         val prompt = """
 Identify this track in a music library, searching the web (Discogs, VGMdb, MusicBrainz, Wikipedia, anime and game wikis, lyrics sites, Spotify, Apple Music):
 title: "${shown.title}"
@@ -170,6 +178,10 @@ album: "${shown.albumName ?: "?"}"
 length: ${shown.durationText ?: "?"}
 ${if (song.isVideo) "It is a YouTube video (maybe a TV appearance or a concert)." else ""}
 ${albumHint?.let { "It is on the album $it." } ?: ""}
+${if (song.title != shown.title || song.artist != shown.artist) "As it came from YouTube: '${song.title}' by '${song.artist}'" else ""}
+${description?.let { "The video's description: <<< $it >>>" } ?: ""}
+${if (fileNames.isNotEmpty()) "The owner's files of it: ${fileNames.joinToString(" | ")}" else ""}
+CREDIT RULE: credit the artist of THIS recording. When the title, the description or the file name names a performer (e.g. "Gather way (FictionJunction)", "Song - Artist"), that is the artist — a cover or a version by another singer keeps that singer, not the song's original artist. Only credit the original artist when nothing about this recording says otherwise.
 Decide whether this is the STUDIO recording or a LIVE performance (concert, TV show, live album): use the title, the album name, the length and the channel. If live, the title must say where: "Title (Live at <venue or TV show>, <year>)" — only what you can confirm.
 Find also where the song was used: anime openings/endings with their number (e.g. "One Piece — opening 1"), video games, TV series, films, commercials.
 Answer ONLY a JSON object:
@@ -195,15 +207,23 @@ Answer ONLY a JSON object:
         val partial = Proposal(title, artist, album, albumArtist, year, track, usedIn, o.optBoolean("live", false), null,
             o.optString("reason").takeIf { it.isNotBlank() && it != "null" }, o.optDouble("confidence", 0.0))
         _session.value?.takeIf { it.song.videoId == song.videoId }?.let { _session.value = it.copy(proposal = partial) }
-        step("Buscando la portada a su mayor tamaño…")
-        // The cover at its best: YouTube Music's album art at 1200 px, else the web's, else Apple's.
-        val cover = album?.let { a ->
-            YtMusicRepository.search("$a $artist", SearchFilter.ALBUMS).getOrNull().orEmpty()
-                .filterIsInstance<SearchResult.Browse>()
-                .firstOrNull { it.item.type == BrowseType.ALBUM && OwnFileMatcher.sameAlbum(it.item.title, a) }
-                ?.item?.thumbnailUrl?.let(LibraryCleanup::bigCover)
-        } ?: o.optString("coverUrl").takeIf { it.startsWith("http") }
-            ?: album?.let { LibraryCleanup.itunesCover(artist, it) }
+        step("Buscando la portada a su mayor tamaño y comparándola con la que tiene…")
+        // Candidates: YouTube Music's album art, Apple's (both at 1200 px), the web's; the one
+        // that LOOKS like the song's current cover, at the biggest size.
+        val candidates = buildList {
+            album?.let { a ->
+                YtMusicRepository.search("$a $artist", SearchFilter.ALBUMS).getOrNull().orEmpty()
+                    .filterIsInstance<SearchResult.Browse>()
+                    .filter { it.item.type == BrowseType.ALBUM && OwnFileMatcher.sameAlbum(it.item.title, a) }
+                    .take(3).mapNotNull { it.item.thumbnailUrl?.let(LibraryCleanup::bigCover) }.forEach(::add)
+                addAll(CoverMatch.itunes("$artist $a"))
+                addAll(CoverMatch.itunes(a))
+            }
+            addAll(CoverMatch.itunes("$title $artist"))
+            o.optString("coverUrl").takeIf { it.startsWith("http") }?.let(::add)
+        }.distinct()
+        val current = CoverOverrides.get(song) ?: Downloads.savedArtwork(song.videoId) ?: song.thumbnailUrl
+        val cover = CoverMatch.best(current, candidates)
 
         return Proposal(title, artist, album, albumArtist, year, track, usedIn, o.optBoolean("live", false), cover,
             o.optString("reason").takeIf { it.isNotBlank() && it != "null" }, o.optDouble("confidence", 0.0))

@@ -26,6 +26,8 @@ data class SongInfo(
     val likes: String? = null,
     val comments: String? = null,
     val failed: Boolean = false,
+    /** BitChord Audio: the video's description (who sings, which release) — context for the assistant. */
+    val description: String? = null,
 )
 
 /**
@@ -135,6 +137,7 @@ internal object SongInfoParser {
             likes = (newLike ?: oldLike)?.withCount(),
             comments = comments,
             failed = data == null,
+            description = details.str("shortDescription"),
         )
     }
 
