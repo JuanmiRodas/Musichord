@@ -51,9 +51,11 @@ object CleanNow {
 
     fun song(song: Song) {
         if (!Gemini.ready) { toast("El asistente necesita una clave de Gemini (Ajustes → Limpiar la biblioteca)."); return }
-        toast("El asistente está mirando «${song.title}»…")
+        toast("El asistente está mirando «${song.title}»… (lo verás en Asistente de la biblioteca)")
         scope.launch {
+            Gemini.activity("Mirando «${song.title}»…")
             val msg = runCatching { clean(song) }.onFailure { TrackLog.w(TAG, "clean now: '${song.title}' failed: ${it.message}") }.getOrNull()
+            Gemini.activity(null)
             toast(msg ?: (Gemini.lastError.value?.let { "Gemini: $it" } ?: "No he podido identificar «${song.title}»."))
         }
     }

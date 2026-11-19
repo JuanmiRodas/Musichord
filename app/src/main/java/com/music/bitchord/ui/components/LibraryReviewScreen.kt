@@ -372,12 +372,21 @@ private fun AssistantPane(modifier: Modifier) {
                 val status = when {
                     !a.on -> stringResource(R.string.assistant_off)
                     !Gemini.ready -> stringResource(R.string.assistant_needs_key)
-                    Gemini.lastError.value != null -> stringResource(R.string.gemini_error, Gemini.lastError.value!!)
+                    Gemini.activity.value == null && Gemini.lastError.value != null -> stringResource(R.string.gemini_error, Gemini.lastError.value!!)
                     a.waiting != null -> stringResource(R.string.assistant_waits)
                     a.running && a.current != null -> stringResource(R.string.assistant_working, a.current!!)
                     else -> stringResource(R.string.assistant_idle)
                 }
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                // What it is doing this very moment (which model it is asking, a fallback…).
+                val now by Gemini.activity.collectAsStateWithLifecycle()
+                now?.let {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
                 Text(stringResource(R.string.assistant_counts, a.history.count { !it.undone }, com.music.bitchord.data.cleanup.LibraryCleanup.waiting.size, a.callsToday),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }

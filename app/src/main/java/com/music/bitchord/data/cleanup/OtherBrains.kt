@@ -133,6 +133,7 @@ object OtherBrains {
             val key = keys.getValue(p).value
             if (key.isBlank()) return null
             val model = modelFor(p) ?: run { lastError[p] = "la clave no da acceso a ningún modelo (¿es correcta?)"; return null }
+            Gemini.activity("Preguntando a ${p.label} · $model…")
             val body = JSONObject()
                 .put("model", model)
                 .put("temperature", 0.2)

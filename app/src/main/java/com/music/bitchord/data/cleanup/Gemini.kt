@@ -132,6 +132,11 @@ object Gemini {
      * Asks with [prompt] (and [image], the folder's cover, when there is one); the JSON
      * object in the answer, or null. Searches the web when it needs to.
      */
+    /** BitChord Audio: what the assistant is doing right now ("Asking gemini-3.6-flash…"), for the screen. */
+    private val _activity = MutableStateFlow<String?>(null)
+    val activity: StateFlow<String?> = _activity
+    fun activity(text: String?) { _activity.value = text }
+
     /** What a request ended with: the answer, "try another model", or a plain failure. */
     private sealed interface Outcome {
         data class Answer(val o: JSONObject?) : Outcome
@@ -147,8 +152,10 @@ object Gemini {
         for (name in (if (hasKey) usable().take(6) else emptyList())) {
             var withSearch = search && name !in noSearch
             repeat(2) {
+                _activity.value = "Preguntando a $name" + if (withSearch) " (con búsqueda web)…" else "…"
                 when (val out = askOnce(name, prompt, image, imageMime, withSearch)) {
                     is Outcome.Answer -> {
+                        _activity.value = null
                         model = name
                         OtherBrains.used("Gemini · $name")
                         return@withContext out.o
@@ -166,7 +173,8 @@ object Gemini {
             }
         }
         // Gemini has nothing left: your other services, if you added them.
-        OtherBrains.ask(prompt)?.let {
+        if (OtherBrains.ready) _activity.value = "Gemini no responde; probando tus otros servicios…"
+        OtherBrains.ask(prompt).also { _activity.value = null }?.let {
             _lastError.value = null
             _lastOk.value = System.currentTimeMillis()
             return@withContext it
