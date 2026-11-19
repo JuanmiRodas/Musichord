@@ -146,6 +146,7 @@ object LocalLikes {
 
     /** BitChord Audio: the song's cover now — your file's folder art when the like saved none. */
     fun withCover(song: Song): Song {
+        found[song.videoId]?.let { return song.copy(thumbnailUrl = song.thumbnailUrl ?: it.first, durationText = song.durationText ?: it.second) }
         if (!song.thumbnailUrl.isNullOrBlank() || !WebDavConfig.isWebDavId(song.videoId)) return song
         val library = WebDavRepository.library()
         val own = library.firstOrNull { it.videoId == song.videoId }
@@ -157,6 +158,52 @@ object LocalLikes {
     }
 
     private const val TOP = "^"
+
+    /** BitChord Audio: covers (and lengths) found for liked songs that had none: id → (cover, length). */
+    private val found = java.util.concurrent.ConcurrentHashMap<String, Pair<String?, String?>>()
+    @Volatile private var filling = false
+
+    /**
+     * BitChord Audio: your local likes shown without a cover (a pCloud file with no picture
+     * in it or its folder, a song liked from another source) get one: the file's own when
+     * the library has it now, the download's, else the same song's on YouTube Music (title
+     * and artist, any script). Kept with the like, so it is found once.
+     */
+    suspend fun fillCovers() {
+        if (filling) return
+        filling = true
+        try {
+            val library = WebDavRepository.library().associateBy { it.videoId }
+            for ((id, s) in _liked.value) {
+                if (!s.thumbnailUrl.isNullOrBlank() && !s.durationText.isNullOrBlank()) continue
+                val shown = withCover(s)
+                var cover = shown.thumbnailUrl ?: com.music.bitchord.download.Downloads.savedArtwork(id)
+                    ?: com.music.bitchord.data.covers.CoverOverrides.get(s)
+                var length = s.durationText ?: library[id]?.durationText
+                if (cover == null) {
+                    val hit = runCatching {
+                        YtMusicRepository.search("${s.title} ${s.artist}", SearchFilter.SONGS).getOrNull().orEmpty()
+                            .mapNotNull { (it as? SearchResult.Track)?.song ?: (it as? SearchResult.TopTrack)?.song }
+                            .firstOrNull { c ->
+                                OwnFileMatcher.allKeys(c.title).any { it in OwnFileMatcher.allKeys(s.title) } &&
+                                    s.artist.split(",", "&", "·").any { a -> OwnFileMatcher.sameArtist(a.trim(), c.artist) }
+                            }
+                    }.getOrNull()
+                    cover = hit?.thumbnailUrl
+                    length = length ?: hit?.durationText
+                    kotlinx.coroutines.delay(1_500)
+                }
+                if (cover == null && length == null) continue
+                found[id] = cover to length
+                val updated = s.copy(thumbnailUrl = s.thumbnailUrl ?: cover, durationText = s.durationText ?: length)
+                _liked.value = _liked.value + (id to updated)
+                prefs?.edit()?.putString(LIKED + id, songJson(updated, anchors[id]))?.apply()
+                TrackLog.d("BitChord", "likes: a cover for '${s.title}' — ${cover?.take(60) ?: "none"}")
+            }
+        } finally {
+            filling = false
+        }
+    }
 
     fun setLocal(song: Song, like: Boolean) {
         val id = song.videoId

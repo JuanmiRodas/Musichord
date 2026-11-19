@@ -2097,6 +2097,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
                 // BitChord Audio: every song's other performances, mapped in the background.
                 com.music.bitchord.data.SongFamily.mapAll()
+                // BitChord Audio: covers for your local likes shown without one.
+                viewModelScope.launch(Dispatchers.IO) { runCatching { com.music.bitchord.data.LocalLikes.fillCovers() } }
                 // BitChord Audio: karaoke versions out of your likes (asked for once).
                 dropKaraokeLikes()
                 // BitChord Audio: every link to your files heard, as Shazam would, before it is trusted.
