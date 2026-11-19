@@ -1790,4 +1790,9 @@
     <string name="gemini_change">Change</string>
     <string name="clean_with_assistant">Clean with the assistant</string>
     <string name="clean_with_assistant_song">Real details, best cover, live or studio, where it was used</string>
+    <string name="ai_last_used">Last answer: %1$s</string>
+    <string name="ai_other_services">Other AI services</string>
+    <string name="ai_other_hint">Used when Gemini has no allowance left. Experiential Labs: its free models (platform.experientiallabs.ai → API keys). Mistral: free Experiment plan (console.mistral.ai → API keys). They don't search the web like Gemini.</string>
+    <string name="ai_key_saved">%1$s key saved</string>
+    <string name="ai_key_label">%1$s key</string>
 </resources>

@@ -147,6 +147,32 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                 TextButton(onClick = { Gemini.setKey("") }) { Text(stringResource(R.string.gemini_change)) }
             }
         }
+        // BitChord Audio: other services for when Gemini has no allowance left.
+        var others by remember { mutableStateOf(false) }
+        val used by com.music.bitchord.data.cleanup.OtherBrains.lastUsed.collectAsStateWithLifecycle()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                used?.let { stringResource(R.string.ai_last_used, it) } ?: "",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { others = !others }) { Text(stringResource(R.string.ai_other_services)) }
+        }
+        if (others) {
+            Text(stringResource(R.string.ai_other_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            com.music.bitchord.data.cleanup.OtherBrains.Provider.entries.forEach { prov ->
+                val saved by com.music.bitchord.data.cleanup.OtherBrains.key(prov).collectAsStateWithLifecycle()
+                var draft by remember(prov) { mutableStateOf("") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (saved.isNotBlank()) {
+                        Text(stringResource(R.string.ai_key_saved, prov.label), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { com.music.bitchord.data.cleanup.OtherBrains.setKey(prov, "") }) { Text(stringResource(R.string.gemini_change)) }
+                    } else {
+                        OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), singleLine = true, label = { Text(stringResource(R.string.ai_key_label, prov.label)) })
+                        TextButton(onClick = { com.music.bitchord.data.cleanup.OtherBrains.setKey(prov, draft) }, enabled = draft.isNotBlank()) { Text(stringResource(R.string.save)) }
+                    }
+                }
+            }
+        }
         if (key.isBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.cleanup_gemini_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -82,6 +82,7 @@ object Gemini {
     private var prefs: android.content.SharedPreferences? = null
 
     fun init(context: Context) {
+        OtherBrains.init(context)
         prefs = context.applicationContext.getSharedPreferences("bitchord_assistant", Context.MODE_PRIVATE)
         _key.value = prefs?.getString("gemini_key", "").orEmpty()
     }
@@ -94,7 +95,11 @@ object Gemini {
         prefs?.edit()?.putString("gemini_key", k.trim())?.apply()
     }
 
-    val ready get() = _key.value.isNotBlank()
+    /** Gemini's own key. */
+    val hasKey get() = _key.value.isNotBlank()
+
+    /** Some assistant to ask: Gemini, or one of your other services. */
+    val ready get() = hasKey || OtherBrains.ready
 
     /** BitChord Audio: how the last request went — null when it answered, else why not (shown in the assistant). */
     private val _lastError = MutableStateFlow<String?>(null)
@@ -137,12 +142,13 @@ object Gemini {
 
     suspend fun ask(prompt: String, image: ByteArray?, imageMime: String?, search: Boolean = true): JSONObject? = withContext(Dispatchers.IO) {
         if (!ready) return@withContext null
-        for (name in usable().take(6)) {
+        for (name in (if (hasKey) usable().take(6) else emptyList())) {
             var withSearch = search && name !in noSearch
             repeat(2) {
                 when (val out = askOnce(name, prompt, image, imageMime, withSearch)) {
                     is Outcome.Answer -> {
                         model = name
+                        OtherBrains.used("Gemini · $name")
                         return@withContext out.o
                     }
                     is Outcome.Quota -> {
@@ -155,7 +161,13 @@ object Gemini {
                 }
             }
         }
-        if (_lastError.value == null) _lastError.value = "ningún modelo disponible con esta clave ahora mismo"
+        // Gemini has nothing left: your other services, if you added them.
+        OtherBrains.ask(prompt)?.let {
+            _lastError.value = null
+            _lastOk.value = System.currentTimeMillis()
+            return@withContext it
+        }
+        if (_lastError.value == null) _lastError.value = "ningún modelo disponible ahora mismo"
         null
     }
 

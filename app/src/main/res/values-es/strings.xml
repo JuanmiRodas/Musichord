@@ -1878,4 +1878,9 @@
     <string name="gemini_change">Cambiar</string>
     <string name="clean_with_assistant">Limpiar con el asistente</string>
     <string name="clean_with_assistant_song">Datos reales, mejor portada, directo o estudio, dónde se usó</string>
+    <string name="ai_last_used">Última respuesta: %1$s</string>
+    <string name="ai_other_services">Otros servicios de IA</string>
+    <string name="ai_other_hint">Se usan cuando Gemini no tiene cuota. Experiential Labs: sus modelos gratuitos (platform.experientiallabs.ai → API keys). Mistral: plan gratuito Experiment (console.mistral.ai → API keys). No buscan en internet como Gemini.</string>
+    <string name="ai_key_saved">Clave de %1$s guardada</string>
+    <string name="ai_key_label">Clave de %1$s</string>
 </resources>
