@@ -1886,4 +1886,15 @@
     <string name="ai_model">Modelo: %1$s</string>
     <string name="ai_model_auto">automático (gratis)</string>
     <string name="ai_free">gratis</string>
+    <string name="clean_now_now">Ahora</string>
+    <string name="clean_now_proposal">Propuesta</string>
+    <string name="clean_now_live">directo</string>
+    <string name="clean_now_studio">estudio</string>
+    <string name="clean_now_sure">%1$d%% seguro</string>
+    <string name="clean_now_title">Título</string>
+    <string name="clean_now_track">Pista</string>
+    <string name="clean_now_used_in">Usada en (anime, juego, serie…)</string>
+    <string name="clean_now_cover_wait">Buscando la portada…</string>
+    <string name="clean_now_done">Aplicado</string>
+    <string name="clean_now_retry">Reintentar</string>
 </resources>

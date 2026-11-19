@@ -50,13 +50,21 @@ object CleanNow {
         ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
 
     fun song(song: Song) {
-        if (!Gemini.ready) { toast("El asistente necesita una clave de Gemini (Ajustes → Limpiar la biblioteca)."); return }
-        toast("El asistente está mirando «${song.title}»… (lo verás en Asistente de la biblioteca)")
-        scope.launch {
-            Gemini.activity("Mirando «${song.title}»…")
-            val msg = runCatching { clean(song) }.onFailure { TrackLog.w(TAG, "clean now: '${song.title}' failed: ${it.message}") }.getOrNull()
+        job?.cancel()
+        _session.value = Session(song)
+        if (!Gemini.ready) {
+            _session.value = Session(song, working = false, failed = "El asistente necesita una clave de IA (Ajustes → Limpiar la biblioteca de pCloud).")
+            return
+        }
+        job = scope.launch {
+            val p = runCatching { propose(song) }.onFailure { TrackLog.w(TAG, "clean now: '${song.title}' failed: ${it.message}") }.getOrNull()
             Gemini.activity(null)
-            toast(msg ?: (Gemini.lastError.value?.let { "Gemini: $it" } ?: "No he podido identificar «${song.title}»."))
+            finishSteps(p != null)
+            _session.value = _session.value?.copy(
+                proposal = p,
+                working = false,
+                failed = if (p == null) (Gemini.lastError.value ?: "No he podido identificar la canción.") else null,
+            )
         }
     }
 
@@ -79,14 +87,80 @@ object CleanNow {
             }
             // The rest, one by one.
             for (s in songs.filterNot { WebDavConfig.isWebDavId(it.videoId) }.take(40)) {
-                if (runCatching { clean(s, albumHint = "$title — $artist") }.getOrNull() != null) done++
+                val p = runCatching { propose(s, albumHint = "$title — $artist") }.getOrNull()
+                if (p != null && p.confidence >= 0.6) { runCatching { write(s, p) }; done++ }
             }
             toast(if (done > 0) "«$title»: $done canciones arregladas." else (Gemini.lastError.value?.let { "Gemini: $it" } ?: "No he podido con «$title»."))
         }
     }
 
-    /** One song: a line for the toast when it was fixed, else null. */
-    private suspend fun clean(song: Song, albumHint: String? = null): String? {
+    /** What the assistant proposes for one song. */
+    data class Proposal(
+        val title: String,
+        val artist: String,
+        val album: String?,
+        val albumArtist: String,
+        val year: String?,
+        val track: String?,
+        val usedIn: String?,
+        val live: Boolean,
+        val cover: String?,
+        val reason: String?,
+        val confidence: Double,
+    )
+
+    // ── The window that shows it working ──
+
+    enum class StepState { RUNNING, DONE, FAILED }
+    data class Step(val text: String, val state: StepState)
+    data class Session(
+        val song: Song,
+        val steps: List<Step> = emptyList(),
+        val proposal: Proposal? = null,
+        val working: Boolean = true,
+        val applied: Boolean = false,
+        val failed: String? = null,
+    )
+
+    private val _session = kotlinx.coroutines.flow.MutableStateFlow<Session?>(null)
+    val session: kotlinx.coroutines.flow.StateFlow<Session?> = _session
+    @Volatile private var job: kotlinx.coroutines.Job? = null
+
+    private fun step(text: String) {
+        val s = _session.value ?: return
+        _session.value = s.copy(steps = s.steps.map { if (it.state == StepState.RUNNING) it.copy(state = StepState.DONE) else it } + Step(text, StepState.RUNNING))
+    }
+
+    private fun finishSteps(ok: Boolean) {
+        val s = _session.value ?: return
+        _session.value = s.copy(steps = s.steps.map { if (it.state == StepState.RUNNING) it.copy(state = if (ok) StepState.DONE else StepState.FAILED) else it })
+    }
+
+    fun close() {
+        job?.cancel()
+        _session.value = null
+        Gemini.activity(null)
+    }
+
+    /** Your edits to the proposal, before applying it. */
+    fun edit(p: Proposal) {
+        _session.value = _session.value?.copy(proposal = p)
+    }
+
+    /** Applies the proposal on screen (as you left it). */
+    fun apply() {
+        val s = _session.value ?: return
+        val p = s.proposal ?: return
+        _session.value = s.copy(working = true)
+        job = scope.launch {
+            runCatching { write(s.song, p) }.onFailure { TrackLog.w(TAG, "clean now: writing failed: ${it.message}") }
+            finishSteps(true)
+            _session.value = _session.value?.copy(working = false, applied = true)
+        }
+    }
+
+    /** One song, its proposal (null when it could not tell). */
+    private suspend fun propose(song: Song, albumHint: String? = null): Proposal? {
         val shown = MetadataEdits.applied(song) ?: song
         val prompt = """
 Identify this track in a music library, searching the web (Discogs, VGMdb, MusicBrainz, Wikipedia, anime and game wikis, lyrics sites, Spotify, Apple Music):
@@ -107,16 +181,21 @@ Answer ONLY a JSON object:
  "coverUrl": "direct URL of the release's cover at the largest size you can find, or null",
  "confidence": 0.0-1.0, "reason": "one short sentence in Spanish"}
 """.trimIndent()
+        step("Preguntando a la IA qué canción es (estudio o directo, dónde se usó)…")
         val o = Gemini.ask(prompt, null, null) ?: return null
         val title = o.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: return null
         val artist = o.optString("artist").takeIf { it.isNotBlank() && it != "null" } ?: return null
-        if (o.optDouble("confidence", 0.0) < 0.6) return null
         val album = o.optString("album").takeIf { it.isNotBlank() && it != "null" }
         val year = o.optString("year").takeIf { Regex("""\d{4}""").matches(it) }
         val track = o.optInt("track", 0).takeIf { it > 0 }?.toString()
         val usedIn = o.optString("usedIn").takeIf { it.isNotBlank() && it != "null" }
         val albumArtist = o.optString("albumArtist").takeIf { it.isNotBlank() && it != "null" } ?: artist.split(",", "&").first().trim()
 
+        // What it has so far, on screen while the cover is looked for.
+        val partial = Proposal(title, artist, album, albumArtist, year, track, usedIn, o.optBoolean("live", false), null,
+            o.optString("reason").takeIf { it.isNotBlank() && it != "null" }, o.optDouble("confidence", 0.0))
+        _session.value?.takeIf { it.song.videoId == song.videoId }?.let { _session.value = it.copy(proposal = partial) }
+        step("Buscando la portada a su mayor tamaño…")
         // The cover at its best: YouTube Music's album art at 1200 px, else the web's, else Apple's.
         val cover = album?.let { a ->
             YtMusicRepository.search("$a $artist", SearchFilter.ALBUMS).getOrNull().orEmpty()
@@ -126,11 +205,21 @@ Answer ONLY a JSON object:
         } ?: o.optString("coverUrl").takeIf { it.startsWith("http") }
             ?: album?.let { LibraryCleanup.itunesCover(artist, it) }
 
+        return Proposal(title, artist, album, albumArtist, year, track, usedIn, o.optBoolean("live", false), cover,
+            o.optString("reason").takeIf { it.isNotBlank() && it != "null" }, o.optDouble("confidence", 0.0))
+    }
+
+    /** Writes [p] for [song]: as shown in the app, its pCloud file, its download. A line saying what changed. */
+    private suspend fun write(song: Song, p: Proposal): String {
+        val title = p.title; val artist = p.artist; val album = p.album; val albumArtist = p.albumArtist
+        val year = p.year; val track = p.track; val usedIn = p.usedIn; val cover = p.cover
+        step("Guardando los datos en la app…")
         // As it is shown, everywhere.
         val edit = MetadataEdits.Edit(title = title, artist = artist, album = album, albumArtist = albumArtist, year = year, track = track, comment = usedIn)
         MetadataEdits.set(listOf(song), edit)
         cover?.let { CoverOverrides.set(listOf(song.copy(title = title, artist = artist, albumName = album ?: song.albumName)), it) }
 
+        step("Escribiéndolo en tu archivo de pCloud y en la descarga…")
         // Into the files: its pCloud file(s) and its download.
         val context = app
         if (context != null) {
@@ -147,7 +236,7 @@ Answer ONLY a JSON object:
                 TrackLog.d(TAG, "clean now: '$title' into the download — ${TagWriter.intoDownload(context, uri, change)}")
             }
         }
-        val live = o.optBoolean("live", false)
+        val live = p.live
         TrackLog.d(TAG, "clean now: '${song.title}' → '$title' by $artist${album?.let { " ($it)" } ?: ""}${if (live) " · live" else ""}${usedIn?.let { " · $it" } ?: ""}")
         return buildString {
             append("«$title» — $artist")
