@@ -266,7 +266,7 @@ object OwnLibrary {
     fun sameName(a: String, b: String): Boolean {
         val ka = OwnFileMatcher.key(a)
         val kb = OwnFileMatcher.key(b)
-        if (ka.isEmpty() || kb.isEmpty()) return false
+        if (ka.isEmpty() || kb.isEmpty() || !WebDavRepository.named(a) || !WebDavRepository.named(b)) return false
         if (ka == kb || ArtistLinks.linked(a, kb) || ArtistLinks.linked(b, ka)) return true
         fun latin(s: String) = s.none { it.code > 0x2FF && it.isLetter() }
         fun words(s: String) = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.sorted()

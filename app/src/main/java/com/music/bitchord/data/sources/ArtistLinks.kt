@@ -32,10 +32,21 @@ object ArtistLinks {
 
     private fun key(name: String) = FileName.key(name.replace('$', 's'))
 
+    /**
+     * BitChord Audio: a credit that names nobody ("Unknown artist", "Various Artists",
+     * "Soundtrack") is never linked to an artist: one file tagged that way and matched to a
+     * Yuki Kajiura song made every "Unknown artist" album hers.
+     */
+    private val NOBODY = setOf(
+        "unknownartist", "unknown", "artistadesconocido", "desconocido", "variousartists", "various", "va",
+        "varios", "variosartistas", "soundtrack", "ost", "anime", "untitled", "artist", "nobody",
+    )
+    private fun nobody(k: String) = k.isEmpty() || k in NOBODY || k.startsWith("unknown")
+
     fun learn(youtubeArtist: String, fileArtist: String) {
         val a = key(youtubeArtist)
         val b = key(fileArtist)
-        if (a.isEmpty() || b.isEmpty() || a == b) return
+        if (nobody(a) || nobody(b) || a == b) return
         val set = links.getOrPut(a) { ConcurrentHashMap.newKeySet() }
         if (set.add(b)) prefs?.edit()?.putStringSet(a, HashSet(set))?.apply()
     }
@@ -43,11 +54,11 @@ object ArtistLinks {
     /** Every name [artist] is linked with, either way round (as keys: letters and digits). */
     fun aliases(artist: String): Set<String> {
         val k = key(artist)
-        if (k.isEmpty()) return emptySet()
+        if (nobody(k)) return emptySet()
         val out = HashSet<String>()
         links[k]?.let(out::addAll)
         links.forEach { (a, set) -> if (k in set) out += a }
-        return out - k
+        return out.filterNot(::nobody).toSet() - k
     }
 
     /** BitChord Audio: the two names are different artists after all (both ways round). */
@@ -59,6 +70,10 @@ object ArtistLinks {
         }
     }
 
-    fun linked(youtubeArtist: String, fileArtist: String): Boolean =
-        links[key(youtubeArtist)]?.contains(key(fileArtist)) == true
+    fun linked(youtubeArtist: String, fileArtist: String): Boolean {
+        val a = key(youtubeArtist)
+        val b = key(fileArtist)
+        if (nobody(a) || nobody(b)) return false
+        return links[a]?.contains(b) == true
+    }
 }
