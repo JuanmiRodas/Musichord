@@ -47,6 +47,9 @@ object LocalLikes {
     /** Songs seen in the queue, so a heart on one knows its name. Not stored. */
     private val seen = java.util.concurrent.ConcurrentHashMap<String, Song>()
 
+    /** BitChord Audio: a song played lately by its id (what was un-liked, when Liked Music hasn't it). */
+    fun seenSong(id: String): Song? = seen[id]
+
     fun init(context: Context) {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs = p

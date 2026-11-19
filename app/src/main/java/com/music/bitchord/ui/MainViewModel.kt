@@ -1114,6 +1114,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
+            // BitChord Audio: the copy Liked Music actually holds may be another id than the one
+            // un-liked — the music video a song version stands in for, the song a video was
+            // shown as. Un-liking one left the other in Liked Music (and on the device). Its
+            // twins there — same title and artist, one of them a video or the conversion's
+            // other half — go too.
+            val twins = likedTwinsOf(videoId) - same
+            if (twins.isNotEmpty()) {
+                com.music.bitchord.data.TrackLog.d("BitChord", "like: un-liked $videoId — also its copies in Liked Music: ${twins.joinToString()}")
+                LikedMusicCache.markUnliked(twins)
+                twins.forEach { id ->
+                    LikeState.set(id, status)
+                    dropFromLikedLists(id)
+                    viewModelScope.launch { YtMusicRepository.rate(id, LikeStatus.INDIFFERENT) }
+                }
+            }
         } else {
             com.music.bitchord.data.LocalLikes.sameAs(videoId).forEach(LikedMusicCache::clearUnliked)
             com.music.bitchord.data.TrackLog.d("BitChord", "like: liked $videoId")
@@ -1196,6 +1211,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Only ever removes. A track liked from somewhere else doesn't get spliced
      * into a list that YouTube orders for itself; the next fetch places it.
      */
+    /** Liked Music's other ids for the song [videoId] is (see [setLike]). */
+    private fun likedTwinsOf(videoId: String): Set<String> {
+        val liked = LikedMusicCache.likedSongs.value
+        val versions = com.music.bitchord.data.SongVersions
+        val out = HashSet<String>()
+        // The conversion's other half, whichever way round.
+        versions.originalOf(videoId)?.videoId?.let { out += it }
+        versions.conversionOf(videoId)?.takeIf { it.startsWith("song:") }?.let { out += it.removePrefix("song:") }
+        val me = liked.firstOrNull { it.videoId == videoId }
+            ?: com.music.bitchord.data.LocalLikes.liked.value[videoId]
+            ?: runCatching { com.music.bitchord.download.Downloads.savedMetadataSongs().firstOrNull { it.videoId == videoId } }.getOrNull()
+            ?: com.music.bitchord.data.LocalLikes.seenSong(videoId)
+        if (me != null) {
+            val keys = com.music.bitchord.data.sources.OwnFileMatcher.allKeys(me.title)
+            liked.filter { t ->
+                t.videoId != videoId &&
+                    (t.isVideo || me.isVideo || versions.looksLikeVideo(t) || versions.looksLikeVideo(me)) &&
+                    com.music.bitchord.data.sources.OwnFileMatcher.allKeys(t.title).any { it in keys } &&
+                    com.music.bitchord.data.sources.OwnFileMatcher.sameArtist(me.artist, t.artist)
+            }.forEach { out += it.videoId }
+        }
+        return out.filter { it in LikedMusicCache.likedIds.value }.toSet()
+    }
+
     private fun dropFromLikedLists(videoId: String) {
         LikedMusicCache.remove(_activeProfileId.value, videoId)
         val library = (_library.value as? UiState.Success)?.data
