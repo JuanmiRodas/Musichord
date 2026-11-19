@@ -42,6 +42,8 @@ object OwnLibrary {
     fun init(context: Context) {
         file = File(context.filesDir, "uploads.json")
         scope.launch { file?.let { SongListStore.load(it) }?.songs?.let { _uploads.value = it } }
+        // The search text of your library worked out once, a minute in, at low priority.
+        scope.launch { kotlinx.coroutines.delay(60_000); warmSearch() }
     }
 
     /** Your uploads, read again from YouTube Music (signed in) at most every 6 hours. */
@@ -213,17 +215,33 @@ object OwnLibrary {
      * Your songs and albums answering [query] (pCloud, uploads, downloads), each word of
      * it found in the title, artist or album — in any script (romaji keys too).
      */
+    private val hayCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Readies the search text of your whole library ahead, so the first search is quick. */
+    fun warmSearch() {
+        runCatching { search("\u0000warm") }
+    }
+
     fun search(query: String, downloaded: List<Song> = emptyList()): Found {
         val words = query.split(Regex("""\s+""")).map { OwnFileMatcher.key(it) }.filter { it.isNotEmpty() }
         if (words.isEmpty()) return Found(emptyList(), emptyList())
-        val pool = (WebDavRepository.library() + _uploads.value + downloaded).distinctBy { it.videoId }
-        fun hay(s: Song): String = buildString {
-            append(OwnFileMatcher.key(s.title)); append(' ')
-            append(OwnFileMatcher.key(s.artist)); append(' ')
-            append(OwnFileMatcher.key(s.albumName.orEmpty())); append(' ')
-            runCatching { OwnFileMatcher.allKeys(s.title).forEach { append(it.removePrefix("~")).append(' ') } }
+        // BitChord Audio: your liked songs first, then your files, uploads and downloads.
+        val liked = LikedMusicCache.likedSongs.value.filter { !it.isVideo }
+        val likedIds = liked.mapTo(HashSet()) { it.videoId }
+        val pool = (liked + WebDavRepository.library() + _uploads.value + downloaded).distinctBy { it.videoId }
+        // The searchable text of each song, worked out once (readings of kanji are slow).
+        fun hay(s: Song): String = hayCache.getOrPut(s.videoId + "|" + s.title + "|" + s.artist) {
+            buildString {
+                append(OwnFileMatcher.key(s.title)); append(' ')
+                append(OwnFileMatcher.key(s.artist)); append(' ')
+                append(OwnFileMatcher.key(s.albumName.orEmpty())); append(' ')
+                runCatching { OwnFileMatcher.allKeys(s.title).forEach { append(it.removePrefix("~")).append(' ') } }
+            }
         }
+        val q = OwnFileMatcher.key(query)
         val hits = pool.filter { s -> val h = hay(s); words.all { it in h } }
+            // The title itself first ("Lacrimosa (Live)" for "lacrimosa"), liked before the rest.
+            .sortedWith(compareBy<Song>({ !OwnFileMatcher.key(it.title).startsWith(q) }, { it.videoId !in likedIds }))
         val songs = hits.distinctBy { OwnFileMatcher.key(it.title) + "|" + OwnFileMatcher.key(it.artist) + "|" + ((seconds(it) ?: 0) / 3) }.take(40)
         val albums = hits.filter { !it.albumName.isNullOrBlank() }
             .filter { s -> words.all { w -> w in OwnFileMatcher.key(s.albumName!!) + " " + OwnFileMatcher.key(s.artist) } }

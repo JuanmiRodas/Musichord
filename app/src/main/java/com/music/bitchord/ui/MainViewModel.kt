@@ -3102,15 +3102,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // BitChord Audio: your own music answers too (pCloud, uploads, downloads) — in
                 // the same list, after the top result, each only when YouTube Music hasn't it
                 // already; and on its own when YouTube can't be reached.
-                val own = kotlinx.coroutines.withTimeoutOrNull(1_500) { ownAsync.await() }.also { if (it == null) ownAsync.cancel() }
+                val own = kotlinx.coroutines.withTimeoutOrNull(4_000) { ownAsync.await() }.also { if (it == null) ownAsync.cancel() }
                 if (request.requestId != newestRequestId.get()) return@collectLatest
                 fun ownRows(yt: List<SearchResult>): List<SearchResult> {
                     own ?: return emptyList()
-                    val ytSongs = yt.mapNotNull { (it as? SearchResult.Track)?.song ?: (it as? SearchResult.TopTrack)?.song }
-                    val wantSongs = request.filter == null || request.filter == SearchFilter.SONGS
-                    val wantAlbums = request.filter == null || request.filter == SearchFilter.ALBUMS
-                    val songs = if (wantSongs) own.songs.filter { m -> ytSongs.none { com.music.bitchord.data.OwnLibrary.sameSong(it, m) } }
-                        .take(if (request.filter == null) 8 else 40).map { SearchResult.Track(it) } else emptyList()
+                    // BitChord Audio: "All" is SearchFilter.ALL, not null — your music was left out of it.
+                    val all = request.filter == SearchFilter.ALL
+                    val wantSongs = all || request.filter == SearchFilter.SONGS
+                    val wantAlbums = all || request.filter == SearchFilter.ALBUMS
+                    val songs = if (wantSongs) own.songs.take(if (all) 8 else 40).map { SearchResult.Track(it) } else emptyList()
                     val albums = if (wantAlbums) own.albums.map {
                         SearchResult.Browse(com.music.bitchord.data.model.BrowseItem(it.browseId!!, it.title, it.subtitle, it.thumbnailUrl, BrowseType.ALBUM))
                     } else emptyList()
@@ -3122,8 +3122,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         if (extra.isEmpty()) {
                             published(page, key, request.requestId)
                         } else {
-                            val top = page.rows.take(1)
-                            published(page.copy(rows = top + extra + page.rows.drop(1)), key, request.requestId)
+                            // Yours first; YouTube's copies of the same songs left out below.
+                            val mine = extra.mapNotNull { (it as? SearchResult.Track)?.song }
+                            val rest = page.rows.filter { r ->
+                                val s = (r as? SearchResult.Track)?.song ?: (r as? SearchResult.TopTrack)?.song
+                                s == null || mine.none { m -> m.videoId == s.videoId || com.music.bitchord.data.OwnLibrary.sameSong(m, s) }
+                            }.map { r ->
+                                // YouTube's top song is not on top of yours: it joins the songs after them.
+                                if (mine.isNotEmpty() && r is SearchResult.TopTrack) SearchResult.Track(r.song) else r
+                            }
+                            published(page.copy(rows = extra + rest), key, request.requestId)
                         }
                     },
                     onFailure = { failure ->
