@@ -40,8 +40,10 @@ object MetadataEdits {
         val year: String? = null,
         val track: String? = null,
         val genre: String? = null,
+        /** BitChord Audio: where the song is from — "One Piece — opening 1", a game, a show. */
+        val comment: String? = null,
     ) {
-        val isEmpty: Boolean get() = listOf(title, artist, album, albumArtist, year, track, genre).all { it.isNullOrBlank() }
+        val isEmpty: Boolean get() = listOf(title, artist, album, albumArtist, year, track, genre, comment).all { it.isNullOrBlank() }
 
         /** [other]'s fields over these, where [other] says something. */
         fun with(other: Edit) = Edit(
@@ -52,6 +54,7 @@ object MetadataEdits {
             year = other.year ?: year,
             track = other.track ?: track,
             genre = other.genre ?: genre,
+            comment = other.comment ?: comment,
         )
 
         fun toJson(): JSONObject = JSONObject().apply {
@@ -62,6 +65,7 @@ object MetadataEdits {
             year?.let { put("year", it) }
             track?.let { put("track", it) }
             genre?.let { put("genre", it) }
+            comment?.let { put("comment", it) }
         }
 
         companion object {
@@ -73,6 +77,7 @@ object MetadataEdits {
                 year = o.optString("year").ifEmpty { null },
                 track = o.optString("track").ifEmpty { null },
                 genre = o.optString("genre").ifEmpty { null },
+                comment = o.optString("comment").ifEmpty { null },
             )
         }
     }

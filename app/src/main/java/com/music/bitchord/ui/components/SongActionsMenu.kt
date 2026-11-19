@@ -530,6 +530,13 @@ fun SongActionsMenu(
             description = appearances.size.takeIf { it > 1 }?.let { stringResource(R.string.also_on_albums) + " · $it" },
             accent = palette.accent,
         ) { AppearsOn.show(song) }
+        // BitChord Audio: the library assistant on this song, now.
+        ActionRow(
+            icon = SfIcons.Album,
+            label = stringResource(R.string.clean_with_assistant),
+            description = stringResource(R.string.clean_with_assistant_song),
+            accent = palette.accent,
+        ) { com.music.bitchord.data.cleanup.CleanNow.song(song) }
 
         // The player's own: about the track playing right now rather than
         // about the song as a thing in a library.

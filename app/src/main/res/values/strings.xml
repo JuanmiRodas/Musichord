@@ -1788,4 +1788,6 @@
     <string name="gemini_error">Gemini: %1$s</string>
     <string name="gemini_test">Check</string>
     <string name="gemini_change">Change</string>
+    <string name="clean_with_assistant">Clean with the assistant</string>
+    <string name="clean_with_assistant_song">Real details, best cover, live or studio, where it was used</string>
 </resources>

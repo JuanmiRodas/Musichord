@@ -1876,4 +1876,6 @@
     <string name="gemini_error">Gemini: %1$s</string>
     <string name="gemini_test">Probar</string>
     <string name="gemini_change">Cambiar</string>
+    <string name="clean_with_assistant">Limpiar con el asistente</string>
+    <string name="clean_with_assistant_song">Datos reales, mejor portada, directo o estudio, dónde se usó</string>
 </resources>

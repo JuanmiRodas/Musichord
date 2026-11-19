@@ -320,7 +320,7 @@ object LibraryCleanup {
 
     private fun yearOf(subtitle: String) = Regex("""\b(19|20)\d{2}\b""").find(subtitle)?.value
 
-    private fun bigCover(url: String?) = url?.replace(Regex("=w\\d+-h\\d+.*$"), "=w1200-h1200")
+    internal fun bigCover(url: String?) = url?.replace(Regex("=w\\d+-h\\d+.*$"), "=w1200-h1200")
         ?.replace(Regex("""/\d+x\d+bb\."""), "/1200x1200bb.")
 
     /** The files matched to [c]'s tracks: by title, else by length, else by order. */
@@ -476,7 +476,7 @@ Every file index must appear once in tracks.
     }
 
     /** The cover Apple's catalogue has for [album], large. */
-    private fun itunesCover(artist: String, album: String): String? = runCatching {
+    internal fun itunesCover(artist: String, album: String): String? = runCatching {
         val term = URLEncoder.encode("$artist $album", "UTF-8")
         val req = Request.Builder().url("https://itunes.apple.com/search?entity=album&limit=3&term=$term").build()
         Http.client.newCall(req).execute().use { r ->

@@ -204,6 +204,12 @@ fun BrowseActionsMenu(
                         playlist = target.type == BrowseType.PLAYLIST,
                     )
                 }
+                // BitChord Audio: the library assistant on this album, now.
+                if (target.type == BrowseType.ALBUM) {
+                    ActionRow(SfIcons.Album, stringResource(R.string.clean_with_assistant)) {
+                        com.music.bitchord.data.cleanup.CleanNow.album(target.title, target.songs.firstOrNull()?.artist ?: target.subtitle, target.songs)
+                    }
+                }
             }
             onDownloadAll?.let { download ->
                 // Saying which of the three it is, rather than offering the same row

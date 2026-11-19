@@ -36,8 +36,10 @@ object TagWriter {
         /** Synced (LRC) or plain lyrics. */
         val lyrics: String? = null,
         val cover: CoverWriter.Image? = null,
+        /** BitChord Audio: where the song is from ("One Piece — opening 1"), in the comment. */
+        val comment: String? = null,
     ) {
-        val isEmpty: Boolean get() = text.isEmpty && discNumber == null && lyrics == null && cover == null
+        val isEmpty: Boolean get() = text.isEmpty && discNumber == null && lyrics == null && cover == null && comment == null
     }
 
     private val AUDIO = setOf("mp3", "flac", "m4a", "mp4", "aac", "alac", "opus", "ogg", "oga", "wav", "aif", "aiff", "wma", "ape", "wv", "mpc", "dsf")
@@ -64,8 +66,9 @@ object TagWriter {
         put("GENRE", t.genre)
         put("DISCNUMBER", change.discNumber)
         put("LYRICS", change.lyrics)
+        put("COMMENT", change.comment)
         var ok = true
-        if (!(t.isEmpty && change.discNumber == null && change.lyrics == null)) {
+        if (!(t.isEmpty && change.discNumber == null && change.lyrics == null && change.comment == null)) {
             ok = TagLib.savePropertyMap(fd.dup().detachFd(), HashMap(map.filterValues { it.isNotEmpty() }))
         }
         change.cover?.let { img ->
