@@ -163,6 +163,9 @@ object AudioCheck {
     private fun waitingFor(context: Context, force: Boolean): Wait? {
         if (prefs?.getBoolean("paused", false) == true) return Wait.Paused
         if (!wifi()) return Wait.Wifi
+        // Never in battery saver, schedule or not.
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        if (pm?.isPowerSaveMode == true && !charging(context)) return Wait.Charging
         val sc = _schedule.value
         if (!sc.on || force) return null
         if (sc.wifiNames.isNotEmpty() && currentWifi(context)?.let { it in sc.wifiNames } != true) return Wait.Network(sc.wifiNames)
@@ -198,11 +201,13 @@ object AudioCheck {
         store = File(context.filesDir, FILE)
         prefs = context.applicationContext.getSharedPreferences("bitchord_audio_check", Context.MODE_PRIVATE).also { p ->
             _schedule.value = Schedule(
-                on = p.getBoolean("on", false),
+                // BitChord Audio: by default only while charging (any hour, any Wi-Fi) — listening
+                // through thousands of links is too much work for a phone on its battery.
+                on = p.getBoolean("on", true),
                 wifiNames = p.getStringSet("wifi", emptySet()).orEmpty().toSet(),
-                fromHour = p.getInt("from", 1),
-                toHour = p.getInt("to", 7),
-                chargingOnly = p.getBoolean("charging", false),
+                fromHour = p.getInt("from", 0),
+                toHour = p.getInt("to", 0),
+                chargingOnly = p.getBoolean("charging", true),
             )
             _progress.value = _progress.value.copy(paused = p.getBoolean("paused", false), lastRun = p.getLong("last", 0L))
         }

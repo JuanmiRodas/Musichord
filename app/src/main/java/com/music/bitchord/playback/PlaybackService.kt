@@ -8470,12 +8470,25 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    private fun lyricLineWanted(): Boolean {
+        val pm = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+        if (pm?.isInteractive != false) return true
+        val am = getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return false
+        return am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_USB_ACCESSORY
+        }
+    }
+
     private fun startLyricsTicker() {
         if (lyricsTickerJob?.isActive == true) return
         lyricsTickerJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
-                updateLyricSubtitle()
-                delay(500L)
+                // BitChord Audio: with the screen off nobody reads the lyric in the notification
+                // — each line re-published the media session (and the notification) every second
+                // or two all night. It carries on for a car or Bluetooth display, and catches up
+                // as soon as the screen comes on.
+                if (lyricLineWanted()) updateLyricSubtitle()
+                delay(if (lyricLineWanted()) 500L else 2_000L)
             }
         }
     }

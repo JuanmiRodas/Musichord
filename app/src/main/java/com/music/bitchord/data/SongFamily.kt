@@ -205,6 +205,8 @@ object SongFamily {
             // 1. Related artists, once per artist of your likes (YouTube Music, a request each).
             liked.map { it.artist }.distinctBy { OwnFileMatcher.key(it) }.take(400).forEach { a ->
                 val k = OwnFileMatcher.key(a.split(",", "&", " feat").first())
+                // On Wi-Fi only: a request per artist is not for mobile data.
+                while (com.music.bitchord.data.settings.AppSettings.meteredConnection.value != false) kotlinx.coroutines.delay(60_000)
                 if (k.isNotEmpty() && related[k] == null) { runCatching { relatedTo(a) }; kotlinx.coroutines.delay(1_500) }
             }
             // 2. Local performances for everything (no network).
