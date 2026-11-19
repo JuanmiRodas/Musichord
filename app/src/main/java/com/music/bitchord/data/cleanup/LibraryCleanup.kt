@@ -334,7 +334,8 @@ object LibraryCleanup {
     private suspend fun proposalFor(g: Group, hint: String?): Proposal? {
         val cands = candidates(g, hint)
         val before = rejected[g.key].orEmpty()
-        if (Gemini.ready) ai(g, hint, cands, before)?.takeIf { p -> p.album.isNotBlank() || p.tracks.any { it.album != null } }?.let { return it }
+        // Gemini searching the web can take a while; past 75 s, YouTube Music's answer instead.
+        if (Gemini.ready) kotlinx.coroutines.withTimeoutOrNull(75_000) { ai(g, hint, cands, before) }?.takeIf { p -> p.album.isNotBlank() || p.tracks.any { it.album != null } }?.let { return it }
         // Without the assistant: the release whose tracks fit best, one not turned down.
         val ranked = cands.sortedByDescending { fit(g, it) }
             .filter { c -> before.none { it.ytAlbumId == c.browseId } }

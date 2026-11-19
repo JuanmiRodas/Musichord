@@ -43,6 +43,29 @@ object Gemini {
 
     val ready get() = _key.value.isNotBlank()
 
+    /** BitChord Audio: how the last request went — null when it answered, else why not (shown in the assistant). */
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError
+    private val _lastOk = MutableStateFlow(0L)
+    val lastOk: StateFlow<Long> = _lastOk
+
+    /** A tiny request to check the key: null when it works, else the reason. */
+    suspend fun test(): String? {
+        val o = ask("Reply with the JSON object {\"ok\": true}", null, null, search = false)
+        return if (o != null) null else _lastError.value ?: "sin respuesta"
+    }
+
+    private fun why(code: Int, body: String): String {
+        val msg = runCatching { JSONObject(body).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty()
+        return when (code) {
+            400 -> if (msg.contains("API key", true)) "la clave no es válida" else "petición rechazada: ${msg.take(120)}"
+            401, 403 -> "la clave no tiene permiso (${msg.take(80)})"
+            429 -> "límite del plan gratuito alcanzado por ahora; se reintenta más tarde"
+            in 500..599 -> "Gemini no responde ahora ($code)"
+            else -> "error $code: ${msg.take(120)}"
+        }
+    }
+
     private val client by lazy {
         Http.client.newBuilder().readTimeout(120, TimeUnit.SECONDS).callTimeout(150, TimeUnit.SECONDS).build()
     }
@@ -51,7 +74,7 @@ object Gemini {
      * Asks with [prompt] (and [image], the folder's cover, when there is one); the JSON
      * object in the answer, or null. Searches the web when it needs to.
      */
-    suspend fun ask(prompt: String, image: ByteArray?, imageMime: String?): JSONObject? = withContext(Dispatchers.IO) {
+    suspend fun ask(prompt: String, image: ByteArray?, imageMime: String?, search: Boolean = true): JSONObject? = withContext(Dispatchers.IO) {
         if (!ready) return@withContext null
         val parts = JSONArray().put(JSONObject().put("text", prompt))
         if (image != null) {
@@ -61,7 +84,7 @@ object Gemini {
         }
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
-            .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+            .apply { if (search) put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject()))) }
             .put("generationConfig", JSONObject().put("temperature", 0.2))
         val req = Request.Builder()
             .url("https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent")
@@ -73,15 +96,21 @@ object Gemini {
                 val text = r.body?.string().orEmpty()
                 if (r.code !in 200..299) {
                     TrackLog.w(TAG, "assistant: Gemini answered ${r.code}: ${text.take(300)}")
+                    _lastError.value = why(r.code, text)
                     return@runCatching null
                 }
+                _lastError.value = null
+                _lastOk.value = System.currentTimeMillis()
                 val answer = JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)
                     ?.optJSONObject("content")?.optJSONArray("parts")
                     ?.let { p -> (0 until p.length()).joinToString("") { p.optJSONObject(it)?.optString("text").orEmpty() } }
                     .orEmpty()
                 jsonIn(answer)
             }
-        }.onFailure { TrackLog.w(TAG, "assistant: Gemini failed: ${it.message}") }.getOrNull()
+        }.onFailure {
+            TrackLog.w(TAG, "assistant: Gemini failed: ${it.message}")
+            _lastError.value = "sin conexión con Gemini (${it.message?.take(80)})"
+        }.getOrNull()
     }
 
     /** The outermost {…} of [text] (an answer may wrap it in prose or a code fence). */

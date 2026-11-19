@@ -1782,4 +1782,10 @@
     <string name="assistant_video_edited">Not on YouTube Music: shown with the right details</string>
     <string name="assistant_video_asked">Asked you</string>
     <string name="assistant_video_official">Official already</string>
+    <string name="gemini_saved">Gemini key saved</string>
+    <string name="gemini_ok">Gemini key works</string>
+    <string name="gemini_testing">Checking the key…</string>
+    <string name="gemini_error">Gemini: %1$s</string>
+    <string name="gemini_test">Check</string>
+    <string name="gemini_change">Change</string>
 </resources>

@@ -123,6 +123,30 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
             }
             TextButton(onClick = onClose) { Text(stringResource(R.string.close)) }
         }
+        if (key.isNotBlank()) {
+            // BitChord Audio: the key you saved, how it is doing, and a way to change it.
+            val err by Gemini.lastError.collectAsStateWithLifecycle()
+            var testing by remember { mutableStateOf(false) }
+            var tested by remember { mutableStateOf<String?>(null) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                Text(
+                    when {
+                        testing -> stringResource(R.string.gemini_testing)
+                        tested == "" -> stringResource(R.string.gemini_ok)
+                        tested != null -> stringResource(R.string.gemini_error, tested!!)
+                        err != null -> stringResource(R.string.gemini_error, err!!)
+                        else -> stringResource(R.string.gemini_saved)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if ((tested ?: err).isNullOrEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { testing = true; scope.launch { tested = Gemini.test() ?: ""; testing = false } }, enabled = !testing) {
+                    Text(stringResource(R.string.gemini_test))
+                }
+                TextButton(onClick = { Gemini.setKey("") }) { Text(stringResource(R.string.gemini_change)) }
+            }
+        }
         if (key.isBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.cleanup_gemini_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -286,6 +310,7 @@ private fun AssistantPane(modifier: Modifier) {
                 val status = when {
                     !a.on -> stringResource(R.string.assistant_off)
                     !Gemini.ready -> stringResource(R.string.assistant_needs_key)
+                    Gemini.lastError.value != null -> stringResource(R.string.gemini_error, Gemini.lastError.value!!)
                     a.waiting != null -> stringResource(R.string.assistant_waits)
                     a.running && a.current != null -> stringResource(R.string.assistant_working, a.current!!)
                     else -> stringResource(R.string.assistant_idle)
