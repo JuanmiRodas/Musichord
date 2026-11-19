@@ -125,7 +125,7 @@ object Gemini {
     }
 
     private val client by lazy {
-        Http.client.newBuilder().readTimeout(120, TimeUnit.SECONDS).callTimeout(150, TimeUnit.SECONDS).build()
+        Http.client.newBuilder().readTimeout(60, TimeUnit.SECONDS).callTimeout(75, TimeUnit.SECONDS).build()
     }
 
     /**
@@ -137,6 +137,8 @@ object Gemini {
         data class Answer(val o: JSONObject?) : Outcome
         data class Quota(val withSearch: Boolean) : Outcome
         data object Gone : Outcome
+        /** Overloaded or down for now (5xx, a timeout): the next model. */
+        data object Busy : Outcome
         data object Failed : Outcome
     }
 
@@ -157,7 +159,9 @@ object Gemini {
                         else { restingUntil[name] = System.currentTimeMillis() + 3 * 3_600_000L; return@repeat }
                     }
                     Outcome.Gone -> { restingUntil[name] = Long.MAX_VALUE; return@repeat }
-                    Outcome.Failed -> return@withContext null
+                    Outcome.Busy -> { restingUntil[name] = System.currentTimeMillis() + 10 * 60_000L; return@repeat }
+                    // A key Gemini refuses: no point trying its other models.
+                    Outcome.Failed -> return@withContext OtherBrains.ask(prompt)
                 }
             }
         }
@@ -200,6 +204,11 @@ object Gemini {
                         TrackLog.w(TAG, "assistant: $name not usable (${r.code}): ${text.take(160)}")
                         if (r.code == 400) Outcome.Quota(true) else Outcome.Gone
                     }
+                    r.code in 500..599 -> {
+                        TrackLog.w(TAG, "assistant: $name busy (${r.code}); trying the next model")
+                        _lastError.value = why(r.code, text)
+                        Outcome.Busy
+                    }
                     r.code !in 200..299 -> {
                         TrackLog.w(TAG, "assistant: Gemini answered ${r.code}: ${text.take(300)}")
                         _lastError.value = why(r.code, text)
@@ -217,9 +226,9 @@ object Gemini {
                 }
             }
         }.getOrElse {
-            TrackLog.w(TAG, "assistant: Gemini failed: ${it.message}")
+            TrackLog.w(TAG, "assistant: $name failed: ${it.message}")
             _lastError.value = "sin conexión con Gemini (${it.message?.take(80)})"
-            Outcome.Failed
+            Outcome.Busy
         }
     }
 

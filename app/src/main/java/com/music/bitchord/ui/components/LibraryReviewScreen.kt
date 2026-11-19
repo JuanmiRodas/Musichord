@@ -164,7 +164,43 @@ private fun LibraryReviewContent(onClose: () -> Unit) {
                 var draft by remember(prov) { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (saved.isNotBlank()) {
-                        Text(stringResource(R.string.ai_key_saved, prov.label), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        var result by remember(prov) { mutableStateOf<String?>(null) }
+                        var busy by remember(prov) { mutableStateOf(false) }
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.ai_key_saved, prov.label), style = MaterialTheme.typography.bodySmall)
+                            when {
+                                busy -> Text(stringResource(R.string.gemini_testing), style = MaterialTheme.typography.labelSmall)
+                                result == "" -> Text(stringResource(R.string.gemini_ok).replace("Gemini", prov.label), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                result != null -> Text(result!!, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            }
+                            // The model: chosen by the app (a free one) or by you.
+                            val chosenModel by com.music.bitchord.data.cleanup.OtherBrains.chosenModel(prov).collectAsStateWithLifecycle()
+                            var menu by remember(prov) { mutableStateOf(false) }
+                            var list by remember(prov) { mutableStateOf<List<String>>(emptyList()) }
+                            Box {
+                                TextButton(onClick = {
+                                    menu = true
+                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) { list = com.music.bitchord.data.cleanup.OtherBrains.listModels(prov) }
+                                }) { Text(stringResource(R.string.ai_model, chosenModel ?: stringResource(R.string.ai_model_auto))) }
+                                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                    androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.ai_model_auto)) }, onClick = {
+                                        com.music.bitchord.data.cleanup.OtherBrains.setModel(prov, null); menu = false
+                                    })
+                                    if (list.isEmpty()) androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.gemini_testing)) }, onClick = {}, enabled = false)
+                                    list.sortedByDescending { com.music.bitchord.data.cleanup.OtherBrains.isFree(prov, it) }.forEach { id ->
+                                        val free = com.music.bitchord.data.cleanup.OtherBrains.isFree(prov, id)
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = { Text(if (free) "$id · " + stringResource(R.string.ai_free) else id) },
+                                            onClick = { com.music.bitchord.data.cleanup.OtherBrains.setModel(prov, id); menu = false },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        TextButton(onClick = {
+                            busy = true
+                            scope.launch(kotlinx.coroutines.Dispatchers.IO) { result = com.music.bitchord.data.cleanup.OtherBrains.test(prov) ?: ""; busy = false }
+                        }, enabled = !busy) { Text(stringResource(R.string.gemini_test)) }
                         TextButton(onClick = { com.music.bitchord.data.cleanup.OtherBrains.setKey(prov, "") }) { Text(stringResource(R.string.gemini_change)) }
                     } else {
                         OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), singleLine = true, label = { Text(stringResource(R.string.ai_key_label, prov.label)) })

@@ -49,7 +49,10 @@ object OtherBrains {
 
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences("bitchord_assistant", Context.MODE_PRIVATE)
-        Provider.entries.forEach { keys.getValue(it).value = prefs?.getString(it.prefKey, "").orEmpty() }
+        Provider.entries.forEach {
+            keys.getValue(it).value = prefs?.getString(it.prefKey, "").orEmpty()
+            chosen.getValue(it).value = prefs?.getString(it.prefKey + "_model", null)
+        }
     }
 
     fun setKey(p: Provider, k: String) {
@@ -62,10 +65,42 @@ object OtherBrains {
     val ready: Boolean get() = Provider.entries.any { keys.getValue(it).value.isNotBlank() }
 
     private val client by lazy {
-        Http.client.newBuilder().readTimeout(120, TimeUnit.SECONDS).callTimeout(150, TimeUnit.SECONDS).build()
+        Http.client.newBuilder().readTimeout(60, TimeUnit.SECONDS).callTimeout(75, TimeUnit.SECONDS).build()
     }
 
+    /** The free models (by name): Experiential's free core pool; for Mistral every model is in the free plan. */
+    fun isFree(p: Provider, id: String) = p == Provider.MISTRAL || p.prefer.any { it.containsMatchIn(id) }
+
+    /** The models your key can use, for picking one by hand. */
+    fun listModels(p: Provider): List<String> = runCatching {
+        val req = Request.Builder().url("${p.base}/models").header("Authorization", "Bearer ${keys.getValue(p).value}").build()
+        client.newCall(req).execute().use { r ->
+            val a = JSONObject(r.body?.string().orEmpty()).optJSONArray("data") ?: JSONArray()
+            (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("id") }.filter { it.isNotBlank() }
+                .filterNot { Regex("(?i)embed|tts|whisper|image|moderation|ocr|audio|transcri").containsMatchIn(it) }
+        }
+    }.getOrDefault(emptyList())
+
+    private val chosen = Provider.entries.associateWith { MutableStateFlow<String?>(null) }
+    fun chosenModel(p: Provider): StateFlow<String?> = chosen.getValue(p)
+
+    fun setModel(p: Provider, id: String?) {
+        chosen.getValue(p).value = id
+        prefs?.edit()?.putString(p.prefKey + "_model", id)?.apply()
+        models.remove(p)
+    }
+
+    /** A tiny request to [p]: null when it answers, else why not. */
+    fun test(p: Provider): String? {
+        resting.remove(p)
+        val o = askOne(p, "Reply with the JSON object {\"ok\": true}")
+        return if (o != null) null else (lastError[p] ?: "sin respuesta")
+    }
+
+    private val lastError = java.util.concurrent.ConcurrentHashMap<Provider, String>()
+
     private fun modelFor(p: Provider): String? {
+        chosen.getValue(p).value?.let { return it }
         models[p]?.let { return it }
         val ids = runCatching {
             val req = Request.Builder().url("${p.base}/models").header("Authorization", "Bearer ${keys.getValue(p).value}").build()
@@ -86,9 +121,18 @@ object OtherBrains {
     fun ask(prompt: String): JSONObject? {
         val now = System.currentTimeMillis()
         for (p in Provider.entries) {
+            if ((resting[p] ?: 0L) > now) continue
+            askOne(p, prompt)?.let { return it }
+        }
+        return null
+    }
+
+    private fun askOne(p: Provider, prompt: String): JSONObject? {
+        val now = System.currentTimeMillis()
+        run {
             val key = keys.getValue(p).value
-            if (key.isBlank() || (resting[p] ?: 0L) > now) continue
-            val model = modelFor(p) ?: continue
+            if (key.isBlank()) return null
+            val model = modelFor(p) ?: run { lastError[p] = "la clave no da acceso a ningún modelo (¿es correcta?)"; return null }
             val body = JSONObject()
                 .put("model", model)
                 .put("temperature", 0.2)
@@ -103,22 +147,29 @@ object OtherBrains {
                     val text = r.body?.string().orEmpty()
                     if (r.code == 429) {
                         TrackLog.w(TAG, "assistant: ${p.label} — no allowance left (429)")
+                        lastError[p] = "sin cuota ahora mismo (429)"
                         resting[p] = now + 3_600_000L
                         return@use null
                     }
                     if (r.code == 404 || r.code == 400) models.remove(p)
                     if (r.code !in 200..299) {
                         TrackLog.w(TAG, "assistant: ${p.label} answered ${r.code}: ${text.take(200)}")
+                        lastError[p] = when (r.code) {
+                            401, 403 -> "la clave no es válida o no tiene permiso"
+                            else -> "error ${r.code}: " + (runCatching { JSONObject(text).optJSONObject("error")?.optString("message") ?: JSONObject(text).optString("message") }.getOrNull() ?: text).take(120)
+                        }
                         return@use null
                     }
                     JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
                 }
-            }.onFailure { TrackLog.w(TAG, "assistant: ${p.label} failed: ${it.message}") }.getOrNull()
+            }.onFailure { TrackLog.w(TAG, "assistant: ${p.label} failed: ${it.message}"); lastError[p] = "sin conexión (${it.message?.take(60)})" }.getOrNull()
             val o = answer?.let(::jsonIn)
             if (o != null) {
+                lastError.remove(p)
                 used("${p.label} · $model")
                 return o
             }
+            if (answer != null) lastError[p] = "respondió, pero no en el formato pedido"
         }
         return null
     }

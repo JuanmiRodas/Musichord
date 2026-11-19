@@ -1883,4 +1883,7 @@
     <string name="ai_other_hint">Se usan cuando Gemini no tiene cuota. Experiential Labs: sus modelos gratuitos (platform.experientiallabs.ai → API keys). Mistral: plan gratuito Experiment (console.mistral.ai → API keys). No buscan en internet como Gemini.</string>
     <string name="ai_key_saved">Clave de %1$s guardada</string>
     <string name="ai_key_label">Clave de %1$s</string>
+    <string name="ai_model">Modelo: %1$s</string>
+    <string name="ai_model_auto">automático (gratis)</string>
+    <string name="ai_free">gratis</string>
 </resources>

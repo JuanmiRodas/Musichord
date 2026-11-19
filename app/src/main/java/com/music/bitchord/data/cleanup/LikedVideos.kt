@@ -71,7 +71,12 @@ object LikedVideos {
         load()
     }
 
-    private fun handled(id: String) = _results.value.any { it.videoId == id && it.status != Status.ASKED }
+    /** Done with: worked out, or undone by you. A failed attempt (no answer) is tried again. */
+    private fun handled(id: String) = _results.value.any {
+        it.videoId == id && (it.status == Status.SWAPPED || it.status == Status.EDITED || it.status == Status.OFFICIAL ||
+            (it.status == Status.FAILED && it.reason == "deshecho") ||
+            (it.status == Status.FAILED && System.currentTimeMillis() - it.at < 3_600_000L))
+    }
 
     /**
      * Liked videos still waiting: [fresh] ones (liked since the app last looked) first —
