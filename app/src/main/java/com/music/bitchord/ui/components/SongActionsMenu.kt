@@ -258,17 +258,32 @@ fun SongActionsMenu(
             )
         }
 
+        // BitChord Audio: a video made into its song version (YouTube Music, your pCloud file,
+        // another source), or back to the original video.
+        val versions = com.music.bitchord.data.SongVersions
+        val original = remember(song.videoId) { versions.originalOf(song.videoId) }
+        if (original != null && versions.restore != null) {
+            if (startsGroup()) IosMenuSeparator()
+            ActionRow(
+                icon = SfIcons.Video,
+                label = stringResource(R.string.convert_restore),
+                description = original.title,
+                accent = palette.accent,
+            ) { versions.restore?.invoke(song) }
+        } else if (versions.looksLikeVideo(song) && versions.convert != null) {
+            if (startsGroup()) IosMenuSeparator()
+            ActionRow(
+                icon = SfIcons.MusicNote,
+                label = stringResource(R.string.convert_song),
+                description = stringResource(R.string.convert_song_hint),
+                accent = palette.accent,
+            ) { versions.convert?.invoke(song) }
+        }
+
         // BitChord Audio: a liked music video (or any liked song, by hand) traded for its song version.
         val songVersion = com.music.bitchord.data.SongVersions.manual
         if (liked && signedIn && songVersion != null && com.music.bitchord.data.LocalLikes.isYouTubeId(song.videoId)) {
             if (startsGroup()) IosMenuSeparator()
-            ActionRow(
-                icon = SfIcons.MusicNote,
-                label = stringResource(R.string.song_version_use),
-                value = stringResource(R.string.song_version_hint).takeIf { com.music.bitchord.data.SongVersions.looksLikeVideo(song) },
-                accent = palette.accent,
-                onClick = { songVersion(song) },
-            )
             // …or to the version you choose, searched with terms you can change.
             ActionRow(
                 icon = SfIcons.FilterAlt,

@@ -1333,6 +1333,87 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** BitChord Audio: the song menu's "Use the song version", for any liked song. */
+    /**
+     * BitChord Audio: a liked video made into its song version — YouTube Music's song (the
+     * like moves to it, album cover and details included); else your pCloud file of it
+     * (shown and played in its place); else another source's copy. Undone by
+     * [restoreVideoVersion].
+     */
+    fun convertToSongVersion(video: Song) {
+        val app = getApplication<Application>()
+        fun say(text: String) = android.widget.Toast.makeText(app, text, android.widget.Toast.LENGTH_LONG).show()
+        viewModelScope.launch {
+            say(app.getString(R.string.convert_song_looking, video.title))
+            val shown = com.music.bitchord.data.edits.MetadataEdits.applied(video) ?: video
+            // 1. YouTube Music's song: its own pairing, then a search by the (corrected) name.
+            if (_signedIn.value && com.music.bitchord.data.LocalLikes.isYouTubeId(video.videoId)) {
+                val song = runCatching { swapLikeForSong(video) }.getOrNull()
+                    ?: runCatching { findSongVersion(shown)?.let { swapLike(video, it) } }.getOrNull()
+                if (song != null) {
+                    com.music.bitchord.data.SongVersions.remember(video, "song:" + song.videoId, song.videoId)
+                    say(app.getString(R.string.convert_song_done_yt, song.title, song.albumName ?: song.artist))
+                    return@launch
+                }
+            }
+            // 2. Your pCloud file (or upload) of it.
+            val file = withContext(Dispatchers.Default) {
+                val pool = com.music.bitchord.data.webdav.WebDavRepository.library() + com.music.bitchord.data.OwnLibrary.uploads.value
+                pool.firstOrNull { f ->
+                    com.music.bitchord.data.sources.OwnFileMatcher.allKeys(f.title).any { it in com.music.bitchord.data.sources.OwnFileMatcher.allKeys(shown.title) } &&
+                        shown.artist.split(",", "&", "·").any { a -> com.music.bitchord.data.sources.OwnFileMatcher.sameArtist(a.trim(), f.artist) }
+                }
+            }
+            if (file != null) {
+                com.music.bitchord.data.sources.PreferredSource.chooseFile(video, file, shown)
+                com.music.bitchord.data.SongVersions.remember(video, "file:" + file.videoId, file.videoId)
+                say(app.getString(R.string.convert_song_done_file, file.title, file.albumName ?: file.artist))
+                return@launch
+            }
+            // 3. Another source's copy: the version picker, searched with the corrected name.
+            say(app.getString(R.string.convert_song_none))
+            com.music.bitchord.ui.components.LikeVersionPicker.open(shown)
+        }
+    }
+
+    /** The song on YouTube Music for [s] (title in any script, artist, not karaoke). */
+    private suspend fun findSongVersion(s: Song): Song? {
+        val found = YtMusicRepository.search("${s.title} ${s.artist}", com.music.bitchord.data.model.SearchFilter.SONGS).getOrNull().orEmpty()
+            .mapNotNull { (it as? com.music.bitchord.data.model.SearchResult.Track)?.song ?: (it as? com.music.bitchord.data.model.SearchResult.TopTrack)?.song }
+            .filter { !it.isVideo }
+        return found.firstOrNull { c ->
+            com.music.bitchord.data.sources.OwnFileMatcher.allKeys(c.title).any { it in com.music.bitchord.data.sources.OwnFileMatcher.allKeys(s.title) } &&
+                s.artist.split(",", "&", "·").any { a -> com.music.bitchord.data.sources.OwnFileMatcher.sameArtist(a.trim(), c.artist) } &&
+                !Regex("(?i)karaoke|カラオケ|off vocal|instrumental").containsMatchIn(c.title + " " + c.albumName.orEmpty())
+        }
+    }
+
+    /** BitChord Audio: back to the video as it was liked (the like moves back; your file stops standing in). */
+    fun restoreVideoVersion(song: Song) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val versions = com.music.bitchord.data.SongVersions
+            val video = versions.originalOf(song.videoId) ?: return@launch
+            when (val did = versions.conversionOf(video.videoId)) {
+                null -> return@launch
+                else -> if (did.startsWith("song:")) {
+                    val songId = did.removePrefix("song:")
+                    LikedMusicCache.clearUnliked(video.videoId)
+                    val current = LikedMusicCache.likedSongs.value.firstOrNull { it.videoId == songId } ?: song.copy(videoId = songId)
+                    if (runCatching { swapLike(current, video) }.getOrNull() == null) {
+                        android.widget.Toast.makeText(app, app.getString(R.string.convert_restore_failed), android.widget.Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    versions.markTried(video.videoId)
+                    versions.forget(video.videoId, songId)
+                } else {
+                    com.music.bitchord.data.sources.PreferredSource.clear(video)
+                    versions.forget(video.videoId, did.removePrefix("file:"))
+                }
+            }
+            android.widget.Toast.makeText(app, app.getString(R.string.convert_restored, video.title), android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun useSongVersion(video: Song) {
         if (!requireSignIn()) return
         val app = getApplication<Application>()
@@ -2088,6 +2169,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         LikedMusicCache.onStillLiked = null
         // BitChord Audio: liked music videos become their songs, on their own and by hand.
         com.music.bitchord.data.SongVersions.manual = { useSongVersion(it) }
+        com.music.bitchord.data.SongVersions.convert = { convertToSongVersion(it) }
+        com.music.bitchord.data.SongVersions.restore = { restoreVideoVersion(it) }
         com.music.bitchord.ui.components.LikeVersionPicker.onPick = { from, to -> linkLikeTo(from, to) }
         viewModelScope.launch {
             @OptIn(kotlinx.coroutines.FlowPreview::class)

@@ -51,4 +51,44 @@ object SongVersions {
 
     /** Set by the app's view model: swaps [Song]'s like for its song version by hand. */
     @Volatile var manual: ((Song) -> Unit)? = null
+
+    // ── BitChord Audio: "Convert into the song version" / "Restore the original video" ──
+
+    /** Set by the app's view model. */
+    @Volatile var convert: ((Song) -> Unit)? = null
+    @Volatile var restore: ((Song) -> Unit)? = null
+
+    /**
+     * What a conversion did, to undo it: the song now liked in a video's place ("song:id",
+     * with the video kept), or your file shown in its place ("file:id").
+     */
+    fun remember(video: Song, did: String, now: String) {
+        prefs?.edit()
+            ?.putString("conv:v:" + video.videoId, did)
+            ?.putString("conv:s:" + now, org.json.JSONObject().apply {
+                put("v", video.videoId); put("t", video.title); put("a", video.artist)
+                video.thumbnailUrl?.let { put("th", it) }; video.durationText?.let { put("d", it) }
+            }.toString())
+            ?.apply()
+    }
+
+    /** The video [id] was converted from (whether [id] is the song or the video itself). */
+    fun originalOf(id: String): Song? {
+        val p = prefs ?: return null
+        val json = p.getString("conv:s:$id", null) ?: p.getString("conv:v:$id", null)?.let { did ->
+            p.getString("conv:s:" + did.substringAfter(':'), null)
+        } ?: return null
+        return runCatching {
+            val o = org.json.JSONObject(json)
+            Song(videoId = o.getString("v"), title = o.optString("t"), artist = o.optString("a"),
+                thumbnailUrl = o.optString("th").ifBlank { null }, durationText = o.optString("d").ifBlank { null }, isVideo = true)
+        }.getOrNull()
+    }
+
+    /** How [videoId] was converted ("song:…" / "file:…"), or null. */
+    fun conversionOf(videoId: String): String? = prefs?.getString("conv:v:$videoId", null)
+
+    fun forget(video: String, now: String) {
+        prefs?.edit()?.remove("conv:v:$video")?.remove("conv:s:$now")?.apply()
+    }
 }

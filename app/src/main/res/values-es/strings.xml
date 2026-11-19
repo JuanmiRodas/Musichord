@@ -1897,4 +1897,13 @@
     <string name="clean_now_cover_wait">Buscando la portada…</string>
     <string name="clean_now_done">Aplicado</string>
     <string name="clean_now_retry">Reintentar</string>
+    <string name="convert_song">Convertir en versión canción</string>
+    <string name="convert_song_hint">Portada y datos del álbum de YouTube Music; si no, tu archivo de pCloud</string>
+    <string name="convert_restore">Restaurar el vídeo original</string>
+    <string name="convert_song_looking">Buscando la versión canción de «%1$s»…</string>
+    <string name="convert_song_done_yt">Ahora es la canción: «%1$s» · %2$s</string>
+    <string name="convert_song_done_file">Se muestra como tu archivo: «%1$s» · %2$s</string>
+    <string name="convert_song_none">No está en YouTube Music ni en tu biblioteca: elige una versión de otras fuentes</string>
+    <string name="convert_restore_failed">No he podido devolver el me gusta al vídeo</string>
+    <string name="convert_restored">Vuelve a ser el vídeo «%1$s»</string>
 </resources>

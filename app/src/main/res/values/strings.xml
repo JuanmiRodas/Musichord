@@ -1809,4 +1809,13 @@
     <string name="clean_now_cover_wait">Looking for the cover…</string>
     <string name="clean_now_done">Applied</string>
     <string name="clean_now_retry">Try again</string>
+    <string name="convert_song">Convert into the song version</string>
+    <string name="convert_song_hint">Album cover and details from YouTube Music, else your pCloud file</string>
+    <string name="convert_restore">Restore the original video</string>
+    <string name="convert_song_looking">Looking for the song version of “%1$s”…</string>
+    <string name="convert_song_done_yt">Now the song: “%1$s” · %2$s</string>
+    <string name="convert_song_done_file">Shown as your file: “%1$s” · %2$s</string>
+    <string name="convert_song_none">Not on YouTube Music or in your library: pick a version from other sources</string>
+    <string name="convert_restore_failed">Could not move the like back to the video</string>
+    <string name="convert_restored">Back to the video “%1$s”</string>
 </resources>
