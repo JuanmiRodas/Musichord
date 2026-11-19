@@ -852,6 +852,7 @@ object Downloads {
             if (backfilling?.isActive == true) return
             backfilling = ownScope.launch(Dispatchers.IO) {
                 kotlinx.coroutines.delay(20_000)
+                com.music.bitchord.data.BackgroundHours.await()
                 val missing = _savedMetadata.value.values
                     .filter { it.thumbnailUrl?.startsWith("http") == true }
                     .groupBy { it.thumbnailUrl!! }

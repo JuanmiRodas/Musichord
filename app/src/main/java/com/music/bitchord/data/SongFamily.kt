@@ -198,6 +198,7 @@ object SongFamily {
         if (mapping?.isActive == true) return
         mapping = bg.launch {
             kotlinx.coroutines.delay(60_000)
+            BackgroundHours.await()
             val liked = LikedMusicCache.likedSongs.value
             val library = runCatching { com.music.bitchord.data.webdav.WebDavRepository.library() }.getOrDefault(emptyList())
             val pool = ownPool()
@@ -220,6 +221,7 @@ object SongFamily {
             // 3. Liked songs: YouTube Music's other versions and MusicBrainz's other artists, slowly.
             var online = 0
             for (s in liked) {
+                BackgroundHours.await()
                 if (com.music.bitchord.data.settings.AppSettings.meteredConnection.value != false) { kotlinx.coroutines.delay(60_000); continue }
                 if (index[familyKey(s)]?.second != null) continue
                 runCatching { performances(s) }

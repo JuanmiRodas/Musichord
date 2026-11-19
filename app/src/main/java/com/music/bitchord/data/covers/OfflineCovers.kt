@@ -86,6 +86,7 @@ object OfflineCovers {
         if (job?.isActive == true) return
         job = scope.launch {
             delay(afterMs)
+            com.music.bitchord.data.BackgroundHours.await()
             val saved = Downloads.saved.value
             if (saved.isEmpty()) return@launch
             val songs = (LikedMusicCache.likedSongs.value + runCatching { PlaylistPageCache.all() }.getOrDefault(emptyList()))

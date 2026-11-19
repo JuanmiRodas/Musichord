@@ -51,6 +51,8 @@ object BackgroundWork {
             // A moment for the connection (and the library) to settle.
             delay(20_000)
             while (AppSettings.meteredConnection.value == false) {
+                // BitChord Audio: matching, tag writing and the lyrics sweep at night only.
+                if (!BackgroundHours.now()) { delay(10 * 60_000L); continue }
                 runCatching { PendingCoverWrites.flush() }
                 runCatching { SourceMap.fill() }
                 runCatching { LyricsKeeper.prefetchLiked() }

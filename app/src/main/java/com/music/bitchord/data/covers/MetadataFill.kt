@@ -41,6 +41,7 @@ object MetadataFill {
         if (job?.isActive == true) return
         job = scope.launch {
             delay(60_000)
+            com.music.bitchord.data.BackgroundHours.await()
             val liked = LikedMusicCache.likedSongs.value.associateBy { it.videoId }
             var downloads = 0
             for (m in Downloads.savedMetadataSongs()) {

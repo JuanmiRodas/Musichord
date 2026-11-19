@@ -167,7 +167,8 @@ object AudioCheck {
         val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
         if (pm?.isPowerSaveMode == true && !charging(context)) return Wait.Charging
         val sc = _schedule.value
-        if (!sc.on || force) return null
+        if (force) return null
+        if (!sc.on) return if (com.music.bitchord.data.BackgroundHours.now()) null else Wait.Hours(sc.fromHour, sc.toHour)
         if (sc.wifiNames.isNotEmpty() && currentWifi(context)?.let { it in sc.wifiNames } != true) return Wait.Network(sc.wifiNames)
         val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         val inHours = if (sc.fromHour == sc.toHour) true else if (sc.fromHour < sc.toHour) h in sc.fromHour until sc.toHour else h >= sc.fromHour || h < sc.toHour
@@ -209,6 +210,11 @@ object AudioCheck {
                 toHour = p.getInt("to", 0),
                 chargingOnly = p.getBoolean("charging", true),
             )
+            // BitChord Audio: nothing heavy by day — the hours move to the night once.
+            if (!p.getBoolean("night_v1", false)) {
+                _schedule.value = _schedule.value.copy(on = true, fromHour = 1, toHour = 7)
+                p.edit().putBoolean("night_v1", true).putBoolean("on", true).putInt("from", 1).putInt("to", 7).apply()
+            }
             _progress.value = _progress.value.copy(paused = p.getBoolean("paused", false), lastRun = p.getLong("last", 0L))
         }
         AudioCheckWorker.schedule(context.applicationContext)
