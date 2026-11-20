@@ -2418,11 +2418,16 @@ class PlaybackService : MediaLibraryService() {
             }
             try {
                 val startPosition = activePlayer.currentPosition
-                val alignmentOffsetMs = if (measureAlignment) {
+                val measuredOffsetMs = if (measureAlignment) {
                     prepareVersionAlignment(sourceSong, targetSong, startPosition)
                 } else {
-                    0L
+                    null
                 }
+                val alignmentOffsetMs = measuredOffsetMs ?: 0L
+                // BitChord Audio: the two copies' offset not known (nothing measured, no
+                // YouTube map): a long overlap of two unaligned copies is heard as the song
+                // starting twice — a near-cut instead.
+                val unaligned = officialMap == null && measuredOffsetMs == null
                 // Where a moment of the playing cut lands in the other one. A
                 // measured offset is one shift for the whole track; YouTube's
                 // map is per stretch, so a skit mid-video maps correctly too.
@@ -2581,7 +2586,7 @@ class PlaybackService : MediaLibraryService() {
             }
 
             // Smooth equal-power crossfade transition (~550ms audio morph)
-            val swapCrossfadeMs = 550L
+            val swapCrossfadeMs = if (unaligned) 40L else 550L
             val fadeStart = SystemClock.elapsedRealtime()
             if (!holdsSwitchBar) {
                 AppSettings.smartMixInProgress.value = true
@@ -2722,7 +2727,7 @@ class PlaybackService : MediaLibraryService() {
         sourceSong: Song,
         targetSong: Song,
         currentPosMs: Long,
-    ): Long {
+    ): Long? {
         val sourceId = sourceSong.videoId
         val targetId = targetSong.videoId
 
@@ -2750,7 +2755,7 @@ class PlaybackService : MediaLibraryService() {
                     sourceId,
                 )
                 VersionAudioAligner.publishPhase(token, VersionAudioAligner.CutPhase.FAILED)
-                return 0L
+                return null
             }
             VersionAudioAligner.publishPhase(token, VersionAudioAligner.CutPhase.ALIGNED, measured)
             return measured

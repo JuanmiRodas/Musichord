@@ -358,6 +358,12 @@ object QualityUpgrade {
         playing: StreamFormat?,
     ): Boolean {
         if (!couldStillUpgrade(mediaId, uri)) return false
+        // BitChord Audio: your own file is already being put in its place (own-first) —
+        // a second swap at the start of the song was heard as the song starting twice.
+        if (OwnFirst.claimedRecently(mediaId)) {
+            TrackLog.d(TAG, "'${target.title}' is being switched to your file already; no second look", about = mediaId)
+            return false
+        }
         // [asked] is set only on the two *verdicts* below, not on adoption.
         // Both are facts about the bytes on disk and the row that queued them,
         // neither changes while the track plays, and neither is worth

@@ -206,13 +206,14 @@ internal class OwnFirst(
         if (!anyEnabled || item == null) return
         val song = item.toSong()
         if (!wants(song) || !inFlight.add(item.mediaId)) return
+        claimed[item.mediaId] = System.currentTimeMillis()
         scope.launch {
             val file = try {
                 withContext(Dispatchers.Default) { bestFor(song) }
             } finally {
                 inFlight -= item.mediaId
             }
-            file ?: return@launch
+            if (file == null) { claimed -= item.mediaId; return@launch }
             val live = currentPlayer() ?: return@launch
             if (live.currentMediaItem?.mediaId != item.mediaId) return@launch
             // Already playing a better copy (JioSaavn's 320 kbps found at play
@@ -221,6 +222,7 @@ internal class OwnFirst(
             val fileRank = if (WebDavConfig.isWebDavId(file.videoId)) OwnFileMatcher.qualityRank(file) else SourceMap.SAAVN_KBPS
             if (playingFrom.contains("JioSaavn", ignoreCase = true) && fileRank < 9_000 && fileRank <= SourceMap.SAAVN_KBPS) {
                 TrackLog.d(TAG, "own-first: '${song.title}' stays on JioSaavn (better than your $fileRank kbps file)", about = song.videoId)
+                claimed -= item.mediaId
                 return@launch
             }
             if (swapCurrent(file.toMediaItem())) {
@@ -234,6 +236,13 @@ internal class OwnFirst(
 
         /** Copies that wouldn't play this session: not put back in a song's place. */
         val broken: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+        /** Songs own-first is switching (or just switched) to your file: mediaId → when. */
+        private val claimed = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+        /** Whether own-first took [mediaId] over in the last minute — no other swap then. */
+        fun claimedRecently(mediaId: String): Boolean =
+            claimed[mediaId]?.let { System.currentTimeMillis() - it < 60_000L } == true
         private const val LOOK_AHEAD = 3
         private const val START_WAIT_MS = 700L
     }
