@@ -108,7 +108,16 @@ object CloudCopies {
     }
 
     private fun start(app: Context, songs: List<Song>, artist: String, title: String, playlist: Boolean) {
-        scope.launch {
+        scope.launch { send(app, songs, artist, title, playlist) }
+    }
+
+    /**
+     * The copy itself: tagged, into the artist's folder, and the songs that went (or were
+     * already there) returned. [auto]: the downloads' sync — no track numbers (the songs
+     * aren't a whole album in order), and a name already taken on pCloud is left as it is.
+     */
+    internal suspend fun send(app: Context, songs: List<Song>, artist: String, title: String, playlist: Boolean, auto: Boolean = false): Set<String> {
+        return run {
             val library = WebDavRepository.library()
             val todo = songs.filter { s ->
                 !WebDavConfig.isWebDavId(s.videoId) &&
@@ -117,12 +126,13 @@ object CloudCopies {
                     library.none { f -> f.videoId == s.videoId }
             }
             TrackLog.d(TAG, "cloud copy: '$title' — ${todo.size} of ${songs.size} songs to send (the rest are in your pCloud)")
-            if (todo.isEmpty()) return@launch
-            // On the phone first.
-            todo.filter { Downloads.localCopyOf(it.videoId) == null }.let { missing ->
+            val already = songs.map { it.videoId }.toSet() - todo.map { it.videoId }.toSet()
+            if (todo.isEmpty()) return already
+            // On the phone first (the backup sends only what is on it already).
+            if (!auto) todo.filter { Downloads.localCopyOf(it.videoId) == null }.let { missing ->
                 if (missing.isNotEmpty()) Downloads.enqueueAll(app, missing, title)
             }
-            val ready = todo.mapNotNull { s ->
+            val ready = if (auto) todo.filter { it.localUri != null } else todo.mapNotNull { s ->
                 val uri = Downloads.localCopyOf(s.videoId) ?: withTimeoutOrNull(10 * 60_000L) {
                     Downloads.saved.first { s.videoId in it }
                     Downloads.localCopyOf(s.videoId)
@@ -132,6 +142,8 @@ object CloudCopies {
             // Tagged first — title, artist, album, track number and the cover — so the files are
             // whole wherever they go (a JioSaavn copy is saved without tags).
             ready.forEachIndexed { i, s ->
+                // Only the app's own downloads are tagged: your other music files stay untouched.
+                if (auto && Downloads.localCopyOf(s.videoId) == null) return@forEachIndexed
                 runCatching {
                     val cover = (com.music.bitchord.data.covers.OfflineCovers.localFor(s.thumbnailUrl ?: "")?.let { android.net.Uri.fromFile(it).toString() }
                         ?: Downloads.savedArtwork(s.videoId)
@@ -146,7 +158,7 @@ object CloudCopies {
                                 artist = s.artist,
                                 album = if (playlist) s.albumName else (s.albumName ?: title),
                                 albumArtist = if (playlist) null else artist,
-                                track = if (playlist) null else (i + 1).toString(),
+                                track = if (playlist || auto) null else (i + 1).toString(),
                             ),
                             cover = cover,
                         ),
@@ -156,18 +168,27 @@ object CloudCopies {
             // Into your music folder on pCloud: the artist's own folder when you have one there,
             // else a new one in your first music folder.
             val base = artistDir(artist)
-            val folder = when {
+            var folder = when {
                 playlist -> listOf("Playlists", title)
                 base != null -> listOf(title)
                 else -> listOf(artist.ifBlank { "Unknown" }, title)
             }
-            val root = base ?: LibraryFolders.musicFolders().firstOrNull()?.url
+            // The backup: "Music/Artist/Album" at the top of your pCloud.
+            val music = if (auto) com.music.bitchord.data.video.PcloudVideos.serverRoot() else null
+            val root = music ?: base ?: LibraryFolders.musicFolders().firstOrNull()?.url
+            if (music != null) folder = listOf("Music", artist.ifBlank { "Unknown" }, title)
             TrackLog.d(TAG, "cloud copy: '$title' into ${root ?: "the top of pCloud"} / ${folder.joinToString("/")}")
-            val summary = runCatching { WebDavUploads.upload(app, ready, folder, root?.let(WebDavConfig::normalizeUrl)) }
+            val summary = runCatching {
+                WebDavUploads.upload(app, ready, folder, root?.let(WebDavConfig::normalizeUrl), unattended = if (auto) WebDavUploads.Choice.SKIP else null)
+            }
                 .onFailure { TrackLog.w(TAG, "cloud copy: '$title' failed: ${it.message}") }
-                .getOrNull() ?: return@launch
+                .getOrNull() ?: return already
             TrackLog.d(TAG, "cloud copy: '$title' — ${summary.uploaded} uploaded, ${summary.skipped} skipped, ${summary.failed} failed")
-            runCatching { WebDavRepository.getSongs() }
+            if (!auto) runCatching { WebDavRepository.getSongs() }
+            val states = WebDavUploads.active.value
+            return already + ready.filter { s ->
+                states[s.videoId].let { it is WebDavUploads.TrackState.Done || it is WebDavUploads.TrackState.Skipped }
+            }.map { it.videoId }
         }
     }
 }

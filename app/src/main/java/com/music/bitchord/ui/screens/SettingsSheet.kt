@@ -767,6 +767,22 @@ fun SettingsScreen(
                     onCheckedChange = com.music.bitchord.data.webdav.CloudCopies::setWifiOnly,
                 )
             }
+            // BitChord Audio: everything on the phone backed up to pCloud's Music folder, on Wi-Fi.
+            val backupTitle = stringResource(R.string.phone_backup_title)
+            row(backupTitle, "pcloud", "backup", "copia", "wi-fi", "downloads") {
+                val backupOn by com.music.bitchord.data.webdav.PhoneBackup.on.collectAsStateWithLifecycle()
+                val b by com.music.bitchord.data.webdav.PhoneBackup.state.collectAsStateWithLifecycle()
+                SettingsSubRow(
+                    title = backupTitle,
+                    subtitle = when {
+                        b.running && b.current != null -> stringResource(R.string.phone_backup_running, b.current!!, b.waiting)
+                        b.waiting > 0 -> stringResource(R.string.phone_backup_waiting, b.sent, b.waiting)
+                        else -> stringResource(R.string.phone_backup_idle, b.sent)
+                    },
+                    checked = backupOn,
+                    onCheckedChange = com.music.bitchord.data.webdav.PhoneBackup::setOn,
+                )
+            }
             // BitChord Audio: the pCloud library cleanup, card by card.
             val cleanupTitle = stringResource(R.string.cleanup_title)
             row(cleanupTitle, "pcloud", "metadata", "tags", "gemini") {

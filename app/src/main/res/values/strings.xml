@@ -1832,4 +1832,8 @@
     <string name="video_pcloud_browse_tab">Browse</string>
     <string name="video_pcloud_is_video_folder">Video folder</string>
     <string name="video_pcloud_empty_folder">No folders or videos here</string>
+    <string name="phone_backup_title">Back up the music on this phone to pCloud (Music folder, on Wi-Fi)</string>
+    <string name="phone_backup_running">Sending %1$s, %2$d left</string>
+    <string name="phone_backup_waiting">%1$d in pCloud, %2$d waiting for Wi-Fi</string>
+    <string name="phone_backup_idle">All synced: %1$d songs in pCloud</string>
 </resources>

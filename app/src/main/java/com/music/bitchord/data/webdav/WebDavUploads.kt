@@ -78,7 +78,14 @@ object WebDavUploads {
      * [folder]: BitChord Audio — a path under the library ("Artist/Album"), made on the
      * server when missing; the files go there instead of the top.
      */
-    suspend fun upload(context: Context, songs: List<Song>, folder: List<String> = emptyList(), base: String? = null): Summary = withContext(Dispatchers.IO) {
+    suspend fun upload(
+        context: Context,
+        songs: List<Song>,
+        folder: List<String> = emptyList(),
+        base: String? = null,
+        /** BitChord Audio: a clash answered this way without asking (the background sync). */
+        unattended: Choice? = null,
+    ): Summary = withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
         val url = com.music.bitchord.data.settings.AppSettings.webdavUrl.value
         val username = com.music.bitchord.data.settings.AppSettings.webdavUsername.value
@@ -96,7 +103,7 @@ object WebDavUploads {
         var uploaded = 0
         var skipped = 0
         var failed = 0
-        var standing: Resolution? = null
+        var standing: Resolution? = unattended?.let { Resolution(it, applyToAll = true) }
         // Names claimed by this batch, so two locals with the same title
         // don't both aim at one target.
         val taken = HashSet<String>()
