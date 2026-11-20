@@ -264,12 +264,9 @@ object AudioCheck {
      */
     /** Listening now, outside the schedule's hours and Wi-Fi (still on Wi-Fi), until this pass ends. */
     @Volatile private var forced = false
-    /** "Listen now" holds for a short while only — then the schedule rules again. */
-    @Volatile private var forcedUntil = 0L
 
     fun runNow() {
         forced = true
-        forcedUntil = System.currentTimeMillis() + 20 * 60_000L
         prefs?.edit()?.putBoolean("paused", false)?.apply()
         _progress.value = _progress.value.copy(paused = false)
         start(now = true)
@@ -299,10 +296,6 @@ object AudioCheck {
             TrackLog.d(TAG, "audio check: ${pairs.size} links to listen to")
             for ((i, p) in pairs.withIndex()) {
                 while (true) {
-                    if (forced && System.currentTimeMillis() > forcedUntil) {
-                        forced = false
-                        TrackLog.d(TAG, "audio check: 'listen now' time is over; back to the schedule")
-                    }
                     val w = waitingFor(context, force = forced)
                     _progress.value = _progress.value.copy(waiting = w, current = if (w == null) _progress.value.current else null)
                     if (w == null) break
@@ -327,8 +320,7 @@ object AudioCheck {
                 save()
                 refreshCounts()
                 _progress.value = _progress.value.copy(done = i + 1)
-                // Gentle on battery and heat when not plugged in.
-                delay(if (charging(context)) 2_000 else 20_000)
+                delay(2_000)
             }
             save()
             val last = System.currentTimeMillis()
