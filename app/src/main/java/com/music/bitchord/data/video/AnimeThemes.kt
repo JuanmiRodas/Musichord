@@ -76,7 +76,7 @@ object AnimeThemes {
               slug
               anime { slug title { romaji } images { nodes { link facet } } }
               song { title { romaji native } performances { as alias artist { name { main native } } } }
-              animethemeentries { version videos { nodes { basename resolution nc audio { basename } } } }
+              animethemeentries { version videos { nodes { basename link resolution nc audio { basename link } } } }
             }
           }
         }
@@ -141,8 +141,12 @@ object AnimeThemes {
                 .flatMap { it.nodes("videos") }
             val best = videos.maxWithOrNull(compareBy<JSONObject>({ it.optInt("resolution") }, { if (it.optBoolean("nc")) 1 else 0 })) ?: continue
             val basename = best.optString("basename").takeIf { it.isNotBlank() && it != "null" } ?: continue
-            val audio = best.optJSONObject("audio")?.optString("basename")?.takeIf { it.isNotBlank() && it != "null" }
-                ?: (basename.substringBeforeLast('.') + ".ogg")
+            // The addresses it gives, else the usual ones built from the file names.
+            val videoLink = best.optString("link").takeIf { it.startsWith("http") } ?: "https://v.animethemes.moe/$basename"
+            val audioJson = best.optJSONObject("audio")
+            val audioLink = audioJson?.optString("link")?.takeIf { it.startsWith("http") }
+                ?: "https://a.animethemes.moe/" + (audioJson?.optString("basename")?.takeIf { it.isNotBlank() && it != "null" }
+                    ?: (basename.substringBeforeLast('.') + ".ogg"))
             out += Theme(
                 anime = anime?.optJSONObject("title")?.optString("romaji")?.takeIf { it.isNotBlank() } ?: anime?.optString("slug").orEmpty(),
                 slug = t.optString("slug").takeIf { it.isNotBlank() && it != "null" }
@@ -150,8 +154,8 @@ object AnimeThemes {
                 title = title,
                 titleNative = song.optJSONObject("title")?.optString("native")?.takeIf { it.isNotBlank() && it != "null" },
                 artists = artists,
-                video = "https://v.animethemes.moe/$basename",
-                audio = "https://a.animethemes.moe/$audio",
+                video = videoLink,
+                audio = audioLink,
                 resolution = best.optInt("resolution"),
                 cover = cover,
             )

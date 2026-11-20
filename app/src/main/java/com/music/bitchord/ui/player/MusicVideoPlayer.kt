@@ -93,6 +93,7 @@ object MusicVideoEngine {
 
     /** Bounded ranges, for the same reason as the audio — see [ChunkedDataSource]. */
     private const val CHUNK_BYTES = 1L * 1024 * 1024
+    private val fileRetries = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** A googlevideo URL lives about six hours; a resolved stream is reused well inside that. */
     private const val STREAM_TTL_MS = 60 * 60 * 1000L
@@ -280,8 +281,21 @@ object MusicVideoEngine {
 
         override fun onPlayerError(error: PlaybackException) {
             val id = loadedId ?: return
-            TrackLog.w(TAG, "video: playback failed at ${loadedCap}p (${error.errorCodeName})", about = id)
+            val status = (error.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+            TrackLog.w(TAG, "video: playback failed at ${loadedCap}p (${error.errorCodeName}${status?.let { ", HTTP $it" } ?: ""})", about = id)
             streams.remove(id)
+            // BitChord Audio: a file elsewhere (AnimeThemes, pCloud) turned away for now (too
+            // many requests, a busy server): asked again, twice, after a pause.
+            if (!com.music.bitchord.data.LocalLikes.isYouTubeId(id) && (status == null || status == 429 || status >= 500)) {
+                val tries = fileRetries.merge(id, 1, Int::plus) ?: 1
+                if (tries <= 2) {
+                    scope.launch {
+                        delay(if (tries == 1) 3_000L else 10_000L)
+                        if (loadedId == id) reload()
+                    }
+                    return
+                }
+            }
             // googlevideo turned this client's URL away: the next client in
             // InnerTubeX's catalog gets a turn, as the audio's probe does.
             val profile = loadedProfile
@@ -748,8 +762,10 @@ object MusicVideoEngine {
             val sound = com.music.bitchord.data.video.AnimeThemes.audioOf(ref.id)
             loadJob = scope.launch {
                 // Its sound alone is a small Ogg: fetched whole for the sync; else read off the WebM.
-                if (sound != null) loadFile(video, videoId, emptyMap(), sound, emptyMap(), ranged = false)
-                else loadFile(video, videoId, emptyMap(), video, emptyMap(), ranged = true)
+                // One connection, not 1 MB pieces: AnimeThemes' server turns away a burst of
+                // requests (the pieces were each one).
+                if (sound != null) loadFile(video, videoId, emptyMap(), sound, emptyMap(), ranged = false, chunked = false)
+                else loadFile(video, videoId, emptyMap(), video, emptyMap(), ranged = true, chunked = false)
             }
             return
         }
@@ -891,10 +907,15 @@ object MusicVideoEngine {
      * BitChord Audio: a video file of yours in pCloud, streamed by ranges with your login,
      * and rebuilt to the song from its own sound (see [VideoAligner.rebuild]).
      */
-    private fun loadFile(url: String, key: String, headers: Map<String, String>, soundUrl: String, soundHeaders: Map<String, String>, ranged: Boolean) {
+    private fun loadFile(
+        url: String, key: String, headers: Map<String, String>, soundUrl: String, soundHeaders: Map<String, String>,
+        ranged: Boolean, chunked: Boolean = true,
+    ) {
         val exo = player ?: return
-        val upstream = OkHttpDataSource.Factory(Http.client).setDefaultRequestProperties(headers)
-        val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
+        val upstream = OkHttpDataSource.Factory(Http.client).setDefaultRequestProperties(
+            headers + ("User-Agent" to "BitChordAudio/1.0 (Android music player)"),
+        )
+        val source = ProgressiveMediaSource.Factory(if (chunked) ChunkedDataSource.Factory(upstream, CHUNK_BYTES) else upstream)
             .createMediaSource(MediaItem.fromUri(url))
         // Its own sound is decoded only when asked for (the "original audio" switch).
         val sound = com.music.bitchord.data.video.VideoMode.originalAudio.value
