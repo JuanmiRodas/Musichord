@@ -1818,4 +1818,13 @@
     <string name="convert_song_none">Not on YouTube Music or in your library: pick a version from other sources</string>
     <string name="convert_restore_failed">Could not move the like back to the video</string>
     <string name="convert_restored">Back to the video “%1$s”</string>
+    <string name="video_pcloud_no_folders">Choose the pCloud folders to look for videos in</string>
+    <string name="video_pcloud_folders">Folders</string>
+    <string name="video_pcloud_search_hint">Search your pCloud videos</string>
+    <string name="video_pcloud_search_go">Search pCloud</string>
+    <string name="video_pcloud_folders_title">Video folders in pCloud</string>
+    <string name="video_pcloud_remove">Remove</string>
+    <string name="video_pcloud_up">Up</string>
+    <string name="video_pcloud_add_here">Use this folder</string>
+    <string name="video_pcloud_save">Save</string>
 </resources>

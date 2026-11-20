@@ -189,6 +189,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         com.music.bitchord.data.NoRecommend.init(filesDir)
         com.music.bitchord.data.sources.SongOrigins.init(this)
         com.music.bitchord.data.video.VideoMode.init(this)
+        com.music.bitchord.data.video.PcloudVideos.init(this)
         com.music.bitchord.playback.smart.VideoAligner.init(this)
         com.music.bitchord.data.CloudBackup.init(this)
         // Lets the lyrics sources match a romaji name against a Japanese one.

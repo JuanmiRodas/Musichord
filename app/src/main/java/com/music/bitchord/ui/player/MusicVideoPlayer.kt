@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.viewinterop.AndroidView
@@ -326,6 +327,7 @@ object MusicVideoEngine {
         surfaces += Surface(view, priority)
         val app = view.context.applicationContext
         appContext = app
+        com.music.bitchord.data.video.VideoMode.onAheadReady = { ref -> scope.launch { prewarm(ref) } }
         if (prefs == null) {
             prefs = app.getSharedPreferences("music_video", Context.MODE_PRIVATE).also { stored ->
                 val held = stored.getInt(KEY_QUALITY, 0).takeIf { it > 0 }
@@ -436,6 +438,15 @@ object MusicVideoEngine {
      * BitChord Audio: where the picture should be for the audio at [audioMs]:
      * through YouTube's own song→video time map when video mode has one.
      */
+    /** BitChord Audio: the measured (or rebuilt) timeline of the video shown, if any. */
+    private fun currentTimeline(): com.music.bitchord.playback.smart.VideoAligner.Timeline? {
+        val ref = loadedRef ?: return null
+        val forId = loadedFor ?: return null
+        if (ref.key == forId) return null
+        if (com.music.bitchord.data.video.VideoMode.timeMap(forId, ref) != null) return null
+        return com.music.bitchord.playback.smart.VideoAligner.timeline(forId, ref.key)
+    }
+
     private fun videoPosition(audioMs: Long): Long {
         val ref = loadedRef ?: return audioMs
         val forId = loadedFor ?: return audioMs
@@ -555,6 +566,40 @@ object MusicVideoEngine {
     }
 
     private val _dip = MutableStateFlow(false)
+
+    /**
+     * BitChord Audio: a jump of the picture blended rather than cut — the frame on screen
+     * held over the video while it seeks, then faded out over the new place.
+     */
+    class Blend(val frame: android.graphics.Bitmap, val fading: Boolean, val id: Long)
+    private val _blend = MutableStateFlow<Blend?>(null)
+    val blend: StateFlow<Blend?> = _blend.asStateFlow()
+    private var blendIds = 0L
+
+    /** Seeks [exo] to [targetMs] behind a snapshot of the frame showing; false when there is none. */
+    private fun blendTo(exo: ExoPlayer, targetMs: Long): Boolean {
+        val view = top() ?: return false
+        if (_shownVideoId.value == null || view.width <= 0) return false
+        val frame = runCatching { view.getBitmap((view.width / 2).coerceAtLeast(1), (view.height / 2).coerceAtLeast(1)) }.getOrNull()
+            ?: return false
+        val id = ++blendIds
+        _blend.value = Blend(frame, fading = false, id = id)
+        seek(exo, targetMs)
+        scope.launch {
+            // Faded out once the new place is showing (or after a moment regardless).
+            val until = System.currentTimeMillis() + 1_500L
+            while (System.currentTimeMillis() < until && exo.playbackState != Player.STATE_READY) delay(30)
+            delay(120)
+            if (_blend.value?.id != id) return@launch
+            _blend.value = Blend(frame, fading = true, id = id)
+            delay(700)
+            if (_blend.value?.id == id) _blend.value = null
+        }
+        return true
+    }
+
+    /** Where the audio was at the last sync: a rebuilt video's jumps are taken as they're crossed. */
+    private var lastAudioAt = -1L
 
     /**
      * BitChord Audio: the video ran out before the song — a shorter cut. The
@@ -681,6 +726,10 @@ object MusicVideoEngine {
         loadedCap = cap
         if (ref.site == com.music.bitchord.data.video.VideoRef.Site.BILIBILI) {
             loadJob = scope.launch { loadBilibili(ref.id, videoId) }
+            return
+        }
+        if (ref.site == com.music.bitchord.data.video.VideoRef.Site.PCLOUD) {
+            loadJob = scope.launch { loadPcloud(ref.id, videoId) }
             return
         }
         loadJob = scope.launch {
@@ -817,6 +866,51 @@ object MusicVideoEngine {
         }
     }
 
+    /**
+     * BitChord Audio: a video file of yours in pCloud, streamed by ranges with your login,
+     * and rebuilt to the song from its own sound (see [VideoAligner.rebuild]).
+     */
+    private fun loadPcloud(url: String, key: String) {
+        val exo = player ?: return
+        val headers = com.music.bitchord.data.video.PcloudVideos.headers()
+        val upstream = OkHttpDataSource.Factory(Http.client).setDefaultRequestProperties(headers)
+        val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
+            .createMediaSource(MediaItem.fromUri(url))
+        // Its own sound is decoded only when asked for (the "original audio" switch).
+        val sound = com.music.bitchord.data.video.VideoMode.originalAudio.value
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, !sound)
+            .build()
+        _quality.value = _quality.value.copy(heights = emptyList(), activeHeight = null)
+        loadedProfile = null
+        val forId = loadedFor
+        val ctx = appContext
+        if (forId != null && ctx != null) {
+            controller?.currentMediaItem?.toSong()?.takeIf { it.videoId == forId }?.let { song ->
+                pendingAlign = {
+                    com.music.bitchord.playback.smart.VideoAligner.request(ctx, song, key, url, headers, ranged = true, songSound = {
+                        val yt = com.music.bitchord.data.video.VideoMode.youTubeSongOf(song) ?: return@request null
+                        val got = withContext(Dispatchers.IO) { InnerTubeXResolver.extract(yt, 64) } ?: return@request null
+                        got.url to got.headers
+                    })
+                }
+                alignJob?.cancel()
+                alignJob = scope.launch {
+                    delay(5_000)
+                    startAlign()
+                }
+            }
+        }
+        val start = videoPosition(controller?.currentPosition?.coerceAtLeast(0L) ?: 0L)
+        exo.setMediaSource(source, start + seekLeadMs)
+        exo.playWhenReady = controller?.isPlaying == true
+        exo.prepare()
+        preparedAt = System.currentTimeMillis()
+        lastSeekAt = System.currentTimeMillis()
+        seekStartedAt = lastSeekAt
+        startSync()
+    }
+
     /** BitChord Audio: a bilibili video's MP4, the same way. */
     private suspend fun loadBilibili(bvid: String, key: String) {
         val stream = runCatching { com.music.bitchord.data.video.Bilibili.stream(bvid) }.getOrNull()
@@ -846,6 +940,28 @@ object MusicVideoEngine {
         startSync()
     }
 
+    /**
+     * BitChord Audio: the next song's YouTube video resolved while this one plays (one small
+     * request, not on a metered connection or in battery saver), so its picture starts at once.
+     */
+    fun prewarm(ref: com.music.bitchord.data.video.VideoRef) {
+        if (ref.site != com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) return
+        if (AppSettings.meteredConnection.value == true) return
+        val ctx = appContext ?: return
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        if (pm?.isPowerSaveMode == true) return
+        val id = ref.key
+        val cap = capFor(id)
+        if (cachedStream(id, cap) != null || id in noPicture) return
+        scope.launch {
+            val stream = runCatching { kotlinx.coroutines.withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { resolve(id, cap) } }.getOrNull() ?: return@launch
+            if (cachedStream(id, cap) == null) {
+                streams[id] = Triple(stream, cap, System.currentTimeMillis())
+                TrackLog.d(TAG, "video: next song's picture ready (${stream.height}p)", about = id)
+            }
+        }
+    }
+
     private fun cachedStream(videoId: String, cap: Int): InnerTubeXResolver.VideoStream? {
         val (stream, askedFor, at) = streams[videoId] ?: return null
         if (askedFor != cap || System.currentTimeMillis() - at > STREAM_TTL_MS) {
@@ -871,6 +987,8 @@ object MusicVideoEngine {
         looksJob?.cancel()
         com.music.bitchord.data.video.VideoMode.showLooks(null)
         _dip.value = false
+        _blend.value = null
+        lastAudioAt = -1L
         applySound()
         _frameOn.value = null
         _quality.value = _quality.value.copy(heights = emptyList(), activeHeight = null)
@@ -920,6 +1038,17 @@ object MusicVideoEngine {
             return
         }
         exo.playWhenReady = true
+        // BitChord Audio: a rebuilt video jumps here (a chorus found again, a loop back):
+        // taken on time, blended, rather than waited for as drift.
+        val nowAudio = audio.currentPosition
+        val crossed = lastAudioAt >= 0 && lastAudioAt < nowAudio && nowAudio - lastAudioAt < 3_000L &&
+            currentTimeline()?.cutBetween(lastAudioAt, nowAudio + seekLeadMs) == true
+        lastAudioAt = nowAudio
+        if (crossed && now - lastSeekAt > 400L) {
+            val target = videoPosition(nowAudio + seekLeadMs)
+            if (!blendTo(exo, target)) seek(exo, target)
+            return
+        }
         if (exo.playbackState == Player.STATE_BUFFERING) return
         val drift = exo.currentPosition - audioPos
         // BitChord Audio: a video that isn't the playing recording is held
@@ -933,7 +1062,11 @@ object MusicVideoEngine {
         if (abs(drift) > seekAt) {
             if (now - lastSeekAt > cooldown) {
                 // A jump of seconds (the sync arriving, a scrub): faded through.
-                if (abs(drift) > 2_000L && _shownVideoId.value != null) {
+                if (abs(drift) > 2_000L && _shownVideoId.value != null &&
+                    blendTo(exo, videoPosition(audio.currentPosition) + seekLeadMs)
+                ) {
+                    // Blended through.
+                } else if (abs(drift) > 2_000L && _shownVideoId.value != null) {
                     _dip.value = true
                     val target = audioPos + seekLeadMs
                     lastSeekAt = now
@@ -1049,6 +1182,29 @@ internal fun AndroidMusicVideo(
         label = "musicVideoAlpha",
     )
 
+    // The picture at its own shape: letterboxed into the bounds, or
+    // overflowing them and cropped by the clip below.
+    val placed = Modifier.layout { measurable, constraints ->
+        val width = constraints.maxWidth
+        val height = if (constraints.hasBoundedHeight) {
+            constraints.maxHeight
+        } else {
+            (width / aspect).roundToInt()
+        }
+        val boundsAspect = width.toFloat() / height.coerceAtLeast(1)
+        val wider = boundsAspect > aspect
+        val (w, h) = if (wider == fit) {
+            (height * aspect).roundToInt() to height
+        } else {
+            width to (width / aspect).roundToInt()
+        }
+        val placeable = measurable.measure(Constraints.fixed(w.coerceAtLeast(1), h.coerceAtLeast(1)))
+        layout(width, height) {
+            placeable.place((width - w) / 2, (height - h) / 2)
+        }
+    }
+    val blend by MusicVideoEngine.blend.collectAsStateWithLifecycle()
+
     Box(modifier.clipToBounds(), contentAlignment = Alignment.Center) {
         AndroidView(
             factory = { context ->
@@ -1066,27 +1222,25 @@ internal fun AndroidMusicVideo(
             },
             update = { it.alpha = alpha },
             onRelease = { if (view === it) view = null },
-            // The picture at its own shape: letterboxed into the bounds, or
-            // overflowing them and cropped by the clip above.
-            modifier = Modifier.layout { measurable, constraints ->
-                val width = constraints.maxWidth
-                val height = if (constraints.hasBoundedHeight) {
-                    constraints.maxHeight
-                } else {
-                    (width / aspect).roundToInt()
-                }
-                val boundsAspect = width.toFloat() / height.coerceAtLeast(1)
-                val wider = boundsAspect > aspect
-                val (w, h) = if (wider == fit) {
-                    (height * aspect).roundToInt() to height
-                } else {
-                    width to (width / aspect).roundToInt()
-                }
-                val placeable = measurable.measure(Constraints.fixed(w.coerceAtLeast(1), h.coerceAtLeast(1)))
-                layout(width, height) {
-                    placeable.place((width - w) / 2, (height - h) / 2)
-                }
-            },
+            modifier = placed,
         )
+        // BitChord Audio: a jump in the picture, blended: the last frame held over it, fading out.
+        val b = blend
+        if (b != null && rendered) {
+            androidx.compose.runtime.key(b.id) {
+                val fade = remember { androidx.compose.animation.core.Animatable(1f) }
+                LaunchedEffect(b.fading) {
+                    if (b.fading) fade.animateTo(0f, tween(durationMillis = 550))
+                }
+                val image = remember(b.frame) { b.frame.asImageBitmap() }
+                androidx.compose.foundation.Image(
+                    bitmap = image,
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.FillBounds,
+                    alpha = fade.value * alpha,
+                    modifier = placed,
+                )
+            }
+        }
     }
 }

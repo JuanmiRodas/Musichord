@@ -1906,4 +1906,13 @@
     <string name="convert_song_none">No está en YouTube Music ni en tu biblioteca: elige una versión de otras fuentes</string>
     <string name="convert_restore_failed">No he podido devolver el me gusta al vídeo</string>
     <string name="convert_restored">Vuelve a ser el vídeo «%1$s»</string>
+    <string name="video_pcloud_no_folders">Elige las carpetas de pCloud donde buscar vídeos</string>
+    <string name="video_pcloud_folders">Carpetas</string>
+    <string name="video_pcloud_search_hint">Buscar en tus vídeos de pCloud</string>
+    <string name="video_pcloud_search_go">Buscar en pCloud</string>
+    <string name="video_pcloud_folders_title">Carpetas de vídeos en pCloud</string>
+    <string name="video_pcloud_remove">Quitar</string>
+    <string name="video_pcloud_up">Subir</string>
+    <string name="video_pcloud_add_here">Usar esta carpeta</string>
+    <string name="video_pcloud_save">Guardar</string>
 </resources>

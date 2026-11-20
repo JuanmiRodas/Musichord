@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.Normalizer
@@ -28,10 +30,15 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** A video to show for a song: on YouTube, or on bilibili. */
 data class VideoRef(val site: Site, val id: String) {
-    enum class Site { YOUTUBE, BILIBILI }
+    enum class Site { YOUTUBE, BILIBILI, PCLOUD }
 
     /** What the video engine files it under: a YouTube id as itself, so its caches carry over. */
-    val key: String get() = if (site == Site.YOUTUBE) id else "bili:$id"
+    val key: String get() = when (site) {
+        Site.YOUTUBE -> id
+        Site.BILIBILI -> "bili:$id"
+        // BitChord Audio: a video file of yours in pCloud, by its address.
+        Site.PCLOUD -> "pcloud:${id.hashCode().toUInt()}:${PcloudVideos.nameOf(id).take(40)}"
+    }
 
     fun encode(): String = "${site.name}:$id"
 
@@ -226,6 +233,9 @@ object VideoMode {
         return v
     }
 
+    /** BitChord Audio: told when the next song's video is known, to have its stream ready. */
+    @Volatile var onAheadReady: ((VideoRef) -> Unit)? = null
+
     fun openSearch(song: Song) { _searchFor.value = song }
     fun closeSearch() { _searchFor.value = null }
 
@@ -298,6 +308,8 @@ object VideoMode {
                     if (sayIfMissing) say(R.string.video_mode_none)
                 } else {
                     TrackLog.d(TAG, "video for '${song.title}': ${ref.encode()}")
+                    // BitChord Audio: the next song's picture readied too, so it starts at once.
+                    if (ahead) runCatching { onAheadReady?.invoke(ref) }
                     if (ref.site == VideoRef.Site.YOUTUBE) fetchNonMusic(ref.id)
                     _ready.update { (it + idsOf(song).associateWith { ref }).entries.toList().takeLast(64).associate { e -> e.key to e.value } }
                 }
@@ -316,6 +328,16 @@ object VideoMode {
 
     private suspend fun resolve(song: Song): VideoRef? {
         val linked = linked(song)?.takeUnless { it.key in unplayable || isWrong(song, it) }
+        // BitChord Audio: one of your own videos in pCloud named like the song (from the
+        // folders already looked through — no request), before anything on YouTube.
+        if (linked == null) {
+            PcloudVideos.bestFor(song)?.let { VideoRef(VideoRef.Site.PCLOUD, it.url) }
+                ?.takeUnless { it.key in unplayable || isWrong(song, it) }
+                ?.let {
+                    TrackLog.d(TAG, "video for '${song.title}': your pCloud video '${PcloudVideos.nameOf(it.id)}'")
+                    return it
+                }
+        }
         if (song.isVideo && LocalLikes.isYouTubeId(song.videoId) && song.videoId !in unplayable) {
             return VideoRef(VideoRef.Site.YOUTUBE, song.videoId)
         }
@@ -324,10 +346,14 @@ object VideoMode {
         val base = SongOrigins.originOf(song.videoId)?.takeIf { LocalLikes.isYouTubeId(it.videoId) }
             ?: song.takeIf { LocalLikes.isYouTubeId(it.videoId) }
         val search = base ?: song
-        val paired = if (linked == null) {
-            runCatching { YtMusicRepository.resolveVideo(search) }.getOrNull()
-                ?.takeUnless { TrackMatcher.isKaraokeLike(it.title, it.albumName) }
-        } else null
+        // BitChord Audio: YouTube Music's pairing and the searches asked at once, not one
+        // after another — the first video of a song used to wait for four answers in a row.
+        val pairedAsk = scope.async(Dispatchers.IO) {
+            if (linked == null) {
+                runCatching { YtMusicRepository.resolveVideo(search) }.getOrNull()
+                    ?.takeUnless { TrackMatcher.isKaraokeLike(it.title, it.albumName) }
+            } else null
+        }
         // Every likely video, best first: the one you linked or YouTube pairs,
         // then the search's matches — so a video YouTube won't play here
         // gives way to the next rather than to nothing.
@@ -345,12 +371,15 @@ object VideoMode {
                     names.drop(1).take(2).map { "$it $artistName" } +
                     listOfNotNull(latinTitle?.let { "$it ${latinArtist ?: artistName}" })
                 ).distinct()
-            val results = queries.flatMap { q -> runCatching { youTube(q) }.getOrDefault(emptyList()) }.distinctBy { it.videoId }
+            val results = kotlinx.coroutines.coroutineScope {
+                queries.map { q -> async { runCatching { youTube(q) }.getOrDefault(emptyList()) } }.awaitAll()
+            }.flatten().distinctBy { it.videoId }
             val ranked = TrackMatcher.ranked(results, TrackMatcher.targetOf(song))
             val cores = names.map(::norm).filter { it.length >= 2 }
             val carried = results.filter { r -> val t = norm(r.title); cores.any { it in t } }
             (ranked + carried).distinctBy { it.videoId }
         }.getOrDefault(emptyList())
+        val paired = pairedAsk.await()
         // BitChord Audio: the official video first — "(Official Video)", a
         // VEVO or the artist's own channel — over a lyric video, a visualizer
         // or an upload that only happens to run the song's exact length.

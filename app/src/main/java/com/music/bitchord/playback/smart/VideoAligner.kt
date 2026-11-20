@@ -49,24 +49,61 @@ object VideoAligner {
     /** Mean agreement (centred-chroma cosine) along the path below which it isn't the same music. */
     private const val MIN_AGREEMENT = 0.28
 
-    /** song ms → video ms, sampled every [HOP_SEC], and linear in between. */
-    class Timeline(internal val songMs: LongArray, internal val videoMs: LongArray) {
+    /**
+     * song ms → video ms, sampled every [HOP_SEC], and linear in between.
+     *
+     * BitChord Audio: a rebuilt video ([rebuild]) also has [cutBefore] — the samples where
+     * the picture jumps to another part of the video (a chorus found again, a loop back)
+     * rather than running on — and [loopMs], the video's length, which every position
+     * wraps around, so the picture never runs out before the song.
+     */
+    class Timeline(
+        internal val songMs: LongArray,
+        internal val videoMs: LongArray,
+        internal val cutBefore: BooleanArray? = null,
+        internal val loopMs: Long = 0L,
+    ) {
         var sections = 0
         var cuts = 0
-        fun describe() = "$sections section(s), $cuts cut(s), starts at +${if (songMs.isEmpty()) 0 else (videoMs[0] - songMs[0]) / 1000.0}s"
+        fun describe() = "$sections section(s), $cuts cut(s), starts at +${if (songMs.isEmpty()) 0 else (videoMs[0] - songMs[0]) / 1000.0}s" +
+            if (loopMs > 0) " (rebuilt, loops every ${loopMs / 1000}s)" else ""
+
+        private fun wrap(ms: Long): Long = if (loopMs > 0) Math.floorMod(ms, loopMs) else ms
+
         fun map(audioMs: Long): Long {
             if (songMs.isEmpty()) return audioMs
-            if (audioMs <= songMs[0]) return videoMs[0] - (songMs[0] - audioMs)
+            if (audioMs <= songMs[0]) return wrap(videoMs[0] - (songMs[0] - audioMs))
             val last = songMs.size - 1
-            if (audioMs >= songMs[last]) return videoMs[last] + (audioMs - songMs[last])
+            if (audioMs >= songMs[last]) return wrap(videoMs[last] + (audioMs - songMs[last]))
+            val lo = indexAt(audioMs)
+            val hi = lo + 1
+            // A jump: the picture runs on from the earlier sample until it.
+            if (cutBefore?.get(hi) == true) return wrap(videoMs[lo] + (audioMs - songMs[lo]))
+            val f = (audioMs - songMs[lo]).toDouble() / (songMs[hi] - songMs[lo]).coerceAtLeast(1)
+            return wrap((videoMs[lo] + f * (videoMs[hi] - videoMs[lo])).toLong())
+        }
+
+        /** The last sample at or before [audioMs]. */
+        private fun indexAt(audioMs: Long): Int {
             var lo = 0
-            var hi = last
+            var hi = songMs.size - 1
             while (hi - lo > 1) {
                 val mid = (lo + hi) / 2
                 if (songMs[mid] <= audioMs) lo = mid else hi = mid
             }
-            val f = (audioMs - songMs[lo]).toDouble() / (songMs[hi] - songMs[lo]).coerceAtLeast(1)
-            return (videoMs[lo] + f * (videoMs[hi] - videoMs[lo])).toLong()
+            return lo
+        }
+
+        /** Whether the picture jumps somewhere between song moments [fromMs] (excluded) and [toMs]. */
+        fun cutBetween(fromMs: Long, toMs: Long): Boolean {
+            val cuts = cutBefore ?: return false
+            if (toMs <= fromMs || songMs.isEmpty()) return false
+            var k = indexAt(fromMs) + 1
+            while (k < songMs.size && songMs[k] <= toMs) {
+                if (cuts[k] && songMs[k] > fromMs) return true
+                k++
+            }
+            return false
         }
     }
 
@@ -81,7 +118,8 @@ object VideoAligner {
 
     // ── Kept: on the device, and (see CloudBackup) in pCloud ──
 
-    const val FILE = "video-sync-v2.json"
+    // v3: videos rebuilt to the song (repeats, loops) — the v2 straight lines measured again.
+    const val FILE = "video-sync-v3.json"
     @Volatile private var store: File? = null
 
     /** Reads the syncs found before; each is measured once, ever. */
@@ -105,7 +143,9 @@ object VideoAligner {
                 val a = e.getJSONArray("s")
                 val b = e.getJSONArray("v")
                 val n = min(a.length(), b.length())
-                results[k] = Timeline(LongArray(n) { a.getLong(it) }, LongArray(n) { b.getLong(it) })
+                val c = e.optJSONArray("c")
+                val cuts = c?.let { arr -> BooleanArray(n).also { f -> for (i in 0 until arr.length()) arr.optInt(i, -1).takeIf { it in 0 until n }?.let { f[it] = true } } }
+                results[k] = Timeline(LongArray(n) { a.getLong(it) }, LongArray(n) { b.getLong(it) }, cuts, e.optLong("l", 0L))
                 settled += k
             }
         }
@@ -117,6 +157,17 @@ object VideoAligner {
         val f = store ?: return
         val o = org.json.JSONObject()
         results.forEach { (k, t) ->
+            val cuts = t.cutBefore
+            if (cuts != null) {
+                // A rebuild is kept whole: its jumps fall on exact samples.
+                o.put(k, org.json.JSONObject().apply {
+                    put("s", org.json.JSONArray(t.songMs.toList()))
+                    put("v", org.json.JSONArray(t.videoMs.toList()))
+                    put("c", org.json.JSONArray(cuts.indices.filter { cuts[it] }))
+                    put("l", t.loopMs)
+                })
+                return@forEach
+            }
             // Every second is plenty to draw the line through.
             val step = max(1, (1000 / (HOP_SEC * 1000)).toInt())
             val idx = (t.songMs.indices step step).toList()
@@ -141,6 +192,8 @@ object VideoAligner {
         audioUrl: String,
         headers: Map<String, String>,
         songSound: (suspend () -> Pair<String, Map<String, String>>?)? = null,
+        /** The video is a whole file (pCloud): its sound read in place, not fetched first. */
+        ranged: Boolean = false,
     ) {
         val key = "${song.videoId}|$videoKey"
         waiting[key]?.let { if (System.currentTimeMillis() - it < 30_000) return }
@@ -149,7 +202,7 @@ object VideoAligner {
         val app = context.applicationContext
         scope.launch {
             val started = System.currentTimeMillis()
-            val outcome = runCatching { align(app, song, audioUrl, headers, songSound) }
+            val outcome = runCatching { align(app, song, audioUrl, headers, songSound, ranged) }
                 .onFailure { TrackLog.w(TAG, "video sync for '${song.title}' failed: ${it.message}") }
                 .getOrNull()
             when (outcome) {
@@ -180,6 +233,7 @@ object VideoAligner {
         audioUrl: String,
         headers: Map<String, String>,
         songSound: (suspend () -> Pair<String, Map<String, String>>?)?,
+        ranged: Boolean = false,
     ): Outcome {
         val songPcm = VersionAudioAligner.openDataSource(context, song)?.let { source ->
             try {
@@ -209,8 +263,8 @@ object VideoAligner {
         } ?: return Outcome.NoAudio
         val file = File(context.cacheDir, "video-sync-${audioUrl.hashCode().toUInt()}.audio")
         try {
-            if (!download(audioUrl, headers, file)) return Outcome.NoAudio
-            val videoSource = FileSource(file)
+            if (!ranged && !download(audioUrl, headers, file)) return Outcome.NoAudio
+            val videoSource: MediaDataSource = if (ranged) HttpRangeSource(audioUrl, headers) else FileSource(file)
             val videoPcm = try {
                 AudioDecoder.decodeDownsampled(videoSource, 0.0, MAX_SECONDS, RATE)
             } finally {
@@ -226,15 +280,13 @@ object VideoAligner {
             val b = if (shift == 0) b0 else Array(b0.size) { i -> FloatArray(12) { k -> b0[i][(k + shift) % 12] } }
             val songStart = songPcm.second
             val videoStart = videoPcm.second
-            val path = dtw(a, b) ?: return Outcome.Different
-            val agreement = path.mean
-            TrackLog.d(
-                TAG,
-                "video sync for '${song.title}': agreement ${"%.2f".format(agreement)} over ${a.size}×${b.size} frames" +
-                    (if (shift != 0) ", key shifted $shift" else ""),
-            )
-            if (agreement < MIN_AGREEMENT) return Outcome.Different
-            val timeline = timelineOf(path, a.size, songStart, videoStart)
+            // BitChord Audio: the video rebuilt to the song — every part of the song shown
+            // with the part of the video playing the same music (a chorus again, an opening
+            // looped through a longer intro), else a stretch that runs on from it; a video
+            // with nothing in common shows a random stretch of itself, looped.
+            val timeline = rebuild(a, b, songStart, videoStart, song.videoId.hashCode())
+                ?: return Outcome.Different
+            if (shift != 0) TrackLog.d(TAG, "video sync for '${song.title}': key shifted $shift")
             TrackLog.d(TAG, "video sync for '${song.title}': ${timeline.describe()}")
             return Outcome.Aligned(timeline)
         } finally {
@@ -579,4 +631,222 @@ object VideoAligner {
 
     @Volatile private var jumps = 0
 
+    // ── BitChord Audio: the video rebuilt to the song ──
+
+    /** Windowed agreement a stretch needs to count as the same music. */
+    private const val MATCH = 0.5f
+    /** What leaving a stretch costs: a jump needs a few seconds of clear agreement to be worth it. */
+    private const val JUMP_COST = 4f
+    /** Drifting a frame (a slightly different tempo) is cheap: no jump, just a nudge. */
+    private const val DRIFT_COST = 0.25f
+    private const val WINDOW = 6
+
+    /**
+     * For every song frame (every [HOP_SEC]), the video frame to show:
+     *  - where the same music plays in the video — a repeated chorus found again, whichever
+     *    time the video plays it — chosen as one path that stays on a stretch unless another
+     *    clearly agrees better (Viterbi over song→video offsets, with a cost to jump);
+     *  - between such stretches, the video running on from the stretch before (first half)
+     *    and up to the one after (second half), so each synced part is reached in time;
+     *  - before the first one (a longer intro), the video looped back from where it syncs;
+     *  - when nothing agrees at all, a random stretch of the video, looped.
+     * Positions wrap around the video's length: it never runs out before the song.
+     */
+    internal fun rebuild(a: Array<FloatArray>, b: Array<FloatArray>, songStartSec: Double, videoStartSec: Double, seed: Int): Timeline? {
+        val n = a.size
+        val m = b.size
+        if (n < 2 || m < 2) return null
+        val k = n + m - 1 // offsets d = j - i, from -(n-1) to m-1
+        val none = k
+        if (n.toLong() * (k + 1) > 9_000_000L) return null
+        fun sim(i: Int, j: Int): Float {
+            val x = a[i]
+            val y = b[j]
+            var dot = 0f
+            for (q in 0 until 12) dot += x[q] * y[q]
+            return dot
+        }
+        // Running window sums along each diagonal.
+        val sum = FloatArray(k)
+        val cnt = IntArray(k)
+        fun add(i: Int, sign: Int) {
+            if (i < 0 || i >= n) return
+            for (di in 0 until k) {
+                val j = i + di - (n - 1)
+                if (j < 0 || j >= m) continue
+                sum[di] += sign * sim(i, j)
+                cnt[di] += sign
+            }
+        }
+        for (i in 0..WINDOW) add(i, 1)
+        val back = ByteArray(n * (k + 1))
+        val bestFrom = IntArray(n)
+        var prev = FloatArray(k + 1)
+        var cur = FloatArray(k + 1)
+        for (i in 0 until n) {
+            if (i > 0) {
+                add(i + WINDOW, 1)
+                add(i - WINDOW - 1, -1)
+            }
+            var bestIdx = none
+            if (i > 0) for (x in 0..k) if (prev[x] > prev[bestIdx]) bestIdx = x
+            bestFrom[i] = bestIdx
+            val bestPrev = if (i > 0) prev[bestIdx] else 0f
+            val row = i * (k + 1)
+            for (di in 0 until k) {
+                val j = i + di - (n - 1)
+                if (j < 0 || j >= m || cnt[di] <= 0) {
+                    cur[di] = Float.NEGATIVE_INFINITY
+                    continue
+                }
+                val e = sum[di] / cnt[di] - MATCH
+                if (i == 0) {
+                    cur[di] = e - 1f
+                    continue
+                }
+                var best = prev[di]
+                var code: Byte = 0
+                if (di > 0 && prev[di - 1] - DRIFT_COST > best) { best = prev[di - 1] - DRIFT_COST; code = 1 }
+                if (di + 1 < k && prev[di + 1] - DRIFT_COST > best) { best = prev[di + 1] - DRIFT_COST; code = 2 }
+                if (bestPrev - JUMP_COST > best) { best = bestPrev - JUMP_COST; code = 3 }
+                cur[di] = best + e
+                back[row + di] = code
+            }
+            if (i == 0) {
+                cur[none] = 0f
+            } else {
+                var best = prev[none]
+                var code: Byte = 0
+                if (bestPrev - JUMP_COST > best) { best = bestPrev - JUMP_COST; code = 3 }
+                cur[none] = best
+                back[row + none] = code
+            }
+            val t = prev; prev = cur; cur = t
+        }
+        // Back through the path.
+        val state = IntArray(n)
+        var s = none
+        for (x in 0..k) if (prev[x] > prev[s]) s = x
+        for (i in n - 1 downTo 0) {
+            state[i] = s
+            if (i == 0) break
+            s = when (back[i * (k + 1) + s].toInt()) {
+                1 -> s - 1
+                2 -> s + 1
+                3 -> bestFrom[i]
+                else -> s
+            }
+        }
+        // Stretches too short to trust (under 2 s) don't count as synced.
+        run {
+            var i = 0
+            while (i < n) {
+                if (state[i] == none) { i++; continue }
+                var e = i
+                while (e + 1 < n && state[e + 1] != none && abs(state[e + 1] - state[e]) <= 2) e++
+                if (e - i + 1 < 5) for (q in i..e) state[q] = none
+                i = e + 1
+            }
+        }
+        val matched = state.count { it != none }
+        val frame = IntArray(n)
+        if (matched == 0) {
+            val r = Math.floorMod(seed, m)
+            for (i in 0 until n) frame[i] = i + r
+        } else {
+            var i = 0
+            while (i < n) {
+                if (state[i] != none) {
+                    frame[i] = i + state[i] - (n - 1)
+                    i++
+                    continue
+                }
+                var e = i
+                while (e < n && state[e] == none) e++
+                val left = if (i > 0) state[i - 1] - (n - 1) else null
+                val right = if (e < n) state[e] - (n - 1) else null
+                val mid = (i + e) / 2
+                for (q in i until e) {
+                    frame[q] = q + when {
+                        left == null -> right!!
+                        right == null -> left
+                        q < mid -> left
+                        else -> right
+                    }
+                }
+                i = e
+            }
+        }
+        val hopMs = HOP_SEC * 1000
+        val wrapped = IntArray(n) { Math.floorMod(frame[it], m) }
+        val cuts = BooleanArray(n)
+        var cutCount = 0
+        for (i in 1 until n) {
+            if (abs(wrapped[i] - (wrapped[i - 1] + 1)) > 2) {
+                cuts[i] = true
+                cutCount++
+            }
+        }
+        val songMs = LongArray(n) { ((songStartSec * 1000) + it * hopMs).toLong() }
+        val videoMs = LongArray(n) { ((videoStartSec * 1000) + wrapped[it] * hopMs).toLong() }
+        TrackLog.d(TAG, "video rebuild: ${matched * 100 / n}% of the song synced to the video (${n}×${m} frames)" +
+            if (matched == 0) " — a random stretch, looped" else "")
+        return Timeline(songMs, videoMs, cuts, (m * hopMs).toLong()).also {
+            it.sections = cutCount + 1
+            it.cuts = cutCount
+        }
+    }
+
+    /**
+     * BitChord Audio: a whole file on a server (a pCloud video) read in place, by ranges,
+     * only where the decoder asks — its sound, not every frame of its picture.
+     */
+    private class HttpRangeSource(private val url: String, private val headers: Map<String, String>) : MediaDataSource() {
+        private val block = 256 * 1024
+        private val blocks = object : LinkedHashMap<Long, ByteArray>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 24
+        }
+        private var length = -1L
+
+        private fun fetch(index: Long): ByteArray? {
+            blocks[index]?.let { return it }
+            val from = index * block
+            val req = Request.Builder().url(url)
+                .apply { headers.forEach { (k, v) -> header(k, v) } }
+                .header("Range", "bytes=$from-${from + block - 1}")
+                .build()
+            val bytes = runCatching {
+                Http.client.newCall(req).execute().use { r ->
+                    if (r.code !in 200..299) return@use null
+                    if (length < 0) {
+                        length = r.header("Content-Range")?.substringAfter('/')?.toLongOrNull()
+                            ?: r.body?.contentLength()?.takeIf { r.code == 200 } ?: -1L
+                    }
+                    if (r.code == 200 && from > 0) return@use null
+                    r.body?.bytes()
+                }
+            }.getOrNull() ?: return null
+            blocks[index] = bytes
+            return bytes
+        }
+
+        override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+            if (size == 0) return 0
+            if (length >= 0 && position >= length) return -1
+            val index = position / block
+            val data = fetch(index) ?: return -1
+            val inBlock = (position - index * block).toInt()
+            if (inBlock >= data.size) return -1
+            val n = min(size, data.size - inBlock)
+            System.arraycopy(data, inBlock, buffer, offset, n)
+            return n
+        }
+
+        override fun getSize(): Long {
+            if (length < 0) fetch(0)
+            return length
+        }
+
+        override fun close() { blocks.clear() }
+    }
 }

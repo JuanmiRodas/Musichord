@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +43,8 @@ import coil3.compose.AsyncImage
 import com.music.bitchord.R
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.video.Bilibili
+import com.music.bitchord.data.video.PcloudVideos
+import androidx.compose.runtime.collectAsState
 import com.music.bitchord.data.video.VideoMode
 import com.music.bitchord.data.video.VideoRef
 import kotlinx.coroutines.launch
@@ -73,6 +77,12 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
     var youtube by remember { mutableStateOf<List<VideoHit>?>(null) }
     var bilibili by remember { mutableStateOf<List<VideoHit>?>(null) }
     var bilibiliAsked by remember { mutableStateOf(false) }
+    // BitChord Audio: your pCloud videos — searched only when asked, in the folders you chose.
+    var pcloudQuery by remember(song.videoId) { mutableStateOf(query) }
+    var pcloudAsked by remember { mutableStateOf<String?>(null) }
+    var pcloud by remember { mutableStateOf<List<PcloudVideos.Video>?>(null) }
+    var choosingFolders by remember { mutableStateOf(false) }
+    val folders by PcloudVideos.folders.collectAsState()
     val current = remember(song.videoId) { VideoMode.linked(song) ?: VideoMode.cached(song.videoId) }
 
     LaunchedEffect(asked) {
@@ -88,6 +98,12 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
         bilibili = runCatching { Bilibili.search(asked) }.getOrDefault(emptyList()).map {
             VideoHit(VideoRef(VideoRef.Site.BILIBILI, it.bvid), it.title, it.author, it.durationText, it.thumbnail)
         }
+    }
+
+    LaunchedEffect(pcloudAsked) {
+        val q = pcloudAsked ?: return@LaunchedEffect
+        pcloud = null
+        pcloud = runCatching { PcloudVideos.search(q) }.getOrDefault(emptyList())
     }
 
     fun pick(hit: VideoHit) {
@@ -122,6 +138,45 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
                     SectionLabel("bilibili")
                     Results(bilibili, current, ::pick)
                 }
+                SectionLabel("pCloud")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (folders.isEmpty()) stringResource(R.string.video_pcloud_no_folders)
+                        else folders.joinToString(" · ") { PcloudVideos.nameOf(it) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { choosingFolders = true }) { Text(stringResource(R.string.video_pcloud_folders)) }
+                }
+                val found = pcloud
+                if (found != null) {
+                    PcloudResults(found, current) { v ->
+                        VideoMode.link(song, VideoRef(VideoRef.Site.PCLOUD, v.url))
+                        onDismiss()
+                    }
+                } else if (pcloudAsked != null) {
+                    Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                    }
+                }
+                OutlinedTextField(
+                    value = pcloudQuery,
+                    onValueChange = { pcloudQuery = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.video_pcloud_search_hint)) },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { if (folders.isNotEmpty()) pcloudAsked = pcloudQuery.trim() }),
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        enabled = folders.isNotEmpty(),
+                        onClick = { pcloudAsked = pcloudQuery.trim() },
+                    ) { Text(stringResource(R.string.video_pcloud_search_go)) }
+                }
             }
         },
         confirmButton = {
@@ -138,6 +193,145 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
         } else {
             null
         },
+    )
+    if (choosingFolders) PcloudVideoFoldersDialog(onDismiss = { choosingFolders = false })
+}
+
+/** Your pCloud videos found, with a frame of each read off the file. */
+@Composable
+private fun PcloudResults(list: List<PcloudVideos.Video>, current: VideoRef?, onPick: (PcloudVideos.Video) -> Unit) {
+    if (list.isEmpty()) {
+        Text(
+            stringResource(R.string.video_mode_search_empty),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    list.take(20).forEach { v ->
+        val chosen = current?.site == VideoRef.Site.PCLOUD && current.id == v.url
+        var thumb by remember(v.url) { mutableStateOf<java.io.File?>(null) }
+        LaunchedEffect(v.url) { thumb = PcloudVideos.thumbnail(v) }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onPick(v) }
+                .padding(vertical = 6.dp),
+        ) {
+            AsyncImage(
+                model = thumb,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .width(96.dp)
+                    .heightIn(min = 54.dp, max = 54.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    v.name.substringBeforeLast('.'),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    listOfNotNull(v.folder, v.size?.let { "${it / (1024 * 1024)} MB" }).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * BitChord Audio: the folders of your pCloud looked through for videos — browsed from the
+ * top of the drive, each added with one tap; only these are ever listed.
+ */
+@Composable
+fun PcloudVideoFoldersDialog(onDismiss: () -> Unit) {
+    val chosen by PcloudVideos.folders.collectAsState()
+    var picked by remember { mutableStateOf(chosen) }
+    val root = remember { PcloudVideos.serverRoot() }
+    var at by remember { mutableStateOf(root) }
+    var subfolders by remember { mutableStateOf<List<com.music.bitchord.data.webdav.WebDavClient.Entry>?>(null) }
+    val trail = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    LaunchedEffect(at) {
+        val dir = at ?: return@LaunchedEffect
+        subfolders = null
+        subfolders = com.music.bitchord.data.webdav.WebDavClient.listFolders(
+            dir,
+            com.music.bitchord.data.settings.AppSettings.webdavUsername.value,
+            com.music.bitchord.data.settings.AppSettings.webdavPassword.value,
+        ).getOrDefault(emptyList()).sortedBy { PcloudVideos.nameOf(it.url).lowercase() }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.video_pcloud_folders_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                picked.forEach { f ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(PcloudVideos.nameOf(f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        TextButton(onClick = { picked = picked - f }) { Text(stringResource(R.string.video_pcloud_remove)) }
+                    }
+                }
+                SectionLabel(at?.let { if (it == root) "pCloud" else PcloudVideos.nameOf(it) } ?: "pCloud")
+                Row {
+                    if (trail.isNotEmpty()) TextButton(onClick = { at = trail.removeAt(trail.lastIndex) }) { Text(stringResource(R.string.video_pcloud_up)) }
+                    val here = at
+                    if (here != null && here != root && here !in picked) {
+                        TextButton(onClick = { picked = picked + here }) { Text(stringResource(R.string.video_pcloud_add_here)) }
+                    }
+                }
+                when (val list = subfolders) {
+                    null -> Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                    }
+                    else -> list.forEach { e ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    at?.let { trail.add(it) }
+                                    at = e.url
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                        ) {
+                            androidx.compose.material3.Icon(
+                                androidx.compose.material.icons.Icons.Outlined.Folder,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                PcloudVideos.nameOf(e.url),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                PcloudVideos.setFolders(picked)
+                onDismiss()
+            }) { Text(stringResource(R.string.video_pcloud_save)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
