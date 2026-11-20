@@ -309,6 +309,8 @@ object VideoAligner {
                     if (r.code !in 200..299) return at > 0
                     val bytes = r.body?.bytes() ?: return at > 0
                     out.write(bytes)
+                    // The whole file in one answer (no ranges): nothing more to ask.
+                    if (r.code == 200) return true
                     bytes.size
                 }
                 at += got

@@ -737,7 +737,20 @@ object MusicVideoEngine {
             return
         }
         if (ref.site == com.music.bitchord.data.video.VideoRef.Site.PCLOUD) {
-            loadJob = scope.launch { loadPcloud(ref.id, videoId) }
+            loadJob = scope.launch {
+                val headers = com.music.bitchord.data.video.PcloudVideos.headers()
+                loadFile(ref.id, videoId, headers, ref.id, headers, ranged = true)
+            }
+            return
+        }
+        if (ref.site == com.music.bitchord.data.video.VideoRef.Site.ANIMETHEMES) {
+            val video = com.music.bitchord.data.video.AnimeThemes.videoOf(ref.id)
+            val sound = com.music.bitchord.data.video.AnimeThemes.audioOf(ref.id)
+            loadJob = scope.launch {
+                // Its sound alone is a small Ogg: fetched whole for the sync; else read off the WebM.
+                if (sound != null) loadFile(video, videoId, emptyMap(), sound, emptyMap(), ranged = false)
+                else loadFile(video, videoId, emptyMap(), video, emptyMap(), ranged = true)
+            }
             return
         }
         loadJob = scope.launch {
@@ -878,9 +891,8 @@ object MusicVideoEngine {
      * BitChord Audio: a video file of yours in pCloud, streamed by ranges with your login,
      * and rebuilt to the song from its own sound (see [VideoAligner.rebuild]).
      */
-    private fun loadPcloud(url: String, key: String) {
+    private fun loadFile(url: String, key: String, headers: Map<String, String>, soundUrl: String, soundHeaders: Map<String, String>, ranged: Boolean) {
         val exo = player ?: return
-        val headers = com.music.bitchord.data.video.PcloudVideos.headers()
         val upstream = OkHttpDataSource.Factory(Http.client).setDefaultRequestProperties(headers)
         val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
             .createMediaSource(MediaItem.fromUri(url))
@@ -896,7 +908,7 @@ object MusicVideoEngine {
         if (forId != null && ctx != null) {
             controller?.currentMediaItem?.toSong()?.takeIf { it.videoId == forId }?.let { song ->
                 pendingAlign = {
-                    com.music.bitchord.playback.smart.VideoAligner.request(ctx, song, key, url, headers, ranged = true, songSound = {
+                    com.music.bitchord.playback.smart.VideoAligner.request(ctx, song, key, soundUrl, soundHeaders, ranged = ranged, songSound = {
                         val yt = com.music.bitchord.data.video.VideoMode.youTubeSongOf(song) ?: return@request null
                         val got = withContext(Dispatchers.IO) { InnerTubeXResolver.extract(yt, 64) } ?: return@request null
                         got.url to got.headers

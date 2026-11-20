@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** A video to show for a song: on YouTube, or on bilibili. */
 data class VideoRef(val site: Site, val id: String) {
-    enum class Site { YOUTUBE, BILIBILI, PCLOUD }
+    enum class Site { YOUTUBE, BILIBILI, PCLOUD, ANIMETHEMES }
 
     /** What the video engine files it under: a YouTube id as itself, so its caches carry over. */
     val key: String get() = when (site) {
@@ -38,6 +38,8 @@ data class VideoRef(val site: Site, val id: String) {
         Site.BILIBILI -> "bili:$id"
         // BitChord Audio: a video file of yours in pCloud, by its address.
         Site.PCLOUD -> "pcloud:${id.hashCode().toUInt()}:${PcloudVideos.nameOf(id).take(40)}"
+        // BitChord Audio: an anime's opening or ending on AnimeThemes, by its file's name.
+        Site.ANIMETHEMES -> "at:" + AnimeThemes.videoOf(id).substringAfterLast('/')
     }
 
     fun encode(): String = "${site.name}:$id"
@@ -350,6 +352,11 @@ object VideoMode {
         val search = base ?: song
         // BitChord Audio: YouTube Music's pairing and the searches asked at once, not one
         // after another — the first video of a song used to wait for four answers in a row.
+        // BitChord Audio: an anime opening or ending, from AnimeThemes (a clean encode, usually
+        // better than YouTube's uploads) — asked alongside, preferred when it is the song.
+        val themeAsk = scope.async(Dispatchers.IO) {
+            if (linked == null) runCatching { AnimeThemes.bestFor(song) }.getOrNull() else null
+        }
         val pairedAsk = scope.async(Dispatchers.IO) {
             if (linked == null) {
                 runCatching { YtMusicRepository.resolveVideo(search) }.getOrNull()
@@ -381,6 +388,9 @@ object VideoMode {
             val carried = results.filter { r -> val t = norm(r.title); cores.any { it in t } }
             (ranked + carried).distinctBy { it.videoId }
         }.getOrDefault(emptyList())
+        val theme = themeAsk.await()
+            ?.let { VideoRef(VideoRef.Site.ANIMETHEMES, AnimeThemes.encode(it)) }
+            ?.takeUnless { it.key in unplayable || isWrong(song, it) }
         val paired = pairedAsk.await()
         // BitChord Audio: the official video first — "(Official Video)", a
         // VEVO or the artist's own channel — over a lyric video, a visualizer
@@ -393,7 +403,7 @@ object VideoMode {
             .map { it.value }
         if (ordered.isNotEmpty()) TrackLog.d(TAG, "videos for '${song.title}', best first: " +
             ordered.take(4).joinToString { "'${it.title}' · ${it.artist} (${officialScore(it, song)})" })
-        val all = (listOfNotNull(linked) + ordered.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) })
+        val all = (listOfNotNull(linked, theme) + ordered.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) })
             .distinctBy { it.key }
             .filterNot { it.key in unplayable || isWrong(song, it) }
         val first = all.firstOrNull() ?: return null

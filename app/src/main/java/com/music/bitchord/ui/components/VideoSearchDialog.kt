@@ -77,6 +77,8 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
     var youtube by remember { mutableStateOf<List<VideoHit>?>(null) }
     var bilibili by remember { mutableStateOf<List<VideoHit>?>(null) }
     var bilibiliAsked by remember { mutableStateOf(false) }
+    var themes by remember { mutableStateOf<List<VideoHit>?>(null) }
+    var themesAsked by remember { mutableStateOf(false) }
     // BitChord Audio: your pCloud videos — searched only when asked, in the folders you chose.
     var pcloudQuery by remember(song.videoId) { mutableStateOf(query) }
     var pcloudAsked by remember { mutableStateOf<String?>(null) }
@@ -100,6 +102,19 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
         }
     }
 
+    LaunchedEffect(asked, themesAsked) {
+        if (!themesAsked) return@LaunchedEffect
+        themes = null
+        themes = runCatching { com.music.bitchord.data.video.AnimeThemes.search(asked) }.getOrDefault(emptyList()).map {
+            VideoHit(
+                VideoRef(VideoRef.Site.ANIMETHEMES, com.music.bitchord.data.video.AnimeThemes.encode(it)),
+                "${it.title} · ${it.label}",
+                it.artists.joinToString(", "),
+                "${it.resolution}p",
+                it.cover,
+            )
+        }
+    }
     LaunchedEffect(pcloudAsked) {
         val q = pcloudAsked ?: return@LaunchedEffect
         pcloud = null
@@ -137,6 +152,15 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
                 } else {
                     SectionLabel("bilibili")
                     Results(bilibili, current, ::pick)
+                }
+                // BitChord Audio: anime openings and endings, from AnimeThemes — when asked.
+                if (!themesAsked) {
+                    TextButton(onClick = { themesAsked = true }) {
+                        Text(stringResource(R.string.video_mode_search_animethemes))
+                    }
+                } else {
+                    SectionLabel("AnimeThemes")
+                    Results(themes, current, ::pick)
                 }
                 SectionLabel("pCloud")
                 Row(verticalAlignment = Alignment.CenterVertically) {

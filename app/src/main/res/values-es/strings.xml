@@ -1915,4 +1915,5 @@
     <string name="video_pcloud_up">Subir</string>
     <string name="video_pcloud_add_here">Usar esta carpeta</string>
     <string name="video_pcloud_save">Guardar</string>
+    <string name="video_mode_search_animethemes">Buscar también en AnimeThemes (openings y endings de anime)</string>
 </resources>
