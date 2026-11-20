@@ -28,9 +28,9 @@ object OtherBrains {
     enum class Provider(val label: String, val base: String, val prefKey: String, val prefer: List<Regex>) {
         EXPERIENTIAL(
             "Experiential Labs", "https://api.experientiallabs.ai/v1", "experiential_key",
-            // Its free core pool: DeepSeek V4.1 Flash, GPT-6 Luna, Clef — chat models, not the
-            // OCR, reasoning-only or vision ones that share a name with them.
-            listOf(Regex("(?i)deepseek[^/]*v4\\.?1[^/]*flash"), Regex("(?i)gpt-?6[^/]*luna|(^|/)luna"), Regex("(?i)(^|/)clef")),
+            // Its free models (the "Free" tab): Jev, Clef, GPT-6 Luna, and the ":free" variants
+            // (gemini-4-neon:free). DeepSeek V4.1 Flash is NOT free — it was charged.
+            listOf(Regex("(?i)(^|/)gpt-?6-?luna(:free)?$"), Regex("(?i)(^|/)clef(:free)?$"), Regex("(?i)(^|/)jev(:free)?$"), Regex("(?i):free$")),
         ),
         MISTRAL(
             "Mistral", "https://api.mistral.ai/v1", "mistral_key",
@@ -72,25 +72,55 @@ object OtherBrains {
     }
 
     /** The free models (by name): Experiential's free core pool; for Mistral every model is in the free plan. */
-    fun isFree(p: Provider, id: String) = p == Provider.MISTRAL || (p.prefer.any { it.containsMatchIn(id) } && !NOT_CHAT.containsMatchIn(id))
+    /**
+     * BitChord Audio: free to use — Mistral's free plan covers its models; on Experiential
+     * Labs only a model the service prices at zero, or one marked ":free" or named in its
+     * free tier. A model with a price is never free, whatever its name.
+     */
+    fun isFree(p: Provider, id: String): Boolean {
+        if (p == Provider.MISTRAL) return true
+        if (NOT_CHAT.containsMatchIn(id)) return false
+        priced[id]?.let { return !it }
+        return p.prefer.any { it.containsMatchIn(id) }
+    }
+
+    /** Model id → whether the service charges for it (from its own list, when it says). */
+    private val priced = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    private fun cost(o: JSONObject): Boolean? {
+        val pricing = o.optJSONObject("pricing") ?: return null
+        val nums = listOf("prompt", "completion", "input", "output", "request").mapNotNull { k ->
+            pricing.opt(k)?.toString()?.toDoubleOrNull()
+        }
+        return if (nums.isEmpty()) null else nums.any { it > 0.0 }
+    }
+
+    private fun fetchIds(p: Provider): List<String> = runCatching {
+        val req = Request.Builder().url("${p.base}/models").header("Authorization", "Bearer ${keys.getValue(p).value}").build()
+        client.newCall(req).execute().use { r ->
+            val a = JSONObject(r.body?.string().orEmpty()).optJSONArray("data") ?: JSONArray()
+            (0 until a.length()).mapNotNull { i ->
+                val o = a.optJSONObject(i) ?: return@mapNotNull null
+                val id = o.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                cost(o)?.let { priced[id] = it }
+                id
+            }
+        }
+    }.getOrDefault(emptyList())
 
     /** Models that are not for a chat answer (reading images, embeddings, speech…). */
     private val NOT_CHAT = Regex("(?i)ocr|embed|tts|whisper|image|vision|moderation|audio|transcri|guard|rerank|-vl\\b")
 
     /** The models your key can use, for picking one by hand. */
-    fun listModels(p: Provider): List<String> = runCatching {
-        val req = Request.Builder().url("${p.base}/models").header("Authorization", "Bearer ${keys.getValue(p).value}").build()
-        client.newCall(req).execute().use { r ->
-            val a = JSONObject(r.body?.string().orEmpty()).optJSONArray("data") ?: JSONArray()
-            (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("id") }.filter { it.isNotBlank() }
-                .filterNot { Regex("(?i)embed|tts|whisper|image|moderation|ocr|audio|transcri").containsMatchIn(it) }
-        }
-    }.getOrDefault(emptyList())
+    /** The free models your key can use, for picking one by hand (paid ones are never offered). */
+    fun listModels(p: Provider): List<String> =
+        fetchIds(p).also { if (it.isNotEmpty()) catalogue[p] = it }.filter { isFree(p, it) }
 
     private val chosen = Provider.entries.associateWith { MutableStateFlow<String?>(null) }
     fun chosenModel(p: Provider): StateFlow<String?> = chosen.getValue(p)
 
     fun setModel(p: Provider, id: String?) {
+        if (id != null && !isFree(p, id)) return
         chosen.getValue(p).value = id
         prefs?.edit()?.putString(p.prefKey + "_model", id)?.apply()
         models.remove(p)
@@ -106,6 +136,12 @@ object OtherBrains {
 
     private val lastError = java.util.concurrent.ConcurrentHashMap<Provider, String>()
 
+    /** The first of your other services that answers [prompt]; the JSON object in it, or null. */
+    fun ask(prompt: String): JSONObject? {
+        for (p in Provider.entries) askOne(p, prompt)?.let { return it }
+        return null
+    }
+
     /** Models resting after "no allowance" or "not usable": "provider|model" → until. */
     private val modelResting = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val catalogue = java.util.concurrent.ConcurrentHashMap<Provider, List<String>>()
@@ -117,20 +153,19 @@ object OtherBrains {
      * list once per run.
      */
     private fun modelsFor(p: Provider): List<String> {
-        chosen.getValue(p).value?.let { return listOf(it) }
-        val ids = catalogue[p] ?: runCatching {
-            val req = Request.Builder().url("${p.base}/models").header("Authorization", "Bearer ${keys.getValue(p).value}").build()
-            client.newCall(req).execute().use { r ->
-                val a = JSONObject(r.body?.string().orEmpty()).optJSONArray("data") ?: JSONArray()
-                (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("id") }.filter { it.isNotBlank() }
-            }
-        }.getOrDefault(emptyList()).also { if (it.isNotEmpty()) catalogue[p] = it }
+        val ids = catalogue[p] ?: fetchIds(p).also { if (it.isNotEmpty()) catalogue[p] = it }
+        // The one you picked — only while it is free.
+        chosen.getValue(p).value?.takeIf { isFree(p, it) }?.let { return listOf(it) }
         val chat = ids.filterNot { NOT_CHAT.containsMatchIn(it) }
-        val free = p.prefer.flatMap { re -> chat.filter { re.containsMatchIn(it) } }.distinct()
-        val order = when {
-            free.isNotEmpty() -> free
-            p == Provider.MISTRAL -> chat.filter { Regex("(?i)mistral-(large|medium|small)-latest").containsMatchIn(it) }.ifEmpty { chat.take(3) }
-            else -> chat.filter { Regex("(?i)deepseek.*(chat|v\\d)").containsMatchIn(it) && !Regex("(?i)r1|reason").containsMatchIn(it) }.take(3)
+        val order = if (p == Provider.MISTRAL) {
+            p.prefer.flatMap { re -> chat.filter { re.containsMatchIn(it) } }.distinct().ifEmpty { chat.take(3) }
+        } else {
+            // Never a paid model: the free ones only, best known first.
+            val free = chat.filter { isFree(p, it) }
+            p.prefer.flatMap { re -> free.filter { re.containsMatchIn(it) } }.distinct() + free
+        }.distinct()
+        if (order.isEmpty() && ids.isNotEmpty()) {
+            TrackLog.w(TAG, "assistant: ${p.label} — no free model among ${ids.size}: ${ids.filter { it.contains("free", true) || it.contains("luna", true) || it.contains("clef", true) || it.contains("jev", true) }.joinToString().ifBlank { ids.take(40).joinToString() }}")
         }
         if (models[p] != order.joinToString()) {
             models[p] = order.joinToString()
@@ -143,7 +178,7 @@ object OtherBrains {
         val key = keys.getValue(p).value
         if (key.isBlank()) return null
         val all = modelsFor(p)
-        if (all.isEmpty()) { lastError[p] = "la clave no da acceso a ningún modelo (¿es correcta?)"; return null }
+        if (all.isEmpty()) { lastError[p] = "ningún modelo gratuito disponible con esta clave"; return null }
         val now = System.currentTimeMillis()
         val ready = all.filter { (modelResting["${p.name}|$it"] ?: 0L) < now }
         if (ready.isEmpty()) {
