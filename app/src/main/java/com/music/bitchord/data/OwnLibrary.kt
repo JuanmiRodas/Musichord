@@ -112,9 +112,23 @@ object OwnLibrary {
     /** Whether two album names are the same release, in either script. */
     fun sameAlbum(a: String, b: String): Boolean {
         if (OwnFileMatcher.sameAlbum(a, b)) return true
-        val ka = OwnFileMatcher.allKeys(a).filter { it.length >= 4 }
-        val kb = OwnFileMatcher.allKeys(b).toSet()
+        val ka = keysOf(a).filter { it.length >= 4 }
+        val kb = keysOf(b)
         return ka.any { it in kb }
+    }
+
+    /**
+     * An album name's keys (reading it in every script is slow: a dictionary look-up per
+     * word), worked out once per name — the Library tab compares thousands of albums.
+     */
+    private val keyCache = java.util.concurrent.ConcurrentHashMap<String, Set<String>>()
+
+    private fun keysOf(name: String): Set<String> {
+        keyCache[name]?.let { return it }
+        if (keyCache.size > 20_000) keyCache.clear()
+        val keys = OwnFileMatcher.allKeys(name)
+        if (com.music.bitchord.data.sources.JapaneseReading.ready) keyCache[name] = keys
+        return keys
     }
 
     private const val OWN_ALBUM = "own:album:"

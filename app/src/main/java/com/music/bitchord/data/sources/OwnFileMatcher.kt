@@ -62,6 +62,15 @@ object OwnFileMatcher {
      * "Asi", "Llévame" and "Llevame" agree, while kana keep their dakuten.
      */
     fun key(s: String): String {
+        keyMemo[s]?.let { return it }
+        if (keyMemo.size > 50_000) keyMemo.clear()
+        return keyOf(s).also { keyMemo[s] = it }
+    }
+
+    /** Names compared over and over (the Library tab's thousands of albums): normalized once. */
+    private val keyMemo = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun keyOf(s: String): String {
         val out = StringBuilder()
         for (ch in Normalizer.normalize(s, Normalizer.Form.NFKC)) {
             val d = Normalizer.normalize(ch.toString(), Normalizer.Form.NFD)
@@ -106,7 +115,19 @@ object OwnFileMatcher {
             .toSet()
     }
 
-    internal fun allKeys(title: String): Set<String> = titleKeys(title) + soundKeys(title)
+    internal fun allKeys(title: String): Set<String> {
+        allKeysCache[title]?.let { return it }
+        val out = titleKeys(title) + soundKeys(title)
+        // Kept once the reading dictionary is loaded (before, the readings are missing).
+        if (JapaneseReading.ready) {
+            if (allKeysCache.size > 30_000) allKeysCache.clear()
+            allKeysCache[title] = out
+        }
+        return out
+    }
+
+    /** A title's keys, worked out once: reading every word of it in the dictionary is slow. */
+    private val allKeysCache = java.util.concurrent.ConcurrentHashMap<String, Set<String>>()
 
     /** BitChord Audio: every key a song goes by — its title's, and its other names' (romaji tables). */
     fun wantedKeys(title: String, artist: String): Set<String> =
