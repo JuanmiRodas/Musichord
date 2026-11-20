@@ -191,9 +191,9 @@ object VideoAligner {
         videoKey: String,
         audioUrl: String,
         headers: Map<String, String>,
-        songSound: (suspend () -> Pair<String, Map<String, String>>?)? = null,
         /** The video is a whole file (pCloud): its sound read in place, not fetched first. */
         ranged: Boolean = false,
+        songSound: (suspend () -> Pair<String, Map<String, String>>?)? = null,
     ) {
         val key = "${song.videoId}|$videoKey"
         waiting[key]?.let { if (System.currentTimeMillis() - it < 30_000) return }
