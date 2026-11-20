@@ -7,7 +7,9 @@ import com.music.bitchord.data.sources.JapaneseReading
 import com.music.bitchord.data.sources.OwnFileMatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
@@ -50,6 +52,113 @@ object AnimeThemes {
         val q = query.trim()
         if (q.isEmpty()) return@withContext emptyList()
         searched[q]?.let { return@withContext it }
+        // Its GraphQL service (what animethemes.moe itself asks); the older REST search after.
+        var themes = graphql(q) ?: rest(q) ?: return@withContext emptyList()
+        // Nothing for the whole of it ("OK! Rica Matsumoto": their spelling is "Rika"): the
+        // last words dropped, one at a time, down to the title.
+        var words = q.split(Regex("\\s+"))
+        while (themes.isEmpty() && words.size > 1) {
+            words = words.dropLast(1)
+            themes = graphql(words.joinToString(" ")).orEmpty()
+        }
+        if (searched.size > 200) searched.clear()
+        searched[q] = themes
+        themes
+    }
+
+    private const val GRAPHQL = "https://graphql.animethemes.moe/"
+    private val QUERY = """
+        query(${'$'}q: String!) {
+          search(search: ${'$'}q, first: 15) {
+            themes {
+              data {
+                type
+                sequence
+                anime { slug title { romaji } images { nodes { link facet } } }
+                song { title { romaji } staff { as artist { name { main native } } } }
+                entries { version videos { nodes { basename resolution nc audio { basename } } } }
+              }
+            }
+          }
+        }
+    """.trimIndent()
+
+    private fun graphql(q: String): List<Theme>? {
+        val body = JSONObject().put("query", QUERY).put("variables", JSONObject().put("q", q)).toString()
+            .toRequestBody("application/json".toMediaType())
+        val text = runCatching {
+            Http.client.newCall(
+                Request.Builder().url(GRAPHQL).post(body)
+                    .header("Accept", "application/json")
+                    .header("User-Agent", "BitChordAudio/1.0 (Android music player)")
+                    .build(),
+            ).execute().use {
+                if (it.isSuccessful) it.body?.string() else {
+                    TrackLog.w(TAG, "AnimeThemes: GraphQL answered ${it.code}")
+                    null
+                }
+            }
+        }.onFailure { TrackLog.w(TAG, "AnimeThemes: GraphQL failed: ${it.message}") }.getOrNull() ?: return null
+        return runCatching {
+            val root = JSONObject(text)
+            root.optJSONArray("errors")?.let { e -> TrackLog.w(TAG, "AnimeThemes: GraphQL: ${e.optJSONObject(0)?.optString("message")}") }
+            val data = root.optJSONObject("data")?.optJSONObject("search")?.optJSONObject("themes")?.optJSONArray("data")
+                ?: return@runCatching null
+            parseGraph(data)
+        }.getOrNull()
+    }
+
+    private fun JSONObject.nodes(name: String): List<JSONObject> {
+        val v = opt(name)
+        val arr = when (v) {
+            is JSONArray -> v
+            is JSONObject -> v.optJSONArray("nodes") ?: v.optJSONArray("data")
+            else -> null
+        } ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+    }
+
+    private fun parseGraph(list: JSONArray): List<Theme> {
+        val out = ArrayList<Theme>()
+        for (i in 0 until list.length()) {
+            val t = list.optJSONObject(i) ?: continue
+            val anime = t.optJSONObject("anime")
+            val song = t.optJSONObject("song") ?: continue
+            val title = song.optJSONObject("title")?.optString("romaji")?.takeIf { it.isNotBlank() && it != "null" }
+                ?: song.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: continue
+            val artists = song.nodes("staff").flatMap { st ->
+                val name = st.optJSONObject("artist")?.optJSONObject("name")
+                listOfNotNull(
+                    name?.optString("main")?.takeIf { it.isNotBlank() && it != "null" },
+                    name?.optString("native")?.takeIf { it.isNotBlank() && it != "null" },
+                    st.optString("as").takeIf { it.isNotBlank() && it != "null" },
+                )
+            }.distinct()
+            val cover = anime?.nodes("images")
+                ?.sortedBy { if (it.optString("facet").contains("Small", true)) 0 else 1 }
+                ?.firstNotNullOfOrNull { it.optString("link").takeIf { l -> l.startsWith("http") } }
+            val videos = t.nodes("entries").sortedBy { it.optInt("version", 1).coerceAtLeast(1) }
+                .flatMap { it.nodes("videos") }
+            val best = videos.maxWithOrNull(compareBy<JSONObject>({ it.optInt("resolution") }, { if (it.optBoolean("nc")) 1 else 0 })) ?: continue
+            val basename = best.optString("basename").takeIf { it.isNotBlank() && it != "null" } ?: continue
+            val audio = best.optJSONObject("audio")?.optString("basename")?.takeIf { it.isNotBlank() && it != "null" }
+                ?: (basename.substringBeforeLast('.') + ".ogg")
+            out += Theme(
+                anime = anime?.optJSONObject("title")?.optString("romaji")?.takeIf { it.isNotBlank() } ?: anime?.optString("slug").orEmpty(),
+                slug = t.optString("type") + (t.optInt("sequence", 0).takeIf { it > 0 } ?: ""),
+                title = title,
+                titleNative = null,
+                artists = artists,
+                video = "https://v.animethemes.moe/$basename",
+                audio = "https://a.animethemes.moe/$audio",
+                resolution = best.optInt("resolution"),
+                cover = cover,
+            )
+        }
+        return out
+    }
+
+    private fun rest(q: String): List<Theme>? {
         val url = "$API/search?q=" + URLEncoder.encode(q, "UTF-8") +
             "&fields%5Bsearch%5D=animethemes" +
             "&include%5Banimetheme%5D=" + URLEncoder.encode("anime.images,song.artists,animethemeentries.videos", "UTF-8") +
@@ -61,14 +170,11 @@ object AnimeThemes {
                     null
                 }
             }
-        }.getOrNull() ?: return@withContext emptyList()
-        val themes = runCatching { parse(JSONObject(body)) }.getOrElse {
+        }.getOrNull() ?: return null
+        return runCatching { parse(JSONObject(body)) }.getOrElse {
             TrackLog.w(TAG, "AnimeThemes: unreadable answer: ${it.message}")
-            emptyList()
+            null
         }
-        if (searched.size > 200) searched.clear()
-        searched[q] = themes
-        themes
     }
 
     private fun parse(root: JSONObject): List<Theme> {
