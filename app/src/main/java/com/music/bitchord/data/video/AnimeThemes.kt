@@ -70,14 +70,13 @@ object AnimeThemes {
     private val QUERY = """
         query(${'$'}q: String!) {
           search(search: ${'$'}q, first: 15) {
-            themes {
-              data {
-                type
-                sequence
-                anime { slug title { romaji } images { nodes { link facet } } }
-                song { title { romaji } staff { as artist { name { main native } } } }
-                entries { version videos { nodes { basename resolution nc audio { basename } } } }
-              }
+            animethemes {
+              type
+              sequence
+              slug
+              anime { slug title { romaji } images { nodes { link facet } } }
+              song { title { romaji native } performances { as alias artist { name { main native } } } }
+              animethemeentries { version videos { nodes { basename resolution nc audio { basename } } } }
             }
           }
         }
@@ -102,7 +101,7 @@ object AnimeThemes {
         return runCatching {
             val root = JSONObject(text)
             root.optJSONArray("errors")?.let { e -> TrackLog.w(TAG, "AnimeThemes: GraphQL: ${e.optJSONObject(0)?.optString("message")}") }
-            val data = root.optJSONObject("data")?.optJSONObject("search")?.optJSONObject("themes")?.optJSONArray("data")
+            val data = root.optJSONObject("data")?.optJSONObject("search")?.optJSONArray("animethemes")
                 ?: return@runCatching null
             parseGraph(data)
         }.getOrNull()
@@ -126,18 +125,19 @@ object AnimeThemes {
             val song = t.optJSONObject("song") ?: continue
             val title = song.optJSONObject("title")?.optString("romaji")?.takeIf { it.isNotBlank() && it != "null" }
                 ?: song.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: continue
-            val artists = song.nodes("staff").flatMap { st ->
+            val artists = (song.nodes("performances") + song.nodes("staff")).flatMap { st ->
                 val name = st.optJSONObject("artist")?.optJSONObject("name")
                 listOfNotNull(
                     name?.optString("main")?.takeIf { it.isNotBlank() && it != "null" },
                     name?.optString("native")?.takeIf { it.isNotBlank() && it != "null" },
                     st.optString("as").takeIf { it.isNotBlank() && it != "null" },
+                    st.optString("alias").takeIf { it.isNotBlank() && it != "null" },
                 )
             }.distinct()
             val cover = anime?.nodes("images")
                 ?.sortedBy { if (it.optString("facet").contains("Small", true)) 0 else 1 }
                 ?.firstNotNullOfOrNull { it.optString("link").takeIf { l -> l.startsWith("http") } }
-            val videos = t.nodes("entries").sortedBy { it.optInt("version", 1).coerceAtLeast(1) }
+            val videos = (t.nodes("animethemeentries") + t.nodes("entries")).sortedBy { it.optInt("version", 1).coerceAtLeast(1) }
                 .flatMap { it.nodes("videos") }
             val best = videos.maxWithOrNull(compareBy<JSONObject>({ it.optInt("resolution") }, { if (it.optBoolean("nc")) 1 else 0 })) ?: continue
             val basename = best.optString("basename").takeIf { it.isNotBlank() && it != "null" } ?: continue
@@ -145,9 +145,10 @@ object AnimeThemes {
                 ?: (basename.substringBeforeLast('.') + ".ogg")
             out += Theme(
                 anime = anime?.optJSONObject("title")?.optString("romaji")?.takeIf { it.isNotBlank() } ?: anime?.optString("slug").orEmpty(),
-                slug = t.optString("type") + (t.optInt("sequence", 0).takeIf { it > 0 } ?: ""),
+                slug = t.optString("slug").takeIf { it.isNotBlank() && it != "null" }
+                    ?: (t.optString("type") + (t.optInt("sequence", 0).takeIf { it > 0 } ?: "")),
                 title = title,
-                titleNative = null,
+                titleNative = song.optJSONObject("title")?.optString("native")?.takeIf { it.isNotBlank() && it != "null" },
                 artists = artists,
                 video = "https://v.animethemes.moe/$basename",
                 audio = "https://a.animethemes.moe/$audio",
