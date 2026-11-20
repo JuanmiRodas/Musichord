@@ -186,6 +186,13 @@ object AnimeThemes {
         return null
     }
 
+    /** [themes] with [song]'s own first: same title and singer, then same title, then the rest. */
+    fun ranked(song: Song, themes: List<Theme>): List<Theme> =
+        themes.withIndex().sortedWith(compareByDescending<IndexedValue<Theme>> { (_, t) ->
+            val title = sameTitle(song, t)
+            (if (title) 2 else 0) + (if (title && sameArtist(song, t)) 1 else 0)
+        }.thenBy { it.index }).map { it.value }
+
     /** A saved theme as a video-mode reference: the WebM and its Ogg, together. */
     fun encode(t: Theme): String = t.video + "|" + t.audio
 

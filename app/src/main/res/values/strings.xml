@@ -1825,7 +1825,11 @@
     <string name="video_pcloud_folders_title">Video folders in pCloud</string>
     <string name="video_pcloud_remove">Remove</string>
     <string name="video_pcloud_up">Up</string>
-    <string name="video_pcloud_add_here">Use this folder</string>
+    <string name="video_pcloud_add_here">Search videos here</string>
     <string name="video_pcloud_save">Save</string>
     <string name="video_mode_search_animethemes">Search AnimeThemes too (anime openings and endings)</string>
+    <string name="video_pcloud_search_tab">Search</string>
+    <string name="video_pcloud_browse_tab">Browse</string>
+    <string name="video_pcloud_is_video_folder">Video folder</string>
+    <string name="video_pcloud_empty_folder">No folders or videos here</string>
 </resources>

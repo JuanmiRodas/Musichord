@@ -1913,7 +1913,11 @@
     <string name="video_pcloud_folders_title">Carpetas de vídeos en pCloud</string>
     <string name="video_pcloud_remove">Quitar</string>
     <string name="video_pcloud_up">Subir</string>
-    <string name="video_pcloud_add_here">Usar esta carpeta</string>
+    <string name="video_pcloud_add_here">Buscar vídeos aquí</string>
     <string name="video_pcloud_save">Guardar</string>
     <string name="video_mode_search_animethemes">Buscar también en AnimeThemes (openings y endings de anime)</string>
+    <string name="video_pcloud_search_tab">Buscar</string>
+    <string name="video_pcloud_browse_tab">Explorar</string>
+    <string name="video_pcloud_is_video_folder">Carpeta de vídeos</string>
+    <string name="video_pcloud_empty_folder">No hay carpetas ni vídeos aquí</string>
 </resources>

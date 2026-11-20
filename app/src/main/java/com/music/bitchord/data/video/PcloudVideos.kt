@@ -153,8 +153,11 @@ object PcloudVideos {
      */
     fun bestFor(song: Song): Video? {
         if (index.isEmpty()) return null
+        // The singer's name is no title: "Do As Infinity / TAO" isn't every Do As Infinity video.
+        val artistKeys = song.artist.split(',', '&', '/').map { OwnFileMatcher.key(it) }.filter { it.length >= 3 }
         val keys = runCatching { OwnFileMatcher.allKeys(song.title) }.getOrDefault(emptySet())
             .map { it.removePrefix("~") }.filter { it.length >= 4 }
+            .filterNot { k -> artistKeys.any { a -> a.contains(k) || k.contains(a) } }
         if (keys.isEmpty()) return null
         return index.firstOrNull { v ->
             val name = v.name.substringBeforeLast('.')
@@ -223,6 +226,20 @@ object PcloudVideos {
             synchronized(shown) { shown[video.url] = bytes }
             bytes
         }
+    }
+
+    /** One folder of your pCloud: the folders in it, and the videos in it. */
+    suspend fun list(dir: String): Pair<List<WebDavClient.Entry>, List<Video>> {
+        val user = AppSettings.webdavUsername.value
+        val pass = AppSettings.webdavPassword.value
+        val folders = WebDavClient.listFolders(dir, user, pass).getOrDefault(emptyList())
+            .sortedBy { nameOf(it.url).lowercase() }
+        val files = WebDavClient.listFiles(dir, user, pass).getOrDefault(emptyList())
+        val pictures = files.map { it.url.trimEnd('/').lowercase() }.toSet()
+        val videos = files.filter { VIDEO.containsMatchIn(it.url) || it.contentType?.startsWith("video/") == true }
+            .map { e -> Video(e.url, e.displayName.ifBlank { nameOf(e.url) }, nameOf(dir), e.size, thumb = thumbUrl(e.url).trimEnd('/').lowercase() in pictures) }
+            .sortedBy { it.name.lowercase() }
+        return folders to videos
     }
 
     /** The root to choose folders from: the server your library is on. */

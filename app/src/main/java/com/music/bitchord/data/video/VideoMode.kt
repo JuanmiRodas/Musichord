@@ -384,8 +384,16 @@ object VideoMode {
                 queries.map { q -> async { runCatching { youTube(q) }.getOrDefault(emptyList()) } }.awaitAll()
             }.flatten().distinctBy { it.videoId }
             val ranked = TrackMatcher.ranked(results, TrackMatcher.targetOf(song))
+            // A short title ("OK!") must be a word of the video's title, not a piece of one
+            // ("pOKémon"); a longer one may sit anywhere in it.
             val cores = names.map(::norm).filter { it.length >= 2 }
-            val carried = results.filter { r -> val t = norm(r.title); cores.any { it in t } }
+            fun words(x: String) = Normalizer.normalize(x, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
+                .split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.toSet()
+            val carried = results.filter { r ->
+                val t = norm(r.title)
+                val w = words(r.title)
+                cores.any { c -> if (c.length >= 4) c in t else c in w }
+            }
             (ranked + carried).distinctBy { it.videoId }
         }.getOrDefault(emptyList())
         val theme = themeAsk.await()
