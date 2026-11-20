@@ -43,7 +43,8 @@ object PcloudVideos {
     private const val MAX_FOLDERS = 400
     private val VIDEO = Regex("(?i)\\.(mp4|m4v|mkv|webm|mov|avi|ts|flv|wmv)$")
 
-    data class Video(val url: String, val name: String, val folder: String, val size: Long?)
+    /** [thumb]: its picture already saved next to it in pCloud, when the listing showed one. */
+    data class Video(val url: String, val name: String, val folder: String, val size: Long?, val thumb: Boolean = false)
 
     private var app: Context? = null
     private val _folders = MutableStateFlow<List<String>>(emptyList())
@@ -64,7 +65,7 @@ object PcloudVideos {
             val a = o.optJSONArray("items") ?: JSONArray()
             index = (0 until a.length()).mapNotNull { i ->
                 val e = a.optJSONObject(i) ?: return@mapNotNull null
-                Video(e.optString("u"), e.optString("n"), e.optString("f"), e.optLong("s").takeIf { it > 0 })
+                Video(e.optString("u"), e.optString("n"), e.optString("f"), e.optLong("s").takeIf { it > 0 }, e.optBoolean("t"))
             }
         }
     }
@@ -103,8 +104,14 @@ object PcloudVideos {
                 if (!seen.add(dir.trimEnd('/').lowercase())) continue
                 listed++
                 val entries = WebDavClient.listFiles(dir, user, pass).getOrNull()
+                val pictures = entries.orEmpty().map { it.url.trimEnd('/').lowercase() }.toSet()
                 entries?.filter { VIDEO.containsMatchIn(it.url) || it.contentType?.startsWith("video/") == true }
-                    ?.forEach { e -> found += Video(e.url, e.displayName.ifBlank { nameOf(e.url) }, nameOf(dir), e.size) }
+                    ?.forEach { e ->
+                        found += Video(
+                            e.url, e.displayName.ifBlank { nameOf(e.url) }, nameOf(dir), e.size,
+                            thumb = thumbUrl(e.url).trimEnd('/').lowercase() in pictures,
+                        )
+                    }
                 WebDavClient.listFolders(dir, user, pass).getOrNull()?.forEach { queue.addLast(it.url) }
             }
             TrackLog.d(TAG, "pCloud videos: ${found.size} in $listed folder(s)")
@@ -116,7 +123,7 @@ object PcloudVideos {
                 File(ctx.filesDir, INDEX).writeText(JSONObject().apply {
                     put("at", indexedAt)
                     put("items", JSONArray().apply {
-                        found.forEach { v -> put(JSONObject().put("u", v.url).put("n", v.name).put("f", v.folder).put("s", v.size ?: 0L)) }
+                        found.forEach { v -> put(JSONObject().put("u", v.url).put("n", v.name).put("f", v.folder).put("s", v.size ?: 0L).put("t", v.thumb)) }
                     })
                 }.toString())
             }
@@ -157,36 +164,64 @@ object PcloudVideos {
         }
     }
 
-    /** A frame of [video], small, kept on the device: read off the file in pCloud the first time. */
-    suspend fun thumbnail(video: Video): File? {
-        val ctx = app ?: return null
-        val dir = File(ctx.cacheDir, "pcloud-thumbs").apply { mkdirs() }
-        val file = File(dir, "${video.url.hashCode().toUInt()}.jpg")
-        if (file.isFile && file.length() > 0) return file
+    /**
+     * Where [videoUrl]'s picture is kept in pCloud: beside it, as "<name>-thumb.jpg" (the
+     * name Kodi and other media players use for a video's picture too).
+     */
+    fun thumbUrl(videoUrl: String): String = videoUrl.substringBeforeLast('.') + "-thumb.jpg"
+
+    /** Pictures read this session, in memory only. */
+    private val shown = object : LinkedHashMap<String, ByteArray>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > 40
+    }
+
+    /**
+     * A frame of [video], small: read from beside it in pCloud; the first time, taken off the
+     * file and saved there — nothing kept on the phone.
+     */
+    suspend fun thumbnail(video: Video): ByteArray? {
+        synchronized(shown) { shown[video.url] }?.let { return it }
+        val user = AppSettings.webdavUsername.value
+        val pass = AppSettings.webdavPassword.value
+        val at = thumbUrl(video.url)
         return thumbs.withPermit {
-            if (file.isFile && file.length() > 0) return@withPermit file
-            withContext(Dispatchers.IO) {
+            synchronized(shown) { shown[video.url] }?.let { return@withPermit it }
+            val saved = if (video.thumb || WebDavClient.exists(at, user, pass).getOrDefault(false)) {
+                WebDavClient.readHead(at, user, pass, 512 * 1024).getOrNull()
+            } else null
+            val bytes = saved ?: withContext(Dispatchers.IO) {
                 val r = MediaMetadataRetriever()
                 try {
                     r.setDataSource(video.url, headers())
                     val length = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                     // A moment into it: the first frame is often black.
-                    val at = (minOf(15_000L, length / 4)) * 1000
+                    val time = (minOf(15_000L, length / 4)) * 1000
                     val frame: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                        r.getScaledFrameAtTime(at, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180)
+                        r.getScaledFrameAtTime(time, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180)
                     } else {
-                        r.getFrameAtTime(at, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        r.getFrameAtTime(time, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                     }
                     frame ?: return@withContext null
-                    file.outputStream().use { frame.compress(Bitmap.CompressFormat.JPEG, 80, it) }
-                    file
+                    val out = java.io.ByteArrayOutputStream()
+                    frame.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                    out.toByteArray()
                 } catch (e: Exception) {
                     TrackLog.w(TAG, "pCloud video thumbnail for '${video.name}' failed: ${e.message}")
                     null
                 } finally {
                     runCatching { r.release() }
                 }
-            }
+            }?.also { made ->
+                // Saved beside the video, so it's there next time, on any device.
+                WebDavClient.putFile(at, made.inputStream(), made.size.toLong(), "image/jpeg", user, pass, overwrite = false)
+                    .onSuccess {
+                        index = index.map { if (it.url == video.url) it.copy(thumb = true) else it }
+                        TrackLog.d(TAG, "pCloud video thumbnail saved beside '${video.name}'")
+                    }
+                    .onFailure { TrackLog.w(TAG, "pCloud video thumbnail for '${video.name}' not saved: ${it.message}") }
+            } ?: return@withPermit null
+            synchronized(shown) { shown[video.url] = bytes }
+            bytes
         }
     }
 

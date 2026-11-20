@@ -210,7 +210,7 @@ private fun PcloudResults(list: List<PcloudVideos.Video>, current: VideoRef?, on
     }
     list.take(20).forEach { v ->
         val chosen = current?.site == VideoRef.Site.PCLOUD && current.id == v.url
-        var thumb by remember(v.url) { mutableStateOf<java.io.File?>(null) }
+        var thumb by remember(v.url) { mutableStateOf<ByteArray?>(null) }
         LaunchedEffect(v.url) { thumb = PcloudVideos.thumbnail(v) }
         Row(
             verticalAlignment = Alignment.CenterVertically,
