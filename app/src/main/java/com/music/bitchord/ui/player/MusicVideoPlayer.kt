@@ -484,6 +484,7 @@ object MusicVideoEngine {
             var dense = 0f
             var seen = 0
             var tries = 0
+            var held = false
             while (seen < 14 && tries < 60 && loadedId == key) {
                 delay(1_500)
                 tries++
@@ -507,7 +508,14 @@ object MusicVideoEngine {
                         textLevel = ((busy.toFloat() / seen) * ((dense / seen) / 0.04f)).coerceIn(0f, 1f),
                     )
                     com.music.bitchord.data.video.VideoMode.showLooks(looks)
-                    if (seen >= 14) com.music.bitchord.data.video.VideoMode.saveLooks(key, looks)
+                    // BitChord Audio: kept from the first reading (bars and shade), and again once
+                    // settled — never measured again, on this phone or after a reinstall.
+                    if (seen == 6 || seen >= 14) com.music.bitchord.data.video.VideoMode.saveLooks(key, looks)
+                    // A shade found needed holds: not looked at again for 30 s.
+                    if (seen < 14 && (looks.busyBottom || looks.textLevel >= 0.3f) && !held) {
+                        held = true
+                        delay(30_000)
+                    }
                 }
             }
         }

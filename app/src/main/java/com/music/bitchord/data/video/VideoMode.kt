@@ -170,6 +170,8 @@ object VideoMode {
 
     fun saveLooks(key: String, looks: Looks) {
         prefs?.edit()?.putString("looks:$key", "${looks.barTop},${looks.barBottom},${if (looks.busyBottom) 1 else 0},${looks.textLevel}")?.apply()
+        // BitChord Audio: to pCloud within seconds, so a reinstall finds it (see CloudBackup).
+        com.music.bitchord.data.CloudBackup.soon("bitchord_video_mode")
         TrackLog.d(TAG, "video $key looks: bars ${"%.2f".format(looks.barTop)}/${"%.2f".format(looks.barBottom)}, text at the bottom: ${looks.busyBottom} (level ${"%.2f".format(looks.textLevel)})")
     }
 

@@ -3833,7 +3833,8 @@ fun NowPlayingScreen(
                                                 .fillMaxWidth()
                                                 // Edge to edge the picture has no corners, nor does its shade.
                                                 .clip(RoundedCornerShape(bottomStart = if (videoEdge) 0.dp else 10.dp, bottomEnd = if (videoEdge) 0.dp else 10.dp))
-                                                .videoLyricsScrim(videoShade)
+                                                // BitChord Audio: no lyrics loaded, no shade over the picture.
+                                                .then(if (lyricsTranslation.displayedLyrics.isNotEmpty()) Modifier.videoLyricsScrim(videoShade) else Modifier)
                                                 // BitChord Audio: the foot of the picture, in three: a tap on
                                                 // the left puts the lyrics 0.5 s earlier, on the right 0.5 s
                                                 // later, in the middle opens their options. No buttons shown.
