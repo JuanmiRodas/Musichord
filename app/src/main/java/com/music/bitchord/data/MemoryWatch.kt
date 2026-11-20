@@ -39,6 +39,7 @@ object MemoryWatch {
         if (started) return
         started = true
         val app = context.applicationContext
+        lastApp = app
         TrackLog.d("BitChord", line() + " · large heap: " + ((app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).largeMemoryClass) + " MB")
         app.registerComponentCallbacks(object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
@@ -64,9 +65,58 @@ object MemoryWatch {
                     last = used
                 }
                 if (used > maxMb() * 85 / 100) freeCaches(app)
+                runCatching { cpu() }
             }
         }
     }
+
+    // ── CPU: which threads keep the phone busy (and hot) ──
+
+    private var lastTicks = HashMap<String, Long>()
+    private var lastAt = 0L
+
+    /** Ticks (1/100 s) each thread has run, by "tid name". */
+    private fun ticks(): Map<String, Long> {
+        val out = HashMap<String, Long>()
+        java.io.File("/proc/self/task").listFiles()?.forEach { t ->
+            val stat = runCatching { java.io.File(t, "stat").readText() }.getOrNull() ?: return@forEach
+            val open = stat.indexOf('('); val close = stat.lastIndexOf(')')
+            if (open < 0 || close < 0) return@forEach
+            val name = stat.substring(open + 1, close)
+            val f = stat.substring(close + 2).split(' ')
+            // After ")": state(0) … utime(11) stime(12)
+            val n = (f.getOrNull(11)?.toLongOrNull() ?: 0) + (f.getOrNull(12)?.toLongOrNull() ?: 0)
+            out["${t.name} $name"] = n
+        }
+        return out
+    }
+
+    /** Once a minute: if the app used more than a tenth of a core, the busiest threads and what they run. */
+    private fun cpu() {
+        val now = System.currentTimeMillis()
+        val cur = ticks()
+        val prev = lastTicks; val since = now - lastAt
+        lastTicks = HashMap(cur); lastAt = now
+        if (prev.isEmpty() || since <= 0) return
+        val delta = cur.mapNotNull { (k, v) -> prev[k]?.let { k to (v - it) } ?: (k to v) }.filter { it.second > 0 }
+        val total = delta.sumOf { it.second } * 10 // ms
+        val pct = total * 100 / since
+        if (pct < 10) return
+        val top = delta.sortedByDescending { it.second }.take(5)
+        val stacks = runCatching { Thread.getAllStackTraces() }.getOrDefault(emptyMap())
+        val lines = top.joinToString(" · ") { (k, v) ->
+            val name = k.substringAfter(' ')
+            val st = stacks.entries.firstOrNull { it.key.name.take(15) == name }?.value
+            val where = st?.firstOrNull { it.className.startsWith("com.music.") }?.let { " @${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }.orEmpty()
+            "$name ${v * 10 * 100 / since}%$where"
+        }
+        val screen = runCatching {
+            (lastApp?.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isInteractive
+        }.getOrNull()
+        TrackLog.w("BitChord", "cpu: $pct% of a core in the last ${since / 1000}s (screen ${if (screen == true) "on" else "off"}) — $lines")
+    }
+
+    @Volatile private var lastApp: Context? = null
 
     private fun freeCaches(context: Context) {
         runCatching { coil3.SingletonImageLoader.get(context).memoryCache?.clear() }
