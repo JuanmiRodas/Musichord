@@ -114,6 +114,19 @@ object MemoryWatch {
             (lastApp?.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isInteractive
         }.getOrNull()
         TrackLog.w("BitChord", "cpu: $pct% of a core in the last ${since / 1000}s (screen ${if (screen == true) "on" else "off"}) — $lines")
+        // What the busy app threads are running right now (sampled a few times).
+        val seen = HashMap<String, Int>()
+        repeat(5) {
+            runCatching { Thread.getAllStackTraces() }.getOrDefault(emptyMap()).forEach { (t, st) ->
+                if (t == Thread.currentThread() || t.state != Thread.State.RUNNABLE) return@forEach
+                val app = st.filter { it.className.startsWith("com.music.") }.take(6)
+                if (app.isEmpty()) return@forEach
+                val k = app.joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+                seen[k] = (seen[k] ?: 0) + 1
+            }
+            Thread.sleep(150)
+        }
+        seen.entries.sortedByDescending { it.value }.take(4).forEach { (k, n) -> TrackLog.w("BitChord", "cpu busy ($n/5): $k") }
     }
 
     @Volatile private var lastApp: Context? = null
