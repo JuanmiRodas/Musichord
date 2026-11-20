@@ -178,13 +178,32 @@ object LocalLikes {
         if (filling) return
         filling = true
         try {
+            // Twice-liked songs first: one like each.
+            runCatching { dedupe() }
+            // The cover search knows more places now: the "not found" marks of before are forgotten once.
+            prefs?.let { p ->
+                if (!p.getBoolean("nocover_v2", false)) {
+                    val e = p.edit()
+                    p.all.keys.filter { it.startsWith(NO_COVER) }.forEach { e.remove(it) }
+                    e.putBoolean("nocover_v2", true).apply()
+                }
+            }
             val library = WebDavRepository.library().associateBy { it.videoId }
             for ((id, s) in _liked.value) {
                 if (!s.thumbnailUrl.isNullOrBlank() && !s.durationText.isNullOrBlank()) continue
                 val shown = withCover(s)
                 var cover = shown.thumbnailUrl ?: com.music.bitchord.download.Downloads.savedArtwork(id)
                     ?: com.music.bitchord.data.covers.CoverOverrides.get(s)
-                var length = s.durationText ?: library[id]?.durationText
+                val inLibrary = library[id] ?: WebDavRepository.library().firstOrNull { f ->
+                    runCatching { java.net.URLDecoder.decode(f.videoId, "UTF-8") == java.net.URLDecoder.decode(id, "UTF-8") }.getOrDefault(false)
+                }
+                var length = s.durationText ?: inLibrary?.durationText
+                cover = cover ?: inLibrary?.thumbnailUrl
+                // A file of yours with no picture: the cover of its album (another file in the folder).
+                if (cover == null && id.startsWith("webdav:")) {
+                    val folder = id.substringBeforeLast('/')
+                    cover = WebDavRepository.library().firstOrNull { it.videoId.startsWith("$folder/") && !it.thumbnailUrl.isNullOrBlank() }?.thumbnailUrl
+                }
                 // Looked for in the last week and not found: not searched again on every start.
                 val tried = prefs?.getLong(NO_COVER + id, 0L) ?: 0L
                 if (cover == null && System.currentTimeMillis() - tried < 7 * 24 * 3_600_000L) continue
@@ -199,6 +218,10 @@ object LocalLikes {
                     }.getOrNull()
                     cover = hit?.thumbnailUrl
                     length = length ?: hit?.durationText
+                    // Not on YouTube Music: the shop's cover of the song (iTunes), when it is there.
+                    if (cover == null) cover = runCatching {
+                        com.music.bitchord.data.cleanup.CoverMatch.itunes("${s.albumName ?: s.title} ${s.artist.split(',', '·').first().trim()}").firstOrNull()
+                    }.getOrNull()
                     kotlinx.coroutines.delay(1_500)
                 }
                 if (cover == null) prefs?.edit()?.putLong(NO_COVER + id, System.currentTimeMillis())?.apply()
@@ -214,9 +237,70 @@ object LocalLikes {
         }
     }
 
+    // ── BitChord Audio: one like per song, whatever copies of it there are ──
+
+    private fun seconds(s: Song): Int? = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+        ?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+
+    private val NOTE = Regex("\\s*[(\\[（【][^)\\]）】]*(karaoke|off ?vocal|instrumental|inst\\.|live|remix|mix|ver\\.|version|edit|acoustic)[^)\\]）】]*[)\\]）】]", RegexOption.IGNORE_CASE)
+    private val VARIANT = Regex("(?i)karaoke|off ?vocal|instrumental|\\binst\\b|live|remix|\\bmix\\b|acoustic|ver\\.|version|edit|カラオケ")
+
+    /** Whether [a] and [b] are the same song: one title (in any script), one artist, one length. */
+    fun sameSong(a: Song, b: Song): Boolean {
+        if (a.videoId == b.videoId) return true
+        // A karaoke, live or other version is never the original.
+        if (VARIANT.containsMatchIn(a.title) != VARIANT.containsMatchIn(b.title)) return false
+        val ka = runCatching { OwnFileMatcher.allKeys(a.title.replace(NOTE, "")) }.getOrDefault(emptySet()).filter { it.removePrefix("~").length >= 3 }
+        val kb = runCatching { OwnFileMatcher.allKeys(b.title.replace(NOTE, "")) }.getOrDefault(emptySet())
+        if (ka.none { it in kb }) return false
+        val artistA = a.artist.split(',', '&', '·').map { it.trim() }.filter { it.isNotEmpty() }
+        if (artistA.none { x -> b.artist.split(',', '&', '·').any { y -> OwnFileMatcher.sameArtist(x, y.trim()) } }) return false
+        val sa = seconds(a)
+        val sb = seconds(b)
+        return sa == null || sb == null || kotlin.math.abs(sa - sb) <= 3
+    }
+
+    /** A song already liked that is [song] (another copy of it), if any. */
+    fun likedTwin(song: Song): Song? =
+        (LikedMusicCache.likedSongs.value + _liked.value.values).firstOrNull { it.videoId != song.videoId && sameSong(song, it) }
+
+    /** Which of two copies keeps the like: the one on the phone, then the one with a cover and a length. */
+    private fun rank(s: Song): Int =
+        (if (com.music.bitchord.download.Downloads.localCopyOf(s.videoId) != null) 8 else 0) +
+            (if (isYouTubeId(s.videoId)) 4 else 0) +
+            (if (!s.thumbnailUrl.isNullOrBlank()) 2 else 0) +
+            (if (!s.durationText.isNullOrBlank()) 1 else 0)
+
+    /**
+     * Likes of the same song twice (two files of it in a pCloud folder, liked with the whole
+     * album; or a file and its YouTube release): the copy that ranks lower loses its like.
+     * Only likes kept here (files) are removed — a YouTube like stays as YouTube has it.
+     */
+    fun dedupe() {
+        val all = (LikedMusicCache.likedSongs.value + _liked.value.values).distinctBy { it.videoId }
+        val gone = HashSet<String>()
+        for (s in all) {
+            if (s.videoId in gone || isYouTubeId(s.videoId) || s.videoId !in _liked.value) continue
+            val twin = all.firstOrNull { it.videoId != s.videoId && it.videoId !in gone && sameSong(s, it) } ?: continue
+            val loser = if (rank(twin) >= rank(s)) s else twin
+            if (isYouTubeId(loser.videoId) || loser.videoId !in _liked.value) continue
+            gone += loser.videoId
+            TrackLog.d("BitChord", "likes: '${loser.title}' liked twice — kept '${(if (loser === s) twin else s).title}', removed the other copy")
+        }
+        gone.forEach { id -> _liked.value[id]?.let { setLocal(it, false) } }
+        if (gone.isNotEmpty()) TrackLog.d("BitChord", "likes: ${gone.size} duplicate like(s) removed")
+    }
+
     fun setLocal(song: Song, like: Boolean) {
         val id = song.videoId
         if (like) {
+            // Another copy of this song is liked already (a whole folder liked, with two files
+            // of a song in it): one like is enough.
+            // (Only two files: a like moved from a video or a YouTube song onto your file is a swap.)
+            likedTwin(song)?.takeIf { !isYouTubeId(it.videoId) && !isYouTubeId(id) }?.let { twin ->
+                TrackLog.d("BitChord", "likes: '${song.title}' is liked already ('${twin.title}'); not liked twice")
+                return
+            }
             val anchor = LikedMusicCache.likedSongs.value.firstOrNull { it.videoId != id }?.videoId ?: TOP
             anchors[id] = anchor
             _liked.value = _liked.value + (id to song)
