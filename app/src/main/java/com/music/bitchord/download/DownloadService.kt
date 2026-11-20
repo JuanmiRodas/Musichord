@@ -319,6 +319,6 @@ class DownloadService : Service() {
          */
         const val IDLE_GRACE_MS = 2_000L
 
-        const val IDLE_POLL_MS = 100L
+        const val IDLE_POLL_MS = 400L
     }
 }

@@ -773,7 +773,8 @@ class CrossfadeController(
                 tick()
                 delay(
                     when (phase) {
-                        Phase.IDLE -> IDLE_STEP_MS
+                        // Paused with nothing easing: nothing to time, a slower look is enough.
+                        Phase.IDLE -> if (easing == null && runCatching { !active().isPlaying }.getOrDefault(false)) 1_000L else IDLE_STEP_MS
                         Phase.ARMING -> ARM_STEP_MS
                         Phase.FADING -> FADE_STEP_MS
                         Phase.SLEEP_FADE -> FADE_STEP_MS

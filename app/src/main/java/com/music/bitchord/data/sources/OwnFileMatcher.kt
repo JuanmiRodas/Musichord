@@ -373,9 +373,18 @@ object OwnFileMatcher {
     )
 
     /** "The Soul Extreme EP" / "The Soul Extreme EP(初回限定盤)": the same release. */
+    /** An album name's key, its notes dropped — worked out once per name. */
+    private val albumKeyMemo = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun albumKey(name: String): String {
+        albumKeyMemo[name]?.let { return it }
+        if (albumKeyMemo.size > 30_000) albumKeyMemo.clear()
+        return key(name.replace(NOTE, " ")).also { albumKeyMemo[name] = it }
+    }
+
     fun sameAlbum(a: String?, b: String?): Boolean {
-        val x = a?.replace(NOTE, " ")?.let(::key).orEmpty()
-        val y = b?.replace(NOTE, " ")?.let(::key).orEmpty()
+        val x = a?.let(::albumKey).orEmpty()
+        val y = b?.let(::albumKey).orEmpty()
         if (x.isEmpty() || y.isEmpty()) return false
         if (x == y) return true
         if (minOf(x.length, y.length) < 5 || !(x in y || y in x)) return false

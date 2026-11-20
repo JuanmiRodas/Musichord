@@ -172,6 +172,8 @@ object LocalLikes {
      * the library has it now, the download's, else the same song's on YouTube Music (title
      * and artist, any script). Kept with the like, so it is found once.
      */
+    private const val NO_COVER = "nocover:"
+
     suspend fun fillCovers() {
         if (filling) return
         filling = true
@@ -183,6 +185,9 @@ object LocalLikes {
                 var cover = shown.thumbnailUrl ?: com.music.bitchord.download.Downloads.savedArtwork(id)
                     ?: com.music.bitchord.data.covers.CoverOverrides.get(s)
                 var length = s.durationText ?: library[id]?.durationText
+                // Looked for in the last week and not found: not searched again on every start.
+                val tried = prefs?.getLong(NO_COVER + id, 0L) ?: 0L
+                if (cover == null && System.currentTimeMillis() - tried < 7 * 24 * 3_600_000L) continue
                 if (cover == null) {
                     val hit = runCatching {
                         YtMusicRepository.search("${s.title} ${s.artist}", SearchFilter.SONGS).getOrNull().orEmpty()
@@ -196,6 +201,7 @@ object LocalLikes {
                     length = length ?: hit?.durationText
                     kotlinx.coroutines.delay(1_500)
                 }
+                if (cover == null) prefs?.edit()?.putLong(NO_COVER + id, System.currentTimeMillis())?.apply()
                 if (cover == null && length == null) continue
                 found[id] = cover to length
                 val updated = s.copy(thumbnailUrl = s.thumbnailUrl ?: cover, durationText = s.durationText ?: length)

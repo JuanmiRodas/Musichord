@@ -84,9 +84,10 @@ object LikedVideos {
      */
     fun todo(): Pair<List<Song>, List<Song>> {
         val versions = com.music.bitchord.data.SongVersions
+        val asked = _results.value.filter { it.status == Status.ASKED }.mapTo(HashSet()) { it.videoId }
         val videos = LikedMusicCache.likedSongs.value.filter {
             versions.looksLikeVideo(it) && com.music.bitchord.data.LocalLikes.isYouTubeId(it.videoId) && !handled(it.videoId) &&
-                _results.value.none { r -> r.videoId == it.videoId && r.status == Status.ASKED && hints[it.videoId] == null }
+                !(it.videoId in asked && hints[it.videoId] == null)
         }
         if (!seeded) {
             // The first time: everything already liked is the backlog, not "new".

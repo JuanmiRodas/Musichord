@@ -8487,8 +8487,9 @@ class PlaybackService : MediaLibraryService() {
                 // — each line re-published the media session (and the notification) every second
                 // or two all night. It carries on for a car or Bluetooth display, and catches up
                 // as soon as the screen comes on.
-                if (lyricLineWanted()) updateLyricSubtitle()
-                delay(if (lyricLineWanted()) 500L else 2_000L)
+                val wanted = lyricLineWanted()
+                if (wanted) updateLyricSubtitle()
+                delay(if (wanted) 500L else 5_000L)
             }
         }
     }

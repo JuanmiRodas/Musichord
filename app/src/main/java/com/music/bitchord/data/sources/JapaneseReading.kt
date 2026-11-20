@@ -57,6 +57,15 @@ object JapaneseReading {
     fun romajiWords(text: String): Set<String>? {
         if (!isJapanese(text)) return null
         val t = tokenizer ?: run { warmUp(); return null }
+        wordsCache[text]?.let { return it.ifEmpty { null } }
+        if (wordsCache.size > 20_000) wordsCache.clear()
+        return wordsOf(t, text).also { wordsCache[text] = it.orEmpty() }
+    }
+
+    /** Names read once: an artist page weighs every liked song's credit against it. */
+    private val wordsCache = ConcurrentHashMap<String, Set<String>>()
+
+    private fun wordsOf(t: com.atilika.kuromoji.ipadic.Tokenizer, text: String): Set<String>? {
         return runCatching {
             t.tokenize(text).mapNotNull { tok ->
                 val r = tok.reading?.takeIf { it.isNotBlank() && it != "*" } ?: tok.surface
@@ -122,8 +131,17 @@ object JapaneseReading {
 
     /** Letters and digits of the romaji, with its spelling variants folded together. */
     fun soundKey(romaji: String): String {
+        soundMemo[romaji]?.let { return it }
+        if (soundMemo.size > 50_000) soundMemo.clear()
+        return soundKeyOf(romaji).also { soundMemo[romaji] = it }
+    }
+
+    private val soundMemo = ConcurrentHashMap<String, String>()
+    private val MARKS = Regex("\\p{M}+")
+
+    private fun soundKeyOf(romaji: String): String {
         var s = java.text.Normalizer.normalize(romaji, java.text.Normalizer.Form.NFKD)
-            .replace(Regex("\\p{M}+"), "")
+            .replace(MARKS, "")
             .lowercase(Locale.ROOT)
             .filter { it in 'a'..'z' || it in '0'..'9' }
         for ((a, b) in FOLDS) s = s.replace(a, b)

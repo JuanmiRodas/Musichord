@@ -105,6 +105,9 @@ object WaveWidgetUpdater {
             ticker = scope.launch {
                 while (isActive) {
                     delay(5_000)
+                    // Nobody sees a widget with the screen off: the bar catches up when it is on.
+                    val pm = app.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                    if (pm?.isInteractive == false) continue
                     renderAll(app, progressOnly = true)
                 }
             }
