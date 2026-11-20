@@ -61,7 +61,8 @@ object OtherBrains {
         keys.getValue(p).value = k.trim()
         prefs?.edit()?.putString(p.prefKey, k.trim())?.apply()
         models.remove(p)
-        resting.remove(p)
+        catalogue.remove(p)
+        modelResting.keys.removeIf { it.startsWith(p.name + "|") }
     }
 
     val ready: Boolean get() = Provider.entries.any { keys.getValue(it).value.isNotBlank() }
@@ -93,54 +94,65 @@ object OtherBrains {
         chosen.getValue(p).value = id
         prefs?.edit()?.putString(p.prefKey + "_model", id)?.apply()
         models.remove(p)
+        modelResting.keys.removeIf { it.startsWith(p.name + "|") }
     }
 
     /** A tiny request to [p]: null when it answers, else why not. */
     fun test(p: Provider): String? {
-        resting.remove(p)
+        modelResting.keys.removeIf { it.startsWith(p.name + "|") }
         val o = askOne(p, "Reply with the JSON object {\"ok\": true}")
         return if (o != null) null else (lastError[p] ?: "sin respuesta")
     }
 
     private val lastError = java.util.concurrent.ConcurrentHashMap<Provider, String>()
 
-    private fun modelFor(p: Provider): String? {
-        chosen.getValue(p).value?.let { return it }
-        models[p]?.let { return it }
-        val ids = runCatching {
+    /** Models resting after "no allowance" or "not usable": "provider|model" → until. */
+    private val modelResting = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val catalogue = java.util.concurrent.ConcurrentHashMap<Provider, List<String>>()
+
+    /**
+     * BitChord Audio: the models to try, in order — the one you picked, else every free chat
+     * model the key offers (each has its own allowance: when one runs out, the next is
+     * asked), never one that only reads images, speaks or embeds. Read from the service's own
+     * list once per run.
+     */
+    private fun modelsFor(p: Provider): List<String> {
+        chosen.getValue(p).value?.let { return listOf(it) }
+        val ids = catalogue[p] ?: runCatching {
             val req = Request.Builder().url("${p.base}/models").header("Authorization", "Bearer ${keys.getValue(p).value}").build()
             client.newCall(req).execute().use { r ->
                 val a = JSONObject(r.body?.string().orEmpty()).optJSONArray("data") ?: JSONArray()
                 (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("id") }.filter { it.isNotBlank() }
             }
-        }.getOrDefault(emptyList())
+        }.getOrDefault(emptyList()).also { if (it.isNotEmpty()) catalogue[p] = it }
         val chat = ids.filterNot { NOT_CHAT.containsMatchIn(it) }
-        val chosen = p.prefer.firstNotNullOfOrNull { re -> chat.firstOrNull { re.containsMatchIn(it) } }
-            // Not a free one found by name: a quick chat model, never a slow reasoning one first.
-            ?: chat.firstOrNull { Regex("(?i)deepseek.*(chat|v\\d)").containsMatchIn(it) && !Regex("(?i)r1|reason").containsMatchIn(it) }
-            ?: chat.firstOrNull()
-            ?: return null
-        TrackLog.d(TAG, "assistant: ${p.label} — using $chosen (of ${ids.size} models)")
-        models[p] = chosen
-        return chosen
-    }
-
-    /** The first of your other services that answers [prompt]; the JSON object in it, or null. */
-    fun ask(prompt: String): JSONObject? {
-        val now = System.currentTimeMillis()
-        for (p in Provider.entries) {
-            if ((resting[p] ?: 0L) > now) continue
-            askOne(p, prompt)?.let { return it }
+        val free = p.prefer.flatMap { re -> chat.filter { re.containsMatchIn(it) } }.distinct()
+        val order = when {
+            free.isNotEmpty() -> free
+            p == Provider.MISTRAL -> chat.filter { Regex("(?i)mistral-(large|medium|small)-latest").containsMatchIn(it) }.ifEmpty { chat.take(3) }
+            else -> chat.filter { Regex("(?i)deepseek.*(chat|v\\d)").containsMatchIn(it) && !Regex("(?i)r1|reason").containsMatchIn(it) }.take(3)
         }
-        return null
+        if (models[p] != order.joinToString()) {
+            models[p] = order.joinToString()
+            TrackLog.d(TAG, "assistant: ${p.label} — models to try: ${order.joinToString().ifBlank { "none" }} (of ${ids.size})")
+        }
+        return order
     }
 
     private fun askOne(p: Provider, prompt: String): JSONObject? {
+        val key = keys.getValue(p).value
+        if (key.isBlank()) return null
+        val all = modelsFor(p)
+        if (all.isEmpty()) { lastError[p] = "la clave no da acceso a ningún modelo (¿es correcta?)"; return null }
         val now = System.currentTimeMillis()
-        run {
-            val key = keys.getValue(p).value
-            if (key.isBlank()) return null
-            val model = modelFor(p) ?: run { lastError[p] = "la clave no da acceso a ningún modelo (¿es correcta?)"; return null }
+        val ready = all.filter { (modelResting["${p.name}|$it"] ?: 0L) < now }
+        if (ready.isEmpty()) {
+            val back = all.minOf { modelResting["${p.name}|$it"] ?: 0L }
+            lastError[p] = "sus modelos gratuitos no tienen cuota ahora mismo; vuelve a probar sobre las " +
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(back))
+            return null
+        }
+        for (model in ready) {
             Gemini.activity("Preguntando a ${p.label} · $model…")
             val body = JSONObject()
                 .put("model", model)
@@ -149,47 +161,56 @@ object OtherBrains {
                 .put("response_format", JSONObject().put("type", "json_object"))
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content",
                     prompt + "\nYou cannot browse the web here: answer from what you know and the data above; lower your confidence when unsure.")))
-            val req = Request.Builder().url("${p.base}/chat/completions")
-                .header("Authorization", "Bearer $key")
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
-                .build()
+            fun call(b: JSONObject) = client.newCall(
+                Request.Builder().url("${p.base}/chat/completions").header("Authorization", "Bearer $key")
+                    .post(b.toString().toRequestBody("application/json".toMediaType())).build(),
+            ).execute()
             val answer = runCatching {
-                client.newCall(req).execute().use { r ->
-                    val text = r.body?.string().orEmpty()
-                    if (r.code == 429) {
-                        TrackLog.w(TAG, "assistant: ${p.label} — no allowance left (429)")
-                        lastError[p] = "sin cuota ahora mismo (429)"
-                        resting[p] = now + 3_600_000L
-                        return@use null
-                    }
-                    // A service that refuses "response_format": once more without it.
-                    if (r.code == 400 && text.contains("response_format", true)) {
-                        body.remove("response_format")
-                        val retry = Request.Builder().url("${p.base}/chat/completions").header("Authorization", "Bearer $key")
-                            .post(body.toString().toRequestBody("application/json".toMediaType())).build()
-                        return@use client.newCall(retry).execute().use { r2 ->
-                            if (r2.code in 200..299) JSONObject(r2.body?.string().orEmpty()).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content") else null
-                        }
-                    }
-                    if (r.code == 404 || r.code == 400) models.remove(p)
-                    if (r.code !in 200..299) {
-                        TrackLog.w(TAG, "assistant: ${p.label} answered ${r.code}: ${text.take(200)}")
-                        lastError[p] = when (r.code) {
-                            401, 403 -> "la clave no es válida o no tiene permiso"
-                            else -> "error ${r.code}: " + (runCatching { JSONObject(text).optJSONObject("error")?.optString("message") ?: JSONObject(text).optString("message") }.getOrNull() ?: text).take(120)
-                        }
-                        return@use null
-                    }
-                    JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
+                var r = call(body)
+                var text = r.use { it.body?.string().orEmpty() }
+                // A service that refuses "response_format": once more without it.
+                if (r.code == 400 && text.contains("response_format", true)) {
+                    body.remove("response_format")
+                    r = call(body)
+                    text = r.use { it.body?.string().orEmpty() }
                 }
-            }.onFailure { TrackLog.w(TAG, "assistant: ${p.label} failed: ${it.message}"); lastError[p] = "sin conexión (${it.message?.take(60)})" }.getOrNull()
+                when {
+                    r.code == 429 -> {
+                        TrackLog.w(TAG, "assistant: ${p.label} · $model — no allowance left (429); the next free model")
+                        modelResting["${p.name}|$model"] = System.currentTimeMillis() + 3_600_000L
+                        lastError[p] = "sin cuota en $model"
+                        null
+                    }
+                    r.code == 404 || r.code == 400 || r.code == 422 -> {
+                        TrackLog.w(TAG, "assistant: ${p.label} · $model not usable (${r.code}): ${text.take(160)}")
+                        modelResting["${p.name}|$model"] = System.currentTimeMillis() + 24 * 3_600_000L
+                        lastError[p] = "$model no se puede usar (${r.code})"
+                        null
+                    }
+                    r.code == 401 || r.code == 403 -> {
+                        lastError[p] = "la clave no es válida o no tiene permiso"
+                        return null
+                    }
+                    r.code !in 200..299 -> {
+                        TrackLog.w(TAG, "assistant: ${p.label} · $model answered ${r.code}: ${text.take(200)}")
+                        modelResting["${p.name}|$model"] = System.currentTimeMillis() + 10 * 60_000L
+                        lastError[p] = "error ${r.code} en $model"
+                        null
+                    }
+                    else -> JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
+                }
+            }.onFailure {
+                TrackLog.w(TAG, "assistant: ${p.label} · $model failed: ${it.message}")
+                modelResting["${p.name}|$model"] = System.currentTimeMillis() + 10 * 60_000L
+                lastError[p] = "sin conexión (${it.message?.take(60)})"
+            }.getOrNull()
             val o = answer?.let(::jsonIn)
             if (o != null) {
                 lastError.remove(p)
                 used("${p.label} · $model")
                 return o
             }
-            if (answer != null) lastError[p] = "respondió, pero no en el formato pedido"
+            if (answer != null) lastError[p] = "$model respondió, pero no en el formato pedido"
         }
         return null
     }
