@@ -22,11 +22,12 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * BitChord Audio: a backup in your pCloud of all the music on your phone — the app's
- * downloads and your own music files — in "Music/Artist/Album" at the top of the drive.
+ * downloads and your own music files — as a mirror: the same folders and file names,
+ * under "Music" at the top of the drive (to be tidied on the computer later).
  *
  * Runs by itself whenever the phone is on Wi-Fi (never on mobile data or in battery
- * saver), a minute after something new appears; a song already in your pCloud library
- * (the same recording) isn't sent twice, and nothing on the phone is moved or deleted.
+ * saver), a minute after something new appears; a file already sent (or already at its
+ * place in pCloud) isn't sent again, and nothing on the phone is moved or deleted.
  * On by default; switched off in Settings.
  */
 object PhoneBackup {
@@ -92,7 +93,60 @@ object PhoneBackup {
         return pm?.isPowerSaveMode != true
     }
 
-    /** Sends what isn't in pCloud yet, album by album, while Wi-Fi lasts. */
+    /** Where a file sits on the phone: its folders (from the top of the storage) and its name. */
+    private data class Place(val folders: List<String>, val name: String, val size: Long, val mime: String)
+
+    private fun placeOf(context: Context, uriText: String): Place? = runCatching {
+        val uri = android.net.Uri.parse(uriText)
+        when (uri.scheme) {
+            "content" -> {
+                val cols = buildList {
+                    add(android.provider.MediaStore.MediaColumns.DISPLAY_NAME)
+                    add(android.provider.MediaStore.MediaColumns.SIZE)
+                    add(android.provider.MediaStore.MediaColumns.MIME_TYPE)
+                    if (android.os.Build.VERSION.SDK_INT >= 29) add(android.provider.MediaStore.MediaColumns.RELATIVE_PATH)
+                    @Suppress("DEPRECATION") add(android.provider.MediaStore.MediaColumns.DATA)
+                }.toTypedArray()
+                context.contentResolver.query(uri, cols, null, null, null)?.use { c ->
+                    if (!c.moveToFirst()) return@use null
+                    fun str(col: String) = c.getColumnIndex(col).takeIf { it >= 0 }?.let { c.getString(it) }
+                    val name = str(android.provider.MediaStore.MediaColumns.DISPLAY_NAME) ?: return@use null
+                    val relative = str("relative_path")
+                        ?: str("_data")?.let { relativeOf(java.io.File(it).parent) }
+                        ?: ""
+                    Place(
+                        relative.split('/').filter { it.isNotBlank() },
+                        name,
+                        c.getColumnIndex(android.provider.MediaStore.MediaColumns.SIZE).takeIf { it >= 0 }?.let { c.getLong(it) } ?: -1L,
+                        str(android.provider.MediaStore.MediaColumns.MIME_TYPE) ?: "audio/mpeg",
+                    )
+                }
+            }
+            "file" -> {
+                val f = java.io.File(uri.path ?: return@runCatching null)
+                if (!f.isFile) return@runCatching null
+                // Inside the app's own storage: kept under "BitChord".
+                val folders = relativeOf(f.parent)?.split('/')?.filter { it.isNotBlank() } ?: listOf("BitChord")
+                Place(folders, f.name, f.length(), java.net.URLConnection.guessContentTypeFromName(f.name) ?: "audio/mpeg")
+            }
+            else -> null
+        }
+    }.getOrNull()
+
+    /** [dir] from the top of the phone's shared storage, or null when it isn't in it. */
+    @Suppress("DEPRECATION")
+    private fun relativeOf(dir: String?): String? {
+        dir ?: return null
+        val top = android.os.Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+        return if (dir.startsWith("$top/") || dir == top) dir.removePrefix(top).trim('/') else null
+    }
+
+    /**
+     * Sends what isn't in pCloud yet, file by file, while Wi-Fi lasts: the same folders and
+     * file names as on the phone, under "Music" at the top of your pCloud ("Music/X" on the
+     * phone stays "Music/X"; another folder, like "Download/X", goes to "Music/Download/X").
+     * The files go as they are: nothing renamed, retagged or converted.
+     */
     fun runNow() {
         val ctx = app ?: return
         scope.launch {
@@ -100,32 +154,56 @@ object PhoneBackup {
             var remaining = 0
             try {
                 if (!allowed(ctx)) return@launch
+                val top = com.music.bitchord.data.video.PcloudVideos.serverRoot() ?: return@launch
+                val user = AppSettings.webdavUsername.value
+                val pass = AppSettings.webdavPassword.value
                 val done = sent()
                 val todo = onPhone(ctx).filter { key(it) !in done }
                 remaining = todo.size
                 _state.value = State(running = true, sent = done.size, waiting = todo.size)
                 if (todo.isEmpty()) return@launch
-                TrackLog.d(TAG, "phone backup: ${todo.size} song(s) on the phone not in pCloud yet")
-                // Album by album, into Music/Artist/Album.
-                val groups = todo.groupBy { s ->
-                    val artist = s.artist.split(',', '&').firstOrNull()?.trim().orEmpty().ifBlank { "Unknown" }
-                    artist to (s.albumName?.takeIf { it.isNotBlank() } ?: "Singles")
-                }
-                var left = todo.size
-                for ((group, songs) in groups) {
+                TrackLog.d(TAG, "phone backup: ${todo.size} file(s) on the phone not in pCloud yet")
+                val made = HashSet<String>()
+                for (s in todo) {
                     if (!allowed(ctx)) {
-                        TrackLog.d(TAG, "phone backup: paused (off Wi-Fi, battery saver or switched off), $left left")
+                        TrackLog.d(TAG, "phone backup: paused (off Wi-Fi, battery saver or switched off), $remaining left")
                         break
                     }
-                    _state.value = _state.value.copy(current = "${group.first} — ${group.second}", waiting = left)
-                    val ok = runCatching { CloudCopies.send(ctx, songs, group.first, group.second, playlist = false, auto = true) }
-                        .onFailure { TrackLog.w(TAG, "phone backup: '${group.second}' failed: ${it.message}") }
-                        .getOrDefault(emptySet())
-                    markSent(songs.filter { it.videoId in ok }.map { key(it) })
-                    left -= songs.size
-                    remaining = left + songs.count { it.videoId !in ok }
+                    val uri = s.localUri ?: continue
+                    val place = placeOf(ctx, uri)
+                    if (place == null || place.name.endsWith(".m3u8", true)) {
+                        remaining--
+                        continue
+                    }
+                    val folders = listOf("Music") + (if (place.folders.firstOrNull().equals("Music", true)) place.folders.drop(1) else place.folders)
+                    var dir = top
+                    var ok = true
+                    for (f in folders) {
+                        dir = WebDavClient.joinUrl(dir, f.replace(Regex("""[\\:*?"<>|]"""), " ").trim())
+                        if (made.add(dir) && WebDavClient.ensureCollection(dir, user, pass).isFailure) { ok = false; break }
+                    }
+                    if (!ok) { TrackLog.w(TAG, "phone backup: no folder ${folders.joinToString("/")}"); break }
+                    val target = WebDavClient.joinUrl(dir, place.name)
+                    _state.value = _state.value.copy(current = (folders.drop(1) + place.name).joinToString("/"), waiting = remaining)
+                    // Already there (sent before, or put there another way): counted as backed up.
+                    if (WebDavClient.exists(target, user, pass).getOrDefault(false)) {
+                        markSent(listOf(key(s)))
+                        remaining--
+                        continue
+                    }
+                    val result = runCatching {
+                        ctx.contentResolver.openInputStream(android.net.Uri.parse(uri))!!.use { input ->
+                            WebDavClient.putFile(target, input, place.size, place.mime, user, pass, overwrite = false).getOrThrow()
+                        }
+                    }
+                    if (result.isSuccess) {
+                        markSent(listOf(key(s)))
+                        remaining--
+                    } else {
+                        TrackLog.w(TAG, "phone backup: '${place.name}' failed: ${result.exceptionOrNull()?.message}")
+                    }
                 }
-                TrackLog.d(TAG, "phone backup: done for now — ${sent().size} song(s) in pCloud")
+                TrackLog.d(TAG, "phone backup: done for now — ${sent().size} file(s) in pCloud, $remaining left")
             } finally {
                 _state.value = _state.value.copy(running = false, current = null, waiting = remaining)
                 running.unlock()

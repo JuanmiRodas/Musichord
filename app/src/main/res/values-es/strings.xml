@@ -1920,7 +1920,7 @@
     <string name="video_pcloud_browse_tab">Explorar</string>
     <string name="video_pcloud_is_video_folder">Carpeta de vídeos</string>
     <string name="video_pcloud_empty_folder">No hay carpetas ni vídeos aquí</string>
-    <string name="phone_backup_title">Copia de la música del móvil en pCloud (carpeta Music, con WiFi)</string>
+    <string name="phone_backup_title">Copia espejo de la música del móvil en pCloud (carpeta Music, con WiFi)</string>
     <string name="phone_backup_running">Subiendo %1$s, faltan %2$d</string>
     <string name="phone_backup_waiting">%1$d en pCloud, %2$d esperando WiFi</string>
     <string name="phone_backup_idle">Todo sincronizado: %1$d canciones en pCloud</string>
