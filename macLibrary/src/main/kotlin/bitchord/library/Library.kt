@@ -105,7 +105,7 @@ data class Track(
 /** Reads every audio file under the folders, once: unchanged files come from the index. */
 object Scanner {
     val AUDIO = setOf("mp3", "m4a", "aac", "flac", "wav", "aiff", "aif", "ogg", "opus", "webm", "wma", "mp4", "alac", "ape", "wv")
-    private val indexFile = File(Store.dir, "index.json")
+    private val indexFile get() = File(System.getProperty("bitchord.index") ?: File(Store.dir, "index.json").path)
     private val index = ConcurrentHashMap<String, Track>()
 
     fun loadIndex() {
@@ -122,6 +122,33 @@ object Scanner {
             .onEnter { d -> !d.name.startsWith(".") && d.name != "_Archivo BitChord" }
             .filter { it.isFile && !it.name.startsWith("._") && it.extension.lowercase() in AUDIO }
             .toList()
+    }
+
+    /** A file moved by a plan: its reading follows it (no need to read it again). */
+    fun moved(from: String, to: String) { index.remove(from)?.let { index[to] = it.copy(path = to) } }
+
+    /** What the index already knows under [folders] (no reading). */
+    fun known(folders: List<String>): List<Track> = index.values.filter { t -> folders.any { t.path.startsWith(it) } }
+
+    /**
+     * Like [scan], but stops at [deadline] (ms since epoch), saving what it read: run it
+     * again to go on. Returns whether every file was read.
+     */
+    suspend fun scanUntil(folders: List<String>, deadline: Long, progress: (Int, Int) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        val all = files(folders)
+        val todo = all.filter { f -> index[f.path]?.let { it.size == f.length() && it.modified == f.lastModified() } != true }
+        var done = all.size - todo.size
+        for (chunk in todo.chunked(64)) {
+            if (System.currentTimeMillis() > deadline) { saveIndex(); return@withContext false }
+            coroutineScope { chunk.map { f -> async { index[f.path] = probe(f) } }.awaitAll() }
+            done += chunk.size
+            progress(done, all.size)
+            if (done % 512 < 64) saveIndex()
+        }
+        val present = all.mapTo(HashSet()) { it.path }
+        index.keys.filter { k -> folders.any { k.startsWith(it) } && k !in present }.forEach { index.remove(it) }
+        saveIndex()
+        true
     }
 
     suspend fun scan(folders: List<String>, progress: (Int, Int) -> Unit): List<Track> = withContext(Dispatchers.IO) {

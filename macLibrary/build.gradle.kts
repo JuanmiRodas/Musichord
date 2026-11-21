@@ -45,3 +45,21 @@ compose.desktop {
         }
     }
 }
+
+// BitChord Audio: the same engine as a plain jar, for the command line (and for Claude, who
+// runs it on the library from its own Linux shell with the system's ffprobe/ffmpeg).
+val cli by configurations.creating
+dependencies {
+    cli("org.json:json:20240303")
+    cli("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    cli(kotlin("stdlib"))
+}
+tasks.register<Jar>("cliJar") {
+    archiveFileName.set("bitchord-library-cli.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("cli"))
+    manifest { attributes("Main-Class" to "bitchord.library.terminal.CliMainKt") }
+    from(sourceSets.main.get().output) { exclude("bitchord/library/MainKt*", "bitchord/library/Tab*", "bitchord/library/LibraryState*") }
+    from(cli.map { if (it.isDirectory) it else zipTree(it) })
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude("META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "META-INF/versions/**/module-info.class")
+}

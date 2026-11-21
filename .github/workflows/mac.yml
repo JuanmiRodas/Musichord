@@ -31,8 +31,9 @@ jobs:
 
       - name: Build the app
         run: |
+          set -o pipefail
           chmod +x gradlew
-          ./gradlew -Pbitchord.mac=true -Pbitchord.libraryVersion=1.0.${{ github.run_number }} :macLibrary:packageDmg --stacktrace 2>&1 | tee build.log
+          ./gradlew -Pbitchord.mac=true -Pbitchord.libraryVersion=1.0.${{ github.run_number }} :macLibrary:packageDmg :macLibrary:cliJar --stacktrace 2>&1 | tee build.log
 
       - name: Publish pre-release
         uses: softprops/action-gh-release@v2
@@ -44,4 +45,7 @@ jobs:
           body: |
             The Mac app that tidies the BitChord Audio library on pCloud (Apple Silicon).
             Unsigned: after copying it to Applications, run `xattr -cr "/Applications/BitChord Library.app"` once.
-          files: macLibrary/build/compose/binaries/main/dmg/*.dmg
+            Command line: `"/Applications/BitChord Library.app/Contents/MacOS/BitChord Library" help`, or `java -jar bitchord-library-cli.jar help`.
+          files: |
+            macLibrary/build/compose/binaries/main/dmg/*.dmg
+            macLibrary/build/cli/bitchord-library-cli.jar

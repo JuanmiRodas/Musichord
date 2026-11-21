@@ -47,10 +47,26 @@ class LibraryState {
         issues = tracks.associate { it.path to Audit.issues(it, dups) }
         todos = Todos.build(settings.root, lib, issues)
         phoneTodos = Todos.phone(settings.phoneTodo)
+        // Shared with the command line (and readable by Claude): the report in the library itself.
+        runCatching { ops().report(tracks, issues, todos, settings.extra) }
+    }
+
+    fun ops() = Ops(settings.root)
+
+    /** Re-reads the library from the index after the command line (or a plan) changed it. */
+    fun reload() {
+        tracks = Scanner.known(listOf(settings.root) + settings.extra)
+        recompute()
     }
 }
 
-fun main() = application {
+fun main(args: Array<String>) {
+    // BitChord Audio: with arguments, the same engine on the command line (see Cli.kt).
+    if (args.isNotEmpty()) { cli(args); return }
+    gui()
+}
+
+private fun gui() = application {
     Scanner.loadIndex()
     val state = remember { LibraryState() }
     Window(
@@ -86,6 +102,7 @@ private fun App(state: LibraryState) {
             state.recompute()
             state.busy = null
             state.message = "${state.tracks.size} archivos leídos"
+            runCatching { state.ops().log("app", "scan: ${state.tracks.size} files") }
         }
     }
     LaunchedEffect(Unit) { scan() }
@@ -162,6 +179,21 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
                 Line("Sin pérdida", extra.count { it.lossless }.toString())
                 Line("Por debajo de 320 u otro formato", extra.count { !it.mp3_320 && !it.lossless }.toString(), warn = true)
                 Line("Sin portada", extra.count { !it.hasCover }.toString(), warn = true)
+            }
+        }
+        item {
+            Card("Hablar con Claude") {
+                Text(
+                    "Copia el resumen y las últimas líneas del registro para pegarlo en la conversación. Claude también puede usar el mismo motor desde la línea de comandos: " +
+                        "\"/Applications/BitChord Library.app/Contents/MacOS/BitChord Library\" status (o scan, todo, plan, apply, undo, convert, claude).",
+                    color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = {
+                    val text = state.ops().forClaude()
+                    java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(text), null)
+                    state.message = "Informe copiado: pégalo en la conversación con Claude"
+                }) { Text("Copiar informe para Claude") }
             }
         }
         item {
@@ -262,8 +294,27 @@ private fun Names(state: LibraryState) {
         Text(
             "Carpeta «Año - Álbum (日本語)» y archivo «01 - Título (日本語) - Artista (日本語) - Álbum (日本語) - Año.mp3». " +
                 "${changes.size} archivos cambiarían de nombre o carpeta; $missing no tienen título o artista para nombrarlos. " +
-                "Todavía no se aplica nada: las colecciones (series, juegos) y la regla de 5 canciones por artista llegan en la siguiente fase.",
+                "Las colecciones (series, juegos) y la regla de 5 canciones por artista llegan en la siguiente fase.",
             color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, modifier = Modifier.padding(vertical = 10.dp),
+        )
+        val ops = state.ops()
+        var confirm by remember { mutableStateOf(false) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 10.dp)) {
+            Button(onClick = { val n = ops.planNames(state.libraryTracks).size; ops.log("app", "plan: $n moves"); state.message = "Plan guardado: $n movimientos" }) { Text("Guardar plan") }
+            Button(onClick = { confirm = true }, enabled = ops.loadPlan().isNotEmpty()) { Text("Aplicar plan…") }
+            OutlinedButton(onClick = { val n = ops.undo(null, "app"); state.reload(); state.message = "$n archivos devueltos a su sitio" }) { Text("Deshacer último lote") }
+        }
+        if (confirm) AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("¿Aplicar el plan?") },
+            text = { Text("Se moverán y renombrarán ${ops.loadPlan().size} archivos dentro de la biblioteca. Nada se sobrescribe y todo queda en el registro para deshacerlo.") },
+            confirmButton = { Button(onClick = {
+                confirm = false
+                val (done, skipped) = ops.apply(null, dryRun = false, who = "app")
+                state.reload()
+                state.message = "$done movidos, $skipped saltados"
+            }) { Text("Aplicar") } },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancelar") } },
         )
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(changes.take(3000)) { (t, to) ->
