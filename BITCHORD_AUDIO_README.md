@@ -1,6 +1,6 @@
 # BitChord Audio: resumen del fork y estado actual
 
-*Actualizado: 21 nov 2026 · última versión publicada: **v1.9.287***
+*Actualizado: 21 nov 2026 · última versión publicada: **v1.9.289** · app del Mac: **mac-library-1.0.2***
 
 Repositorio: `JuanmiRodas/Musichord`. Es el fork «BitChord Audio» de BitChord, una app Android en Kotlin con Compose y Media3, organizada en los módulos `shared`, `sharedUi` y `app`.
 
@@ -194,6 +194,20 @@ Este documento resume las modificaciones hechas sobre BitChord y el punto en que
 
 ### 2.13 Descargas de listas («Música que te gusta»)
 - Arreglado en v1.9.284: la sincronización en segundo plano no incluía los likes locales (pCloud) y los borraba 30 s después de descargarlos.
+
+### 2.14 Biblioteca ordenada en pCloud y app del Mac
+- Plan completo en `LIBRARY_PLAN.md`: solo MP3 320 auténtico en `pCloud Backup/MacBookAirdeJuanmi/Music/Música`; to-do de sustitución; nombres «Año - Álbum (日本語)» y «01 - Título (日本語) - Artista (日本語) - Álbum (日本語) - Año.mp3».
+- **BitChord** (`data/webdav/LibraryQuality.kt`):
+  - el espejo y las copias a pCloud solo suben MP3 o sin pérdida, y nada que ya esté en la biblioteca;
+  - la limpieza ya no convierte a AAC;
+  - de noche, con WiFi, se sustituyen las descargas por la copia de la biblioteca si es la misma grabación;
+  - la to-do del móvil va a `.bitchord-audio/todo-phone.json`.
+- **App del Mac «BitChord Library»** (`macLibrary/`, Compose Desktop, workflow `mac.yml`): se publica como pre-release `mac-library-1.0.N` con un `.dmg` para Apple Silicon. El actualizador del móvil no la ve.
+- **Auditoría del 21 nov:**
+  - biblioteca: 6.467 archivos, 3.024 sin calidad (47 %);
+  - espejo del móvil: 989 AAC u opus;
+  - Discografías: 5.049 archivos (242 FLAC);
+  - falsos 320 en muestras: 10–15 %.
 
 ---
 
