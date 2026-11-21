@@ -1985,4 +1985,7 @@
     <string name="song_dna_discogs_token">Token de Discogs</string>
     <string name="song_dna_lastfm_key">Clave de API de Last.fm (opcional)</string>
     <string name="song_dna_keys_save">Guardar</string>
+    <string name="song_dna_d_mood">Ambiente</string>
+    <string name="song_dna_d_theme">Tema</string>
+    <string name="song_dna_partial">%1$s no respondió esta vez; se volverá a preguntar esta noche.</string>
 </resources>

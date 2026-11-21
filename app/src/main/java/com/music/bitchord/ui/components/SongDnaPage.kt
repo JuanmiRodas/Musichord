@@ -305,6 +305,8 @@ fun SongDnaPage(
             d?.genres?.takeIf { it.isNotEmpty() }?.let { add(R.string.song_dna_d_genres to it.joinToString(", ")) }
             song.durationText?.let { add(R.string.song_dna_d_duration to it) }
             d?.bpm?.let { add(R.string.song_dna_d_bpm to "$it BPM") }
+            d?.stats?.get("mood")?.let { add(R.string.song_dna_d_mood to it) }
+            d?.stats?.get("theme")?.let { add(R.string.song_dna_d_theme to it) }
             d?.language?.let { add(R.string.song_dna_d_language to languageName(it)) }
             d?.isrc?.let { add(R.string.song_dna_d_isrc to it) }
             d?.stats?.get("recorded_at")?.let { add(R.string.song_dna_d_recorded to it) }
@@ -353,6 +355,12 @@ fun SongDnaPage(
                     }
                 } else if (!loading) {
                     Text(stringResource(R.string.song_dna_nothing), color = Dim, fontSize = 13.sp)
+                }
+                d?.failed?.takeIf { it.isNotEmpty() && !loading }?.let { f ->
+                    Text(
+                        stringResource(R.string.song_dna_partial, f.joinToString(", ")),
+                        color = Dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+                    )
                 }
                 Row(Modifier.padding(top = 4.dp)) {
                     TextButton(onClick = { force++ }, enabled = !loading) {

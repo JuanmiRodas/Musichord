@@ -67,6 +67,7 @@ object SongDna {
     private const val VERSION = 1
     private const val FRESH_MS = 120L * 24 * 60 * 60 * 1000
     private const val FRESH_EMPTY_MS = 21L * 24 * 60 * 60 * 1000
+    private const val FRESH_FAILED_MS = 2L * 24 * 60 * 60 * 1000
     private const val AGENT = "BitChordAudio/1.9 ( https://github.com/JuanmiRodas/Musichord )"
 
     data class Credit(val role: String, val name: String, val source: String)
@@ -104,6 +105,8 @@ object SongDna {
         val stats: Map<String, String> = emptyMap(),
         val links: List<Link> = emptyList(),
         val sources: List<String> = emptyList(),
+        /** Sources that didn't answer (network, timeout): asked again sooner, and nothing of theirs is lost. */
+        val failed: List<String> = emptyList(),
     ) {
         val empty: Boolean
             get() = credits.isEmpty() && facts.isEmpty() && relations.isEmpty() && covers.isEmpty() && genres.isEmpty()
@@ -207,7 +210,11 @@ object SongDna {
     fun cached(song: Song): Dna? = cache[keyOf(song)]
 
     private fun fresh(d: Dna): Boolean =
-        d.version == VERSION && System.currentTimeMillis() - d.fetchedAt < (if (d.empty) FRESH_EMPTY_MS else FRESH_MS)
+        d.version == VERSION && System.currentTimeMillis() - d.fetchedAt < when {
+            d.failed.isNotEmpty() -> FRESH_FAILED_MS
+            d.empty -> FRESH_EMPTY_MS
+            else -> FRESH_MS
+        }
 
     /** [song]'s DNA: what is kept, or looked up now ([force]: looked up again anyway). */
     suspend fun get(song: Song, force: Boolean = false): Dna {
@@ -215,7 +222,7 @@ object SongDna {
         if (!force) cache[key]?.takeIf(::fresh)?.let { return it }
         val running = inFlight[key]
         if (running != null && !force) return running.await()
-        val job = scope.async { lookUp(song, key) }
+        val job = scope.async { lookUp(song, key).let { new -> cache[key]?.let { old -> merged(old, new) } ?: new } }
         inFlight[key] = job
         return try {
             job.await().also { d ->
@@ -300,26 +307,39 @@ object SongDna {
     private suspend fun lookUp(song: Song, key: String): Dna = coroutineScope {
         val titles = titles(song.title)
         val artist = firstArtist(song.artist)
-        val parts = listOf(
+        val seconds = secondsOf(song.durationText)
+        val failed = java.util.Collections.synchronizedList(ArrayList<String>())
+        suspend fun ask(name: String, limit: Long, block: suspend () -> Found?): Found? {
+            var answered = false
+            val r = withTimeoutOrNull(limit) {
+                runCatching { block() }
+                    .onSuccess { answered = true }
+                    .onFailure { TrackLog.d(TAG, "song dna: $name failed: ${it.message}") }
+                    .getOrNull()
+            }
+            if (!answered) failed += name
+            return r
+        }
+        // 1. Everyone who can be asked by name, at once. Deezer's answer carries the ISRC —
+        //    the recording's own code — which phase 2 and 3 find it by exactly.
+        val first = listOf(
             "YouTube Music" to suspend { youTubeMusic(song) },
-            "MusicBrainz" to suspend { musicBrainz(titles, artist) },
             "Genius" to suspend { genius(titles, artist) },
             "Last.fm" to suspend { lastFm(titles.first(), artist) },
-            "iTunes" to suspend { iTunes(titles.first(), artist) },
-            "Deezer" to suspend { deezer(titles.first(), artist) },
+            "iTunes" to suspend { iTunes(titles.first(), artist, seconds) },
+            "Deezer" to suspend { deezer(titles, artist, seconds) },
             "Discogs" to suspend { discogs(titles.first(), artist) },
+            "TheAudioDB" to suspend { audioDb(titles, artist) },
             "AnimeThemes" to suspend { animeThemes(song) },
-        ).map { (name, block) ->
-            async(Dispatchers.IO) {
-                withTimeoutOrNull(if (name == "MusicBrainz") 45_000 else 15_000) {
-                    runCatching { block() }.onFailure { TrackLog.d(TAG, "song dna: $name failed: ${it.message}") }.getOrNull()
-                }
-            }
-        }
-        val found = parts.mapNotNull { it.await() }
-        // Wikipedia: from Wikidata when MusicBrainz knew it, else searched.
-        val wiki = withTimeoutOrNull(15_000) {
-            runCatching { wikipedia(found.firstNotNullOfOrNull { it.wikidata }, titles, artist) }.getOrNull()
+        ).map { (name, block) -> async(Dispatchers.IO) { ask(name, 15_000, block) } }.mapNotNull { it.await() }
+        val isrc = first.firstNotNullOfOrNull { it.isrc }
+        // 2. MusicBrainz: by the ISRC when there is one (no guessing), else by name and length.
+        val mb = ask("MusicBrainz", 45_000) { musicBrainz(titles, artist, isrc, seconds) }
+        val found = first + listOfNotNull(mb)
+        // 3. Wikipedia: through Wikidata — MusicBrainz's link, else the ISRC — else searched.
+        val wiki = ask("Wikipedia", 20_000) {
+            val wd = mb?.wikidata ?: isrc?.let { wikidataByIsrc(it) }
+            wikipedia(wd, titles, artist)
         }
         val all = found + listOfNotNull(wiki)
         fun <T> firstOf(f: (Found) -> T?): T? = all.firstNotNullOfOrNull(f)
@@ -345,6 +365,7 @@ object SongDna {
             stats = LinkedHashMap<String, String>().also { m -> all.forEach { f -> f.stats.forEach { (k, v) -> m.putIfAbsent(k, v) } } },
             links = all.flatMap { it.links }.distinctBy { it.url }.take(12),
             sources = all.flatMap { it.sources }.distinct(),
+            failed = failed.toList(),
         )
         TrackLog.d(
             TAG,
@@ -359,6 +380,34 @@ object SongDna {
         val ok = dates.map { it.trim() }.filter { it.length >= 4 && it.take(4).all(Char::isDigit) && !it.startsWith("0000") }
         val year = ok.minOfOrNull { it.take(4) } ?: return null
         return ok.filter { it.startsWith(year) }.maxByOrNull { it.length }
+    }
+
+    /**
+     * A new look-up on top of the last one: what a source said before is kept when it
+     * didn't answer this time, so a bad night never makes a song's page poorer.
+     */
+    private fun merged(old: Dna, new: Dna): Dna {
+        if (new.failed.isEmpty()) return new
+        val lost = old.sources.filter { it in new.failed }
+        if (lost.isEmpty()) return new
+        fun <T> keep(a: List<T>, b: List<T>, n: Int, by: (T) -> Any) = (a + b).distinctBy(by).take(n)
+        return new.copy(
+            album = new.album ?: old.album,
+            releaseDate = new.releaseDate ?: old.releaseDate,
+            label = new.label ?: old.label,
+            isrc = new.isrc ?: old.isrc,
+            bpm = new.bpm ?: old.bpm,
+            language = new.language ?: old.language,
+            genres = keep(new.genres, old.genres, 8) { it.lowercase() },
+            credits = mergeCredits(new.credits + old.credits.filter { it.source in lost }),
+            facts = keep(new.facts, old.facts.filter { it.source in lost }, 6) { it.text.take(60) },
+            covers = keep(new.covers, old.covers, 14) { it.url },
+            relations = keep(new.relations, old.relations, 60) { it.kind + it.title + it.artist },
+            uses = keep(new.uses, old.uses, 12) { it },
+            stats = old.stats + new.stats,
+            links = keep(new.links, old.links, 14) { it.url },
+            sources = (new.sources + lost).distinct(),
+        )
     }
 
     /** One credit per person and role, the most specific role kept. */
@@ -378,11 +427,29 @@ object SongDna {
 
     private val http by lazy { Http.client.newBuilder().callTimeout(10, TimeUnit.SECONDS).build() }
 
-    private fun get(url: String, headers: Map<String, String> = emptyMap()): String? = runCatching {
+    /**
+     * The body, or null when the site has nothing ("not found"). A network failure, a
+     * rate limit or a server error is thrown instead — the source is then marked as not
+     * having answered, and asked again soon rather than taken as having nothing.
+     */
+    private fun get(url: String, headers: Map<String, String> = emptyMap()): String? {
         val b = Request.Builder().url(url).header("User-Agent", AGENT).header("Accept", "application/json")
         headers.forEach { (k, v) -> b.header(k, v) }
-        http.newCall(b.build()).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
-    }.getOrNull()
+        return http.newCall(b.build()).execute().use { r ->
+            when {
+                r.isSuccessful -> r.body?.string()
+                r.code == 429 || r.code >= 500 -> throw java.io.IOException("HTTP ${r.code} from ${r.request.url.host}")
+                else -> null
+            }
+        }
+    }
+
+    /** "4:59" → 299. */
+    private fun secondsOf(t: String?): Int? = t?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+        ?.takeIf { it.isNotEmpty() }?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
+
+    /** Lengths that can be the same recording (both known and within 8 s, or one unknown). */
+    private fun sameLength(a: Int?, b: Int?): Boolean = a == null || b == null || b <= 0 || kotlin.math.abs(a - b) <= 8
 
     private fun json(url: String, headers: Map<String, String> = emptyMap()): JSONObject? =
         get(url, headers)?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -492,13 +559,20 @@ object SongDna {
         }
     }
 
-    private suspend fun musicBrainz(titles: List<String>, artist: String): Found? {
+    private suspend fun musicBrainz(titles: List<String>, artist: String, isrc: String?, seconds: Int?): Found? {
         var recId: String? = null
-        for (t in titles.take(2)) {
+        if (isrc != null) {
+            val byCode = NameSources.getJson(NameSources.mb("isrc/$isrc", "inc" to "artist-credits"), musicBrainz = true)
+                ?.optJSONArray("recordings").objects()
+            recId = (byCode.firstOrNull { sameArtist(artist, credit(it)) } ?: byCode.firstOrNull())
+                ?.optString("id")?.takeIf { it.isNotBlank() }
+        }
+        if (recId == null) for (t in titles.take(2)) {
             val q = "recording:\"${NameSources.lucene(t)}\" AND artist:\"${NameSources.lucene(artist)}\""
             val found = NameSources.getJson(NameSources.mb("recording", "query" to q, "limit" to "8"), musicBrainz = true) ?: continue
             val hit = found.optJSONArray("recordings").objects()
                 .filter { it.optInt("score") >= 80 && sameTitle(titles, it.optString("title")) && sameArtist(artist, credit(it)) }
+                .filter { sameLength(seconds, it.optInt("length").takeIf { l -> l > 0 }?.let { l -> l / 1000 }) }
                 // The earliest release is the original, not a compilation's copy.
                 .minByOrNull { it.optString("first-release-date").ifBlank { "9999" } }
             recId = hit?.optString("id")?.takeIf { it.isNotBlank() }
@@ -516,7 +590,7 @@ object SongDna {
         f.sources += "MusicBrainz"
         f.links += Link("MusicBrainz", "https://musicbrainz.org/recording/$id")
         f.releaseDate = rec.optString("first-release-date").ifBlank { null }
-        f.isrc = rec.optJSONArray("isrcs")?.optString(0)?.ifBlank { null }
+        f.isrc = isrc ?: rec.optJSONArray("isrcs")?.optString(0)?.ifBlank { null }
         (rec.optJSONArray("genres").objects() + rec.optJSONArray("tags").objects())
             .sortedByDescending { it.optInt("count") }.take(5).forEach { f.genres += it.optString("name") }
         mbRelCredits(rec.optJSONArray("relations"), f)
@@ -547,7 +621,7 @@ object SongDna {
             r.optJSONObject("release-group")?.let { g -> g.optString("id") to (g.optString("title").ifBlank { r.optString("title") }) }
         }.filter { it.first.isNotBlank() }.distinctBy { it.first }.take(5)
         for ((gid, title) in groups) {
-            val caa = json("https://coverartarchive.org/release-group/$gid") ?: continue
+            val caa = runCatching { json("https://coverartarchive.org/release-group/$gid") }.getOrNull() ?: continue
             val front = caa.optJSONArray("images").objects().firstOrNull { it.optBoolean("front") } ?: continue
             val url = front.optJSONObject("thumbnails")?.let { t -> t.optString("large").ifBlank { t.optString("500") } }
                 ?.ifBlank { null } ?: front.optString("image").ifBlank { null } ?: continue
@@ -605,6 +679,44 @@ object SongDna {
         if (text != null) f.facts += Fact(clip(text), "Wikipedia", url)
         f.links += Link("Wikipedia", url)
         f.sources += "Wikipedia"
+        return f
+    }
+
+    /** The Wikidata item of the recording with this ISRC (property P1243). */
+    private fun wikidataByIsrc(isrc: String): String? {
+        val q = "SELECT ?i WHERE { ?i wdt:P1243 \"$isrc\" } LIMIT 1"
+        val r = json(
+            "https://query.wikidata.org/sparql?format=json&query=${enc(q)}",
+            mapOf("Accept" to "application/sparql-results+json"),
+        ) ?: return null
+        return r.optJSONObject("results")?.optJSONArray("bindings").objects().firstOrNull()
+            ?.optJSONObject("i")?.optString("value")?.substringAfterLast('/')?.takeIf { it.startsWith("Q") }
+    }
+
+    // ── TheAudioDB (its free public key) ───────────────────────────────────
+
+    private fun audioDb(titles: List<String>, artist: String): Found? {
+        var t: JSONObject? = null
+        for (title in titles.take(2)) {
+            t = json("https://www.theaudiodb.com/api/v1/json/123/searchtrack.php?s=${enc(artist)}&t=${enc(title)}")
+                ?.optJSONArray("track").objects()
+                .firstOrNull { sameTitle(titles, it.optString("strTrack")) && sameArtist(artist, it.optString("strArtist")) }
+            if (t != null) break
+        }
+        val track = t ?: return null
+        val f = Found()
+        f.sources += "TheAudioDB"
+        fun str(k: String) = track.optString(k).takeIf { it.isNotBlank() && it != "null" }
+        val lang = Locale.getDefault().language.uppercase()
+        (str("strDescription$lang") ?: str("strDescriptionEN"))?.takeIf { it.length > 40 }
+            ?.let { f.facts += Fact(clip(it), "TheAudioDB", null) }
+        listOfNotNull(str("strGenre"), str("strStyle")).forEach { f.genres += it }
+        str("strMood")?.let { f.stats["mood"] = it }
+        str("strTheme")?.let { f.stats["theme"] = it }
+        str("strAlbum")?.let { f.album = it }
+        str("strTrackThumb")?.let { f.covers += Cover(it, "TheAudioDB") }
+        str("strMusicVid")?.let { f.links += Link("Videoclip", it) }
+        str("idTrack")?.let { f.links += Link("TheAudioDB", "https://www.theaudiodb.com/track/$it") }
         return f
     }
 
@@ -737,10 +849,13 @@ object SongDna {
 
     // ── iTunes and Deezer ──────────────────────────────────────────────────
 
-    private fun iTunes(title: String, artist: String): Found? {
+    private fun iTunes(title: String, artist: String, seconds: Int?): Found? {
         val arr = json("https://itunes.apple.com/search?entity=song&limit=8&term=${enc("$title $artist")}")
             ?.optJSONArray("results").objects()
-        val r = arr.firstOrNull { sameTitle(listOf(title), it.optString("trackName")) && sameArtist(artist, it.optString("artistName")) }
+        val r = arr.firstOrNull {
+            sameTitle(listOf(title), it.optString("trackName")) && sameArtist(artist, it.optString("artistName")) &&
+                sameLength(seconds, it.optLong("trackTimeMillis").takeIf { ms -> ms > 0 }?.let { ms -> (ms / 1000).toInt() })
+        }
             ?: return null
         val f = Found()
         f.sources += "iTunes"
@@ -754,11 +869,18 @@ object SongDna {
         return f
     }
 
-    private fun deezer(title: String, artist: String): Found? {
-        val arr = json("https://api.deezer.com/search?limit=8&q=${enc("artist:\"$artist\" track:\"$title\"")}")
-            ?.optJSONArray("data").objects()
-        val hit = arr.firstOrNull { sameTitle(listOf(title), it.optString("title")) && sameArtist(artist, it.optJSONObject("artist")?.optString("name").orEmpty()) }
-            ?: return null
+    private fun deezer(titles: List<String>, artist: String, seconds: Int?): Found? {
+        var hit: JSONObject? = null
+        for (title in titles.take(2)) {
+            val arr = json("https://api.deezer.com/search?limit=10&q=${enc("artist:\"$artist\" track:\"$title\"")}")
+                ?.optJSONArray("data").objects()
+            hit = arr.firstOrNull {
+                sameTitle(titles, it.optString("title")) && sameArtist(artist, it.optJSONObject("artist")?.optString("name").orEmpty()) &&
+                    sameLength(seconds, it.optInt("duration"))
+            }
+            if (hit != null) break
+        }
+        if (hit == null) return null
         val t = json("https://api.deezer.com/track/${hit.optLong("id")}") ?: hit
         val f = Found()
         f.sources += "Deezer"
@@ -849,6 +971,7 @@ object SongDna {
         put("st", JSONObject(d.stats as Map<*, *>))
         put("ln", JSONArray(d.links.map { JSONObject().put("l", it.label).put("u", it.url) }))
         put("src", JSONArray(d.sources))
+        put("fail", JSONArray(d.failed))
     }
 
     private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).map { optString(it) }
@@ -879,6 +1002,7 @@ object SongDna {
         stats = o.optJSONObject("st")?.let { s -> s.keys().asSequence().associateWith { s.optString(it) } }.orEmpty(),
         links = o.optJSONArray("ln").objects().map { Link(it.optString("l"), it.optString("u")) },
         sources = o.optJSONArray("src").strings(),
+        failed = o.optJSONArray("fail").strings(),
     )
 
     /** Whether [song] is a file of yours (pCloud) — used by the page's "File" section. */

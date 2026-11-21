@@ -1897,4 +1897,7 @@
     <string name="song_dna_discogs_token">Discogs token</string>
     <string name="song_dna_lastfm_key">Last.fm API key (optional)</string>
     <string name="song_dna_keys_save">Save</string>
+    <string name="song_dna_d_mood">Mood</string>
+    <string name="song_dna_d_theme">Theme</string>
+    <string name="song_dna_partial">%1$s did not answer this time; they will be asked again tonight.</string>
 </resources>
