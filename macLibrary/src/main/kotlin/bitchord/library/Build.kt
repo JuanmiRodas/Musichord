@@ -161,20 +161,69 @@ object Builder {
         return aliases[norm(c)] ?: c
     }
 
+    // ── Artists' names: one folder per person, "Romaji (日本語)" when both are known ──
+
+    private val CJK = Regex("""[\p{IsHiragana}\p{IsKatakana}\p{IsHan}\p{IsHangul}]""")
+    private fun latin(s: String) = s.any { it.isLetter() } && !CJK.containsMatchIn(s)
+    private val VARIOUS = Regex("(?i)^(various( artists)?|varios( artistas)?|varias|va|v\\.a\\.|compilation|unknown( artist)?|artista desconocido)$")
+    /** "Akiko Shikata" and "Shikata Akiko" are one key. */
+    private fun akey(s: String) = if (latin(s)) Regex("[\\p{L}\\p{N}]+").findAll(s.lowercase()).map { it.value }.sorted().joinToString("") else norm(s)
+    private fun firstArtist(s: String) = s.split(',', '&', '、', ';', '/', '×').first().replace(Regex("(?i)\\s(feat|ft)\\.?.*$"), "").trim()
+    private fun folderName(s: String) = s.replace(Regex("(?i)\\s*[-–]?\\s*(discography|discografía|collection|colecci[oó]n|коллекция|complete|\\(mp3\\)|\\[mp3\\]|\\(flac\\))"), " ").replace(Regex("\\s+"), " ").trim()
+
+    /** akey → display name, learnt from folders named in Latin whose songs are tagged in Japanese (and spelling variants). */
+    private fun artistNames(sources: List<Source>, tracks: List<Track>): Map<String, String> {
+        val latinVariants = HashMap<String, MutableMap<String, Int>>()
+        val pairs = HashMap<String, String>() // cjk akey → latin
+        fun see(n: String) { if (latin(n)) latinVariants.getOrPut(akey(n)) { HashMap() }.merge(n, 1, Int::plus) }
+        tracks.forEach { t -> see(firstArtist(t.artist)); if (t.albumArtist.isNotBlank()) see(firstArtist(t.albumArtist)) }
+        // "Latin (日本語)" already in tags.
+        tracks.forEach { t ->
+            Regex("""^(.+?)\s*[(（]([^)）]+)[)）]$""").find(firstArtist(t.artist))?.let { m ->
+                val (a, b) = m.groupValues[1].trim() to m.groupValues[2].trim()
+                if (latin(a) && !latin(b)) pairs[akey(b)] = a
+            }
+        }
+        for (s in sources.filter { it.mode == "all" }) {
+            tracks.filter { it.path.startsWith(s.path + "/") }
+                .groupBy { it.path.removePrefix(s.path + "/").substringBefore('/') }
+                .forEach { (folder, list) ->
+                    val f = folderName(folder)
+                    val top = list.groupingBy { firstArtist(it.albumArtist.ifBlank { it.artist }) }.eachCount().maxByOrNull { it.value } ?: return@forEach
+                    if (top.value < list.size * 0.6 || VARIOUS.matches(top.key)) return@forEach
+                    if (latin(f) && !latin(top.key)) pairs.putIfAbsent(akey(top.key), f)
+                    see(f)
+                }
+        }
+        val best = latinVariants.mapValues { (_, v) -> v.maxBy { it.value }.key }
+        val out = HashMap<String, String>()
+        best.forEach { (k, v) -> out[k] = v }
+        pairs.forEach { (cjk, lat) ->
+            val l = best[akey(lat)] ?: lat
+            val shown = "$l (${tracks.firstNotNullOfOrNull { t -> firstArtist(t.artist).takeIf { akey(it) == cjk } } ?: cjk})"
+            out[cjk] = shown
+            out[akey(lat)] = shown
+        }
+        return out
+    }
+
     private val GENERIC = Regex("(?i)\\b(singles?|ost|soundtracks?|collection|best|songs?|music|op|ed|openings?|endings?|cds?|disc|vol\\.?\\s*\\d+)\\b")
 
     /** A folder of many artists whose songs carry its name (album, title or file name). */
+    private val GRAB_BAG = Regex("(?i)^(vari[oa]s|various( artists)?|va|musique|m[uú]sica.*|music|otros.*|other.*|misc.*|comercial|rock|pop|nueva.*|mix.*|random|singles?|descargad.*|lost)$")
+
     private fun isCollection(name: String, tracks: List<Track>): Boolean {
-        if (tracks.size < 3) return false
+        if (tracks.size < 3 || GRAB_BAG.matches(name.trim())) return false
         val artists = tracks.groupingBy { norm(it.artist.split(',', '&', '、').first()) }.eachCount()
         val top = artists.values.maxOrNull() ?: 0
         if (artists.size < 3 || top >= tracks.size * 0.6) return false
         val words = norm(name.replace(GENERIC, " "))
         if (words.length < 3) return false
-        val named = tracks.count { t -> listOf(t.album, t.title, File(t.path).name, File(t.path).parentFile.name).any { norm(it).contains(words) } }
-        val bigAlbum = tracks.groupingBy { norm(it.album) }.eachCount().filterKeys { it.isNotEmpty() }.values.maxOrNull() ?: 0
-        return named >= tracks.size * 0.3 || bigAlbum >= tracks.size * 0.3
+        val named = tracks.count { t -> listOf(t.album, t.title, File(t.path).name).any { norm(it).contains(words) } }
+        return named >= tracks.size * 0.3
     }
+
+    private val KARAOKE = Regex("(?i)karaoke|カラオケ|off[ -]?vocal|instrumental|inst\\.\\)|\\(inst\\)|backing track|オリジナル・カラオケ")
 
     /** "2009 - storia" / "2003/FICTION": the album folder's year and name. */
     private fun folderAlbum(rel: String): Pair<String?, String> {
@@ -205,6 +254,7 @@ object Builder {
             }
             for (t in mine) {
                 if (!t.lossless && t.codec != "mp3") { skipped += t to "formato ${t.codec ?: "?"} (no se copia)"; continue }
+                if (KARAOKE.containsMatchIn(t.title + " " + File(t.path).nameWithoutExtension)) { skipped += t to "karaoke / sin voz"; continue }
                 val r = rel(t)
                 val (fYear, fAlbum) = folderAlbum(r)
                 val album = t.album.ifBlank { fAlbum }
@@ -239,9 +289,12 @@ object Builder {
         val cands = candidates(sources, tracks, skipped)
         val have = tracks.filter { it.path.startsWith("$targetRoot/") }.associateBy { key(it) }
         val byKey = cands.groupBy { key(it.track) }
+        val names = artistNames(sources, tracks)
+        fun shown(n: String) = names[akey(n)] ?: n
+        fun ownerOf(t: Track) = firstArtist(t.albumArtist.takeUnless { it.isBlank() || VARIOUS.matches(it.trim()) } ?: t.artist).ifBlank { t.artist }
         // Artists' song counts (for the 5-song rule), counted once per recording.
         val artistSongs = byKey.values.mapNotNull { l -> l.maxBy { it.homeKind }.takeIf { it.homeKind == 1 } }
-            .groupingBy { norm(it.track.albumArtist.ifBlank { it.track.artist.split(',', '&', '、').first() }) }.eachCount()
+            .groupingBy { akey(shown(ownerOf(it.track))) }.eachCount()
         // A collection's albums by how many of its songs they gather.
         val albumSize = cands.filter { it.homeKind >= 2 }.groupBy { it.home.lowercase() to norm(it.album) }.mapValues { (_, l) -> l.map { key(it.track) }.toSet().size }
         val alternatives = HashMap<String, List<String>>()
@@ -257,16 +310,18 @@ object Builder {
             val existing = have[k]
             if (existing != null && rank(existing) >= rank(best.track)) return@mapNotNull null
             val t = best.track
-            val artist = t.artist.ifBlank { chosen.track.artist }
+            val rawArtist = t.artist.ifBlank { chosen.track.artist }
+            val artist = if (rawArtist.contains(',') || rawArtist.contains('&')) rawArtist else shown(rawArtist)
             val albumArtist = when (homeKind) {
                 3, 2 -> home.substringBefore('/')
-                else -> t.albumArtist.ifBlank { artist.split(',', '&', '、').first().trim() }
+                else -> shown(ownerOf(t))
             }
             val folder = when (homeKind) {
                 3, 2 -> home.split('/').joinToString("/") { clean(it) }
-                else -> if ((artistSongs[norm(albumArtist)] ?: 0) >= 5) clean(albumArtist) else "Otros artistas"
+                else -> if ((artistSongs[akey(albumArtist)] ?: 0) >= 5) clean(albumArtist) else "Otros artistas"
             }
-            val album = chosen.album.ifBlank { "Sueltas" }
+            // An album named only as its collection or folder ("Sailor Moon/Sailor moon") is no album.
+            val album = chosen.album.takeUnless { it.isBlank() || norm(it) == norm(home.substringAfterLast('/')) || GRAB_BAG.matches(it.trim()) } ?: "Sueltas"
             val year = chosen.year ?: t.year
             val no = chosen.track.trackNo ?: t.trackNo
             val disc = chosen.track.discNo
