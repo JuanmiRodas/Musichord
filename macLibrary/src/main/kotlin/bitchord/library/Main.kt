@@ -59,6 +59,84 @@ class LibraryState {
         tracks = Scanner.known(listOf(settings.root) + settings.extra)
         recompute()
     }
+
+    var update by mutableStateOf<Updater.Release?>(null)
+    lateinit var scope: kotlinx.coroutines.CoroutineScope
+    /** Set by the window: quits the app (for an update). */
+    var quit: () -> Unit = {}
+
+    fun scan(then: (() -> Unit)? = null) {
+        if (busy != null) return
+        scope.launch {
+            busy = "Leyendo la biblioteca y las fuentes…"
+            File(settings.root).mkdirs()
+            Live.root = settings.root
+            val folders = listOf(settings.root) + settings.extra
+            tracks = Scanner.scan(folders.filter { File(it).isDirectory }) { done, total ->
+                progress = done.toFloat() / total.coerceAtLeast(1)
+                Live.phase = "leyendo $done de $total"; Live.write()
+            }
+            recompute()
+            busy = null
+            message = "${tracks.size} archivos leídos"
+            Live.phase = message.orEmpty(); Live.write(force = true)
+            runCatching { ops().log("app", "scan: ${tracks.size} files") }
+            then?.invoke()
+        }
+    }
+
+    /** Builds and puts the library in order with the plan (see [Engine.build]). */
+    fun build() {
+        if (busy != null) return
+        scope.launch {
+            busy = "Construyendo y ordenando la biblioteca…"
+            val ticker = launch { while (true) { busy = Live.summary(); progress = Live.done.get().toFloat() / Live.total.coerceAtLeast(1); kotlinx.coroutines.delay(1000) } }
+            val summary = withContext(Dispatchers.IO) { runCatching { Engine.build(Sources.load(), tracks, settings.root) }.getOrElse { "Error: ${it.message}" } }
+            ticker.cancel()
+            busy = null
+            message = summary
+            reload()
+        }
+    }
+
+    fun stop() { Live.stop = true; message = "Parando en cuanto termine el archivo en curso…" }
+
+    /** Downloads the newest version and restarts into it; [then] (e.g. "build") runs after the restart. */
+    fun installUpdate(then: String? = null) {
+        val r = update ?: return
+        if (busy != null) { message = "Termina o para la tarea en curso antes de actualizar"; return }
+        scope.launch {
+            busy = "Actualizando a la versión ${r.version}…"
+            val ok = withContext(Dispatchers.IO) {
+                if (then != null) runCatching { File(settings.root, ".bitchord-library/resume.json").writeText(org.json.JSONObject().put("then", then).toString()) }
+                Updater.prepare(r) { busy = it }
+            }
+            ok.onSuccess { Scanner.saveIndex(); quit() }.onFailure { busy = null; message = "No se pudo actualizar: ${it.message}" }
+        }
+    }
+
+    /** Orders left in the inbox (by Claude): run one at a time while the app is open. */
+    suspend fun inbox() {
+        for (o in withContext(Dispatchers.IO) { Inbox.take(settings.root) }) {
+            Live.lastCommand = "${o.cmd} ${o.args.joinToString(" ")}".trim()
+            ops().log("inbox", "order: ${Live.lastCommand}")
+            val answer = when (o.cmd) {
+                "status" -> Live.summary() + "\nVersión ${Updater.current}" + (update?.let { " (hay ${it.version})" } ?: "")
+                "stop" -> { stop(); "Parando" }
+                "scan" -> if (busy != null) "Ocupada: ${Live.summary()}" else { scan(); "Leyendo" }
+                "build" -> if (busy != null) "Ocupada: ${Live.summary()}" else { build(); "Construyendo y ordenando" }
+                "scan+build" -> if (busy != null) "Ocupada: ${Live.summary()}" else { scan { build() }; "Leyendo y después construyendo" }
+                "update" -> {
+                    update = withContext(Dispatchers.IO) { Updater.newer() }
+                    if (update == null) "Ya es la última versión (${Updater.current})" else { installUpdate(o.then); "Actualizando a ${update?.version}" }
+                }
+                "cli" -> withContext(Dispatchers.IO) { Inbox.runCli(o.args) }
+                else -> "Orden desconocida: ${o.cmd} (status, stop, scan, build, scan+build, update, cli)"
+            }
+            withContext(Dispatchers.IO) { Inbox.answer(settings.root, o.file.name, answer) }
+            Live.write(force = true)
+        }
+    }
 }
 
 fun main(args: Array<String>) {
@@ -70,8 +148,9 @@ fun main(args: Array<String>) {
 private fun gui() = application {
     Scanner.loadIndex()
     val state = remember { LibraryState() }
+    state.quit = { exitApplication() }
     Window(
-        onCloseRequest = { Scanner.saveIndex(); exitApplication() },
+        onCloseRequest = { Live.stop = true; Scanner.saveIndex(); exitApplication() },
         title = "BitChord Library",
         state = rememberWindowState(width = 1200.dp, height = 820.dp),
     ) {
@@ -93,22 +172,26 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
 private fun App(state: LibraryState) {
     var tab by remember { mutableStateOf(Tab.SUMMARY) }
     val scope = rememberCoroutineScope()
-    fun scan() {
-        if (state.busy != null) return
-        scope.launch {
-            state.busy = "Leyendo la biblioteca y las fuentes…"
-            File(state.settings.root).mkdirs()
-            val folders = listOf(state.settings.root) + state.settings.extra
-            state.tracks = Scanner.scan(folders.filter { File(it).isDirectory }) { done, total ->
-                state.progress = done.toFloat() / total.coerceAtLeast(1)
-            }
-            state.recompute()
-            state.busy = null
-            state.message = "${state.tracks.size} archivos leídos"
-            runCatching { state.ops().log("app", "scan: ${state.tracks.size} files") }
+    state.scope = scope
+    fun scan() = state.scan()
+    LaunchedEffect(Unit) {
+        Live.root = state.settings.root
+        // After an update: what was asked to run next ("build").
+        val resume = File(state.settings.root, ".bitchord-library/resume.json")
+        val then = runCatching { org.json.JSONObject(resume.readText()).optString("then") }.getOrNull()
+        resume.delete()
+        state.scan { if (then == "build") state.build() }
+        state.update = withContext(Dispatchers.IO) { Updater.newer() }
+    }
+    // Orders from Claude, and the live status file, every few seconds.
+    LaunchedEffect(Unit) {
+        var n = 0
+        while (true) {
+            runCatching { state.inbox() }
+            if (Live.job != null || state.busy != null || n++ % 20 == 0) Live.write(force = true)
+            kotlinx.coroutines.delay(3000)
         }
     }
-    LaunchedEffect(Unit) { scan() }
     Row(Modifier.fillMaxSize()) {
         NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
             Spacer(Modifier.height(12.dp))
@@ -120,8 +203,19 @@ private fun App(state: LibraryState) {
             Spacer(Modifier.height(12.dp))
         }
         Column(Modifier.fillMaxSize().padding(24.dp)) {
+            state.update?.let { u ->
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Hay una versión nueva: ${u.version} (tienes ${Updater.current})", color = Color.White, modifier = Modifier.weight(1f))
+                    Button(enabled = state.busy == null, onClick = { state.installUpdate() }) { Text("Actualizar y reiniciar") }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
             state.busy?.let { b ->
-                Text(b, color = Color.White.copy(alpha = 0.8f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(b, color = Color.White.copy(alpha = 0.8f), modifier = Modifier.weight(1f))
+                    if (Live.job != null) OutlinedButton(onClick = { state.stop() }) { Text("Parar") }
+                }
+                if (Live.current.isNotEmpty() && Live.job != null) Text(Live.current, color = Color.White.copy(alpha = 0.45f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
             }
             state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp)) }
@@ -186,96 +280,43 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
             }
         }
         item {
-            Card("Construir la biblioteca limpia") {
+            Card("Construir y ordenar la biblioteca") {
                 Text(
                     "De cada canción se copia la mejor versión de las fuentes (sin pérdida → MP3 320; si no, MP3 320 auténtico; si no, el mejor MP3 mientras tanto, apuntado en la to-do). " +
-                        "AAC, m4a, opus, webm y wma no se copian. Las fuentes no se tocan nunca.",
+                        "AAC, m4a, opus, webm y wma no se copian. Lo ya copiado se mueve a su sitio (no se copia otra vez) y lo que el plan ya no quiere se quita. Las fuentes no se tocan nunca.",
                     color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp,
                 )
                 Spacer(Modifier.height(8.dp))
-                val sources = remember { Sources.load() }
-                // All sources at once: each song placed and taken from its best copy across them all.
-                var allPreview by remember(state.tracks) { mutableStateOf<String?>(null) }
-                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Todas las fuentes (recomendado)", color = Color.White, fontWeight = FontWeight.Bold)
-                        Text(allPreview ?: "Cada canción una sola vez, de su mejor copia entre todas las fuentes", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
-                    }
+                var preview by remember(state.tracks) { mutableStateOf<String?>(null) }
+                preview?.let { Text(it, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp) }
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(enabled = state.busy == null, onClick = {
-                        val p = Builder.plan(sources, state.tracks, state.settings.root)
-                        allPreview = "Se copiarían ${p.copy.size} (${p.copy.count { it.reason.startsWith("MP3 320") }} MP3 320, ${p.copy.count { it.reason.startsWith("sin pérdida") }} desde sin pérdida, " +
-                            "${p.copy.count { it.reason.contains("mientras") }} por debajo, a la to-do) · no se copian ${p.skipped.size}"
-                    }) { Text("Ver qué se copia") }
-                    Spacer(Modifier.width(8.dp))
-                    Button(enabled = state.busy == null, onClick = {
                         scope.launch {
-                            state.busy = "Construyendo la biblioteca con todas las fuentes…"
-                            val p = Builder.plan(sources, state.tracks, state.settings.root)
-                            var ok = 0
-                            var failed = 0
-                            withContext(Dispatchers.IO) {
-                                val covers = Covers(state.settings.root)
-                                p.copy.forEachIndexed { i, item ->
-                                    Builder.copy(item, covers).onSuccess { ok++; covers.propose(item.key, p.alternatives[item.key].orEmpty()) }
-                                        .onFailure { failed++; state.ops().log("app", "build error ${item.track.path}: ${it.message}") }
-                                    state.progress = (i + 1f) / p.copy.size.coerceAtLeast(1)
-                                    state.busy = "Construyendo: ${i + 1} de ${p.copy.size} (${ok} copiadas, $failed con error)"
-                                    if (i % 50 == 0) covers.save()
-                                }
-                                covers.save()
-                            }
-                            state.ops().log("app", "build (all sources): $ok copied, $failed failed")
+                            state.busy = "Calculando el plan…"
+                            preview = withContext(Dispatchers.IO) { Inbox.runCli(listOf("build", "--dry-run")).lines().take(3).joinToString("\n") }
                             state.busy = null
-                            state.message = "$ok copiadas" + if (failed > 0) ", $failed con error (ver registro)" else ""
                         }
-                    }) { Text("Construir todo") }
+                    }) { Text("Ver el plan") }
+                    Button(enabled = state.busy == null, onClick = { state.build() }) { Text("Construir y ordenar") }
+                    if (Live.job != null) OutlinedButton(onClick = { state.stop() }) { Text("Parar") }
                 }
-                Text("O una sola fuente:", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-                sources.forEach { s ->
-                    var preview by remember(state.tracks) { mutableStateOf<String?>(null) }
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(s.name, color = Color.White, fontWeight = FontWeight.Medium)
-                            Text(preview ?: s.path, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
-                        }
-                        OutlinedButton(enabled = state.busy == null, onClick = {
-                            val p = Builder.plan(listOf(s), state.tracks, state.settings.root)
-                            preview = "Se copiarían ${p.copy.size} (" + p.copy.groupingBy { it.reason }.eachCount().entries.joinToString { "${it.value} ${it.key}" } +
-                                ") · no se copian ${p.skipped.size}"
-                        }) { Text("Ver qué se copia") }
-                        Spacer(Modifier.width(8.dp))
-                        Button(enabled = state.busy == null, onClick = {
-                            scope.launch {
-                                state.busy = "Copiando desde ${s.name}…"
-                                val p = Builder.plan(listOf(s), state.tracks, state.settings.root)
-                                var ok = 0
-                                var failed = 0
-                                withContext(Dispatchers.IO) {
-                                    val covers = Covers(state.settings.root)
-                                    p.copy.forEachIndexed { i, item ->
-                                        Builder.copy(item, covers).onSuccess { ok++; covers.propose(item.key, p.alternatives[item.key].orEmpty()) }
-                                            .onFailure { failed++; state.ops().log("app", "build error ${item.track.path}: ${it.message}") }
-                                        state.progress = (i + 1f) / p.copy.size.coerceAtLeast(1)
-                                        if (i % 50 == 0) covers.save()
-                                    }
-                                    covers.save()
-                                }
-                                state.ops().log("app", "build ${s.name}: $ok copied, $failed failed")
-                                state.busy = null
-                                state.message = "$ok copiadas desde ${s.name}" + if (failed > 0) ", $failed con error (ver registro)" else ""
-                            }
-                        }) { Text("Construir") }
-                    }
-                }
+                if (Live.unmatched.isNotEmpty()) Text("${Live.unmatched.size} archivos de la biblioteca que la app no hizo y no reconoce se han dejado donde estaban (lista en live.json)", color = Color(0xFFFFB4A9), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
         }
         item {
             Card("Hablar con Claude") {
                 Text(
-                    "Copia el resumen y las últimas líneas del registro para pegarlo en la conversación. Claude también puede usar el mismo motor desde la línea de comandos: " +
-                        "\"/Applications/BitChord Library.app/Contents/MacOS/BitChord Library\" status (o scan, todo, plan, apply, undo, convert, claude).",
+                    "Claude ve lo que hace la app (.bitchord-library/live.json y log.txt, dentro de la biblioteca) y le puede dar órdenes mientras está abierta " +
+                        "(archivos en .bitchord-library/inbox: construir, parar, leer, actualizar o cualquier orden de la línea de comandos). Versión ${Updater.current}.",
                     color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp,
                 )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(enabled = state.busy == null, onClick = {
+                    scope.launch {
+                        state.update = withContext(Dispatchers.IO) { Updater.newer() }
+                        state.message = state.update?.let { "Hay una versión nueva: ${it.version}" } ?: "Ya tienes la última versión (${Updater.current})"
+                    }
+                }) { Text("Buscar actualización") }
                 Spacer(Modifier.height(8.dp))
                 Button(onClick = {
                     val text = state.ops().forClaude()

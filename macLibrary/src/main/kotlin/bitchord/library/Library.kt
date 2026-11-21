@@ -60,12 +60,20 @@ object Tools {
         listOf("/opt/homebrew/bin/$name", "/usr/local/bin/$name", System.getProperty("user.home") + "/.homebrew/bin/$name")
             .firstOrNull { File(it).canExecute() }
 
+    /**
+     * Runs a program and waits at most [timeoutSec]: its output goes to files, so a program
+     * that hangs (a file pCloud never finishes downloading) is stopped instead of blocking.
+     */
     fun run(vararg args: String, timeoutSec: Long = 120): Pair<Int, String> {
-        val p = ProcessBuilder(*args).redirectErrorStream(false).start()
-        val out = p.inputStream.bufferedReader().readText()
-        val err = p.errorStream.bufferedReader().readText()
-        if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) { p.destroyForcibly(); return -1 to "" }
-        return p.exitValue() to (out.ifBlank { err })
+        val out = File.createTempFile("bitchord-", ".out")
+        val err = File.createTempFile("bitchord-", ".err")
+        try {
+            val p = ProcessBuilder(*args).redirectOutput(out).redirectError(err)
+                .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null"))).start()
+            if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) { p.destroyForcibly(); p.waitFor(5, TimeUnit.SECONDS); return -1 to err.readText().takeLast(500) }
+            val o = out.readText()
+            return p.exitValue() to (o.ifBlank { err.readText() })
+        } finally { out.delete(); err.delete() }
     }
 }
 
@@ -129,6 +137,11 @@ object Scanner {
             .filter { it.isFile && !it.name.startsWith("._") && it.extension.lowercase() in AUDIO }
             .toList()
     }
+
+    /** A file the app wrote itself: known without reading it. */
+    fun put(t: Track) { index[t.path] = t }
+    fun forget(path: String) { index.remove(path) }
+    fun get(path: String): Track? = index[path]
 
     /** A file moved by a plan: its reading follows it (no need to read it again). */
     fun moved(from: String, to: String) { index.remove(from)?.let { index[to] = it.copy(path = to) } }

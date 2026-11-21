@@ -26,6 +26,17 @@ dependencies {
     runtimeOnly("org.bytedeco:javacpp:$javacpp:$arch")
 }
 
+// The app's own version, readable at run time (for its updater and for Claude).
+val versionDir = layout.buildDirectory.dir("generated/version")
+val writeVersion by tasks.registering {
+    val v = libVersion
+    val out = versionDir
+    outputs.dir(out)
+    doLast { out.get().file("bitchord-library-version.txt").asFile.apply { parentFile.mkdirs(); writeText(v) } }
+}
+sourceSets.main { resources.srcDir(versionDir) }
+tasks.named("processResources") { dependsOn(writeVersion) }
+
 kotlin {
     jvmToolchain(21)
     // Bytecode for Java 11: the jar also runs on older Javas (Claude's shell has 11).

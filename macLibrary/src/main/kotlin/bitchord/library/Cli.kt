@@ -18,8 +18,9 @@ Uso: bitchord-library <orden> [opciones]
   convert           Convierte los FLAC de la biblioteca a MP3 320 (--only <carpeta>)
   claude            Informe para pegar en la conversación con Claude
   sources           Las fuentes (solo lectura) y sus reglas
-  build             Construye la biblioteca limpia desde las fuentes: --source "<nombre>",
-                    --dry-run para ver qué se copiaría, --only <texto> para una parte
+  build             Construye la biblioteca y la ordena con el plan (mueve lo ya copiado,
+                    copia lo que falta, quita lo que sobra): --source "<nombre>",
+                    --dry-run para ver el plan, --only <texto> para filtrar lo que se enseña
   covers            Portadas alternativas propuestas pendientes de aprobar
   free              Carpetas de las fuentes ya cubiertas por la biblioteca (para liberar espacio)
   archive           Copia a --to <carpeta> y comprueba las carpetas cubiertas (--folder <texto>);
@@ -34,7 +35,7 @@ Opciones:
 """
 
 /** The command line: `BitChord Library <command> …` (or the jar, `java -jar bitchord-library-cli.jar …`). */
-fun cli(args: Array<String>) = runBlocking {
+fun cli(args: Array<String>, inApp: Boolean = false) = runBlocking {
     fun opt(name: String): String? = args.indexOf("--$name").takeIf { it >= 0 && it + 1 < args.size }?.let { args[it + 1] }
     fun flag(name: String) = "--$name" in args
     val cmd = args.firstOrNull() ?: "help"
@@ -46,7 +47,7 @@ fun cli(args: Array<String>) = runBlocking {
     val deadline = System.currentTimeMillis() + (opt("max-seconds")?.toLongOrNull() ?: 86_400L) * 1000
     if (cmd != "help") File(root).mkdirs()
     val ops = Ops(root)
-    Scanner.loadIndex()
+    if (!inApp) Scanner.loadIndex()
 
     fun computed(): Triple<List<Track>, Map<String, List<Audit.Issue>>, List<Todo>> {
         val tracks = Scanner.known(folders)
@@ -120,7 +121,8 @@ fun cli(args: Array<String>) = runBlocking {
             val only = opt("only")
             val items = plan.copy.filter { only == null || it.target.contains(only, ignoreCase = true) || it.track.path.contains(only, ignoreCase = true) }
             println("Fuentes: ${chosen.joinToString { it.name }} · ${known.size - Scanner.known(listOf(root)).size} archivos leídos")
-            println("Se copiarían ${items.size}: " + items.groupingBy { it.reason }.eachCount().entries.joinToString { "${it.value} ${it.key}" })
+            println("En la biblioteca ${items.size}: ${items.count { it.reason == "MP3 320" }} MP3 320, ${items.count { it.reason.startsWith("sin pérdida") }} desde sin pérdida, " +
+                "${items.count { it.reason.contains("mientras") }} por debajo de 320 (mientras tanto, en la to-do)")
             println("No se copian ${plan.skipped.size}: " + plan.skipped.groupingBy { it.second }.eachCount().entries.joinToString { "${it.value} ${it.key}" })
             File(ops.state, "build-plan.csv").writeText(buildString {
                 appendLine("origen,destino,motivo")
@@ -132,18 +134,7 @@ fun cli(args: Array<String>) = runBlocking {
                 println("— Lista completa en ${File(ops.state, "build-plan.csv").path}")
                 return@runBlocking
             }
-            var ok = 0
-            var failed = 0
-            val covers = Covers(root)
-            for (i in items) {
-                if (System.currentTimeMillis() > deadline) break
-                Builder.copy(i, covers).onSuccess { ok++; covers.propose(i.key, plan.alternatives[i.key].orEmpty()) }
-                    .onFailure { failed++; println("ERROR ${i.track.path}: ${it.message}") }
-                if ((ok + failed) % 50 == 0) covers.save()
-            }
-            covers.save()
-            ops.log("cli", "build ${chosen.joinToString { it.name }}: $ok copied, $failed failed, ${items.size - ok - failed} left")
-            println("$ok copiadas, $failed con error, ${items.size - ok - failed} pendientes (vuelve a lanzar «build» para seguir)")
+            println(Engine.build(chosen, known, root))
         }
         "covers" -> Covers(root).pending().let { p ->
             p.take(40).forEach { println("${it.key}: ${it.alternative.name} (de ${it.from})") }
