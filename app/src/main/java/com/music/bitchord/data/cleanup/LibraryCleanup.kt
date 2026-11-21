@@ -524,7 +524,10 @@ Every file index must appear once in tracks.
                 )
             }.getOrNull()
             val change = TagWriter.Change(text = text, discNumber = t.disc?.toString(), lyrics = lyrics?.let { it.enhanced ?: it.plain }, cover = coverAt(t.cover ?: p.coverUrl))
-            val result = if (convert && f.ext in LOSSLESS) toAac(context, f, change, u, pw) else when (val o = TagWriter.intoPcloud(context, f.id, change)) {
+            // BitChord Audio: a lossless file is no longer made into AAC here — the library is MP3 320
+            // only, made from lossless by the Mac app. Its tags are written as any other file's.
+            @Suppress("UNUSED_VARIABLE") val wouldConvert = convert && f.ext in LOSSLESS
+            val result = when (val o = TagWriter.intoPcloud(context, f.id, change)) {
                 is CoverWriter.Outcome.Saved -> "Saved"
                 else -> o.toString()
             }

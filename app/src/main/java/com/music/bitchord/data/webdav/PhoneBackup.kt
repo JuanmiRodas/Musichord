@@ -1,5 +1,7 @@
 package com.music.bitchord.data.webdav
 
+import com.music.bitchord.data.sources.OwnFileMatcher
+
 import android.content.Context
 import android.os.PowerManager
 import com.music.bitchord.data.LocalMediaRepository
@@ -172,6 +174,15 @@ object PhoneBackup {
                     val uri = s.localUri ?: continue
                     val place = placeOf(ctx, uri)
                     if (place == null || place.name.endsWith(".m3u8", true)) {
+                        remaining--
+                        continue
+                    }
+                    // BitChord Audio: the library is MP3 320 only — no AAC, m4a, opus or webm goes up;
+                    // and a song your library already has is not copied again.
+                    if (!LibraryQuality.isKeepable(place.name) || WebDavConfig.isWebDavId(s.videoId) ||
+                        OwnFileMatcher.matches(s.title, s.artist, null, s.albumName).isNotEmpty()
+                    ) {
+                        markSent(listOf(key(s)))
                         remaining--
                         continue
                     }

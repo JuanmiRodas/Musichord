@@ -132,13 +132,25 @@ object CloudCopies {
             if (!auto) todo.filter { Downloads.localCopyOf(it.videoId) == null }.let { missing ->
                 if (missing.isNotEmpty()) Downloads.enqueueAll(app, missing, title)
             }
-            val ready = if (auto) todo.filter { it.localUri != null } else todo.mapNotNull { s ->
+            val readyAll = if (auto) todo.filter { it.localUri != null } else todo.mapNotNull { s ->
                 val uri = Downloads.localCopyOf(s.videoId) ?: withTimeoutOrNull(10 * 60_000L) {
                     Downloads.saved.first { s.videoId in it }
                     Downloads.localCopyOf(s.videoId)
                 }
                 uri?.let { s.copy(localUri = it) }
             }
+            // BitChord Audio: the library is MP3 320 only — an AAC, m4a, opus or webm download is
+            // not uploaded (it stays on the phone's to-do for the Mac app instead).
+            val refused = readyAll.filter { s ->
+                val name = runCatching {
+                    app.contentResolver.query(android.net.Uri.parse(s.localUri!!), arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                }.getOrNull() ?: s.localUri
+                !LibraryQuality.isKeepable(name, Downloads.savedEntry(s.videoId)?.second)
+            }
+            if (refused.isNotEmpty()) TrackLog.d(TAG, "cloud copy: '$title' — ${refused.size} not MP3 or lossless, left out (on the to-do instead)")
+            val ready = readyAll - refused.toSet()
+            if (ready.isEmpty()) return already
             // Tagged first — title, artist, album, track number and the cover — so the files are
             // whole wherever they go (a JioSaavn copy is saved without tags).
             ready.forEachIndexed { i, s ->
