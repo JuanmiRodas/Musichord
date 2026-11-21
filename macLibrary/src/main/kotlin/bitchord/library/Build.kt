@@ -329,6 +329,9 @@ object Builder {
             val placed = list.filter { it.homeKind == homeKind }
             var home = placed.groupingBy { it.home }.eachCount().maxBy { it.value }.key
             if (homeKind == 1) absorbed[akey(shown(ownerOf(best.track)))]?.let { home = it; homeKind = 3 }
+            // A "collection" named as one of a rules source's people (a folder of FictionJunction
+            // with guests) is that person's.
+            if (homeKind == 2) absorbed[akey(shown(home.substringBefore('/')))]?.let { home = it; homeKind = 3 }
             val inHome = placed.filter { it.home == home }
             val chosen = if (inHome.isEmpty()) best else if (homeKind >= 2) inHome.maxWith(compareBy({ albumSize[home.lowercase() to norm(it.album)] ?: 0 }, { -(it.year?.toIntOrNull() ?: 9999) }))
                 else inHome.maxWith(compareBy({ rank(it.track) }, { richness(it.track) }))
@@ -341,12 +344,12 @@ object Builder {
             val owner = ownerOf(t)
             val albumArtist = when (homeKind) {
                 3 -> shown(home.substringBefore('/'))
-                2 -> home.substringBefore('/')
+                2 -> shown(home.substringBefore('/'))
                 else -> if (owner.isBlank()) "Otros artistas" else shown(owner)
             }
             val folder = when (homeKind) {
                 3 -> (listOf(shown(home.substringBefore('/'))) + home.split('/').drop(1)).joinToString("/") { clean(it) }
-                2 -> home.split('/').joinToString("/") { clean(it) }
+                2 -> (listOf(shown(home.substringBefore('/'))) + home.split('/').drop(1)).joinToString("/") { clean(it) }
                 else -> if (owner.isNotBlank() && (artistSongs[akey(albumArtist)] ?: 0) >= 5) clean(albumArtist) else "Otros artistas"
             }
             // An album named only as its collection or folder ("Sailor Moon/Sailor moon") is no album.
