@@ -203,6 +203,12 @@ Este documento resume las modificaciones hechas sobre BitChord y el punto en que
   - de noche, con WiFi, se sustituyen las descargas por la copia de la biblioteca: se baja aparte, se comprueba que es mejor y que la huella acústica coincide (error < 0,33), se registra la nueva y solo entonces se borra la antigua;
   - la to-do del móvil va a `.bitchord-audio/todo-phone.json`.
 - **App del Mac «BitChord Library»** (`macLibrary/`, Compose Desktop, workflow `mac.yml`): se publica como pre-release `mac-library-1.0.N` con un `.dmg` para Apple Silicon. El actualizador del móvil no la ve.
+- **Línea de comandos (para Claude y para Terminal):** el mismo motor.
+  - En el Mac: `"/Applications/BitChord Library.app/Contents/MacOS/BitChord Library" <orden>`.
+  - Claude: `bitchord-library-cli.jar` (Java 11+) en su shell del Mac.
+  - Órdenes: `status`, `scan`, `todo`, `fake320`, `plan`, `apply` (`--only`, `--dry-run`), `undo`, `convert`, `claude`.
+  - Estado compartido con la app en `Música/.bitchord-library/`: `report.json`, `todo.csv`, `plan.json`, `journal.jsonl` (para deshacer) y `log.txt`.
+  - En la app, el botón «Copiar informe para Claude» copia el resumen y el registro.
 - **Auditoría del 21 nov:**
   - biblioteca: 6.467 archivos, 3.024 sin calidad (47 %);
   - espejo del móvil: 989 AAC u opus;
