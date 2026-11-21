@@ -194,6 +194,43 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
                 )
                 Spacer(Modifier.height(8.dp))
                 val sources = remember { Sources.load() }
+                // All sources at once: each song placed and taken from its best copy across them all.
+                var allPreview by remember(state.tracks) { mutableStateOf<String?>(null) }
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Todas las fuentes (recomendado)", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(allPreview ?: "Cada canción una sola vez, de su mejor copia entre todas las fuentes", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+                    }
+                    OutlinedButton(enabled = state.busy == null, onClick = {
+                        val p = Builder.plan(sources, state.tracks, state.settings.root)
+                        allPreview = "Se copiarían ${p.copy.size} (${p.copy.count { it.reason.startsWith("MP3 320") }} MP3 320, ${p.copy.count { it.reason.startsWith("sin pérdida") }} desde sin pérdida, " +
+                            "${p.copy.count { it.reason.contains("mientras") }} por debajo, a la to-do) · no se copian ${p.skipped.size}"
+                    }) { Text("Ver qué se copia") }
+                    Spacer(Modifier.width(8.dp))
+                    Button(enabled = state.busy == null, onClick = {
+                        scope.launch {
+                            state.busy = "Construyendo la biblioteca con todas las fuentes…"
+                            val p = Builder.plan(sources, state.tracks, state.settings.root)
+                            var ok = 0
+                            var failed = 0
+                            withContext(Dispatchers.IO) {
+                                val covers = Covers(state.settings.root)
+                                p.copy.forEachIndexed { i, item ->
+                                    Builder.copy(item, covers).onSuccess { ok++; covers.propose(item.key, p.alternatives[item.key].orEmpty()) }
+                                        .onFailure { failed++; state.ops().log("app", "build error ${item.track.path}: ${it.message}") }
+                                    state.progress = (i + 1f) / p.copy.size.coerceAtLeast(1)
+                                    state.busy = "Construyendo: ${i + 1} de ${p.copy.size} (${ok} copiadas, $failed con error)"
+                                    if (i % 50 == 0) covers.save()
+                                }
+                                covers.save()
+                            }
+                            state.ops().log("app", "build (all sources): $ok copied, $failed failed")
+                            state.busy = null
+                            state.message = "$ok copiadas" + if (failed > 0) ", $failed con error (ver registro)" else ""
+                        }
+                    }) { Text("Construir todo") }
+                }
+                Text("O una sola fuente:", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 sources.forEach { s ->
                     var preview by remember(state.tracks) { mutableStateOf<String?>(null) }
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
