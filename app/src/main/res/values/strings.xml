@@ -1900,4 +1900,18 @@
     <string name="song_dna_d_mood">Mood</string>
     <string name="song_dna_d_theme">Theme</string>
     <string name="song_dna_partial">%1$s did not answer this time; they will be asked again tonight.</string>
+    <string name="song_dna_contributors">Contributors</string>
+    <string name="song_dna_more_roles">+ %1$d roles</string>
+    <string name="song_dna_in_library_count">%1$d in your library</string>
+    <string name="song_dna_collab_count">%1$d collaborators</string>
+    <string name="song_dna_back_to">Back to %1$s</string>
+    <string name="song_dna_artist_profile">Artist profile</string>
+    <string name="song_dna_p_library">In your library</string>
+    <string name="song_dna_p_collaborators">Worked with</string>
+    <string name="song_dna_p_works">Their work</string>
+    <string name="song_dna_p_about">About</string>
+    <string name="song_dna_p_looking">Looking up their work…</string>
+    <string name="song_dna_p_none">No other work found.</string>
+    <string name="song_dna_show_all">Show all (%1$d)</string>
+    <string name="song_dna_p_on_song">On this song</string>
 </resources>

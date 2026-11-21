@@ -64,13 +64,23 @@ object SongDna {
 
     private const val TAG = "BitChord"
     const val FILE = "song_dna.json"
-    private const val VERSION = 1
+    private const val VERSION = 2
     private const val FRESH_MS = 120L * 24 * 60 * 60 * 1000
     private const val FRESH_EMPTY_MS = 21L * 24 * 60 * 60 * 1000
     private const val FRESH_FAILED_MS = 2L * 24 * 60 * 60 * 1000
     private const val AGENT = "BitChordAudio/1.9 ( https://github.com/JuanmiRodas/Musichord )"
 
-    data class Credit(val role: String, val name: String, val source: String)
+    /** A person on the song, with whatever ids the sources gave (so their page finds the right person). */
+    data class Credit(
+        val role: String,
+        val name: String,
+        val source: String,
+        val mbid: String? = null,
+        val geniusId: Long? = null,
+        val discogsId: Long? = null,
+        val ytId: String? = null,
+        val image: String? = null,
+    )
     data class Fact(val text: String, val source: String, val url: String?)
     data class Cover(val url: String, val label: String)
     data class Link(val label: String, val url: String)
@@ -153,6 +163,12 @@ object SongDna {
         return out.filter { it.isNotBlank() }
     }
 
+    /** One person under any spelling a source used ("Mika Nakashima", "MIKA NAKASHIMA"). */
+    fun personKey(name: String): String = OwnFileMatcher.key(name).ifEmpty { name.trim().lowercase() }
+
+    /** Everything known, for the people pages (who worked on what in your library). */
+    fun all(): Collection<Dna> = cache.values
+
     fun keyOf(song: Song): String = OwnFileMatcher.key(bareTitle(song.title)) + "|" + OwnFileMatcher.key(firstArtist(song.artist))
 
     private val cache = ConcurrentHashMap<String, Dna>()
@@ -175,6 +191,7 @@ object SongDna {
         appContext = context.applicationContext
         file = File(context.filesDir, FILE)
         DnaKeys.init(context)
+        DnaPeople.init(context)
         scope.launch { load() }
     }
 
@@ -258,6 +275,10 @@ object SongDna {
                     .distinctBy { keyOf(it) }
                 val todo = pool.filter { s -> cache[keyOf(s)]?.let(::fresh) != true }
                 if (todo.isEmpty()) {
+                    if (AppSettings.meteredConnection.value == false) {
+                        val people = DnaPeople.fillSome(300) { BackgroundHours.now() && AppSettings.meteredConnection.value == false }
+                        if (people > 0) TrackLog.d(TAG, "song dna: $people people looked up")
+                    }
                     delay(6 * 60 * 60_000L)
                     continue
                 }
@@ -278,6 +299,11 @@ object SongDna {
                 }
                 _progress.value = null
                 TrackLog.d(TAG, "song dna: $done songs looked up")
+                // Then the people on their credits (their other work), a few hundred a night.
+                if (BackgroundHours.now()) {
+                    val people = DnaPeople.fillSome(300) { BackgroundHours.now() && AppSettings.meteredConnection.value == false }
+                    TrackLog.d(TAG, "song dna: $people people looked up")
+                }
                 delay(30 * 60_000L)
             }
         }
@@ -420,7 +446,20 @@ object SongDna {
             val old = seen[k]
             if (old == null || (old.role.length < c.role.length && c.role.length < 40)) seen[k] = c.copy(name = name)
         }
-        return seen.values.sortedBy { DnaRoles.group(it.role).ordinal }.take(80)
+        // Every id any source gave a person, on each of their credits.
+        val ids = HashMap<String, Credit>()
+        for (c in list) {
+            val pk = personKey(c.name)
+            val o = ids[pk] ?: c
+            ids[pk] = o.copy(
+                mbid = o.mbid ?: c.mbid, geniusId = o.geniusId ?: c.geniusId, discogsId = o.discogsId ?: c.discogsId,
+                ytId = o.ytId ?: c.ytId, image = o.image ?: c.image,
+            )
+        }
+        return seen.values.map { c ->
+            val i = ids[personKey(c.name)] ?: return@map c
+            c.copy(mbid = c.mbid ?: i.mbid, geniusId = c.geniusId ?: i.geniusId, discogsId = c.discogsId ?: i.discogsId, ytId = c.ytId ?: i.ytId, image = c.image ?: i.image)
+        }.sortedBy { DnaRoles.group(it.role).ordinal }.take(80)
     }
 
     // ── HTTP ───────────────────────────────────────────────────────────────
@@ -506,12 +545,19 @@ object SongDna {
         walk(root) { o ->
             val section = o.optJSONObject("dismissableDialogContentSectionRenderer") ?: return@walk
             val role = runs(section.optJSONObject("title")) ?: return@walk
-            val people = runs(section.optJSONObject("subtitle")) ?: return@walk
+            val subtitle = section.optJSONObject("subtitle")
+            val people = runs(subtitle) ?: return@walk
+            // A name that is a link is an artist page on YouTube Music.
+            val pages = HashMap<String, String>()
+            subtitle?.optJSONArray("runs").objects().forEach { r ->
+                val id = r.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("browseId")
+                if (!id.isNullOrBlank()) pages[r.optString("text").trim()] = id
+            }
             for (name in people.split('\n', '•').flatMap { it.split(Regex("""\s*,\s*|\s+&\s+""")) }) {
                 val n = name.trim()
                 if (n.isBlank()) continue
                 if (DnaRoles.group(role) == DnaRoles.Group.LABEL) f.label = f.label ?: n
-                else f.credits += Credit(role, n, "YouTube Music")
+                else f.credits += Credit(role, n, "YouTube Music", ytId = pages[n])
             }
         }
         if (f.credits.isEmpty() && f.label == null) return null
@@ -548,6 +594,7 @@ object SongDna {
         for (r in rels.objects()) {
             if (r.optString("target-type") != "artist") continue
             val name = r.optJSONObject("artist")?.optString("name")?.takeIf { it.isNotBlank() } ?: continue
+            val mbid = r.optJSONObject("artist")?.optString("id")?.takeIf { it.isNotBlank() }
             val type = r.optString("type")
             val attrs = r.optJSONArray("attributes")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
             val role = when {
@@ -555,7 +602,7 @@ object SongDna {
                 type == "vocal" -> attrs.firstOrNull()?.let { "$it vocals" } ?: "vocals"
                 else -> type + if (attrs.isNotEmpty() && type != "instrument") " (" + attrs.joinToString(", ") + ")" else ""
             }
-            into.credits += Credit(role, name, "MusicBrainz")
+            into.credits += Credit(role, name, "MusicBrainz", mbid = mbid)
         }
     }
 
@@ -786,15 +833,20 @@ object SongDna {
         s.optString("song_art_image_url").ifBlank { null }?.takeIf { !it.contains("default_cover") }
             ?.let { f.covers += Cover(it, "Genius") }
         s.optJSONObject("stats")?.optLong("pageviews")?.takeIf { it > 0 }?.let { f.stats["genius_views"] = it.toString() }
-        fun names(key: String) = s.optJSONArray(key).objects().mapNotNull { it.optString("name").ifBlank { null } }
-        names("writer_artists").forEach { f.credits += Credit("writer", it, "Genius") }
-        names("producer_artists").forEach { f.credits += Credit("producer", it, "Genius") }
-        names("featured_artists").forEach { f.credits += Credit("featured", it, "Genius") }
+        fun person(role: String, a: JSONObject): Credit? {
+            val name = a.optString("name").ifBlank { return null }
+            val image = a.optString("image_url").takeIf { it.startsWith("http") && !it.contains("default_avatar") }
+            return Credit(role, name, "Genius", geniusId = a.optLong("id").takeIf { it > 0 }, image = image)
+        }
+        fun people(key: String, role: String) = s.optJSONArray(key).objects().mapNotNull { person(role, it) }.forEach { f.credits += it }
+        s.optJSONObject("primary_artist")?.let { a -> person("performer", a)?.let { f.credits += it } }
+        people("writer_artists", "writer")
+        people("producer_artists", "producer")
+        people("featured_artists", "featured")
         for (p in s.optJSONArray("custom_performances").objects()) {
             val role = p.optString("label")
             if (role.isBlank()) continue
-            p.optJSONArray("artists").objects().mapNotNull { it.optString("name").ifBlank { null } }
-                .forEach { f.credits += Credit(role, it, "Genius") }
+            p.optJSONArray("artists").objects().mapNotNull { person(role, it) }.forEach { f.credits += it }
         }
         for (r in s.optJSONArray("song_relationships").objects()) {
             val kind = r.optString("relationship_type").ifBlank { r.optString("type") }
@@ -893,7 +945,10 @@ object SongDna {
         }
         t.optJSONArray("contributors").objects().forEach { c ->
             val name = c.optString("name").ifBlank { return@forEach }
-            f.credits += Credit(if (c.optString("role") == "Featured") "featured" else "performer", name, "Deezer")
+            f.credits += Credit(
+                if (c.optString("role") == "Featured") "featured" else "performer", name, "Deezer",
+                image = c.optString("picture_xl").ifBlank { c.optString("picture_big") }.takeIf { it.startsWith("http") && !it.contains("/artist//") },
+            )
         }
         t.optString("link").ifBlank { null }?.let { f.links += Link("Deezer", it) }
         return f
@@ -927,7 +982,7 @@ object SongDna {
         fun extra(a: JSONArray?) = a.objects().forEach { x ->
             val name = x.optString("anv").ifBlank { x.optString("name") }.replace(Regex("""\s*\(\d+\)$"""), "").ifBlank { return@forEach }
             val role = x.optString("role").ifBlank { return@forEach }
-            f.credits += Credit(role, name, "Discogs")
+            f.credits += Credit(role, name, "Discogs", discogsId = x.optLong("id").takeIf { it > 0 })
         }
         // The song's own credits, then the release's that name no tracks (they cover them all).
         r.optJSONArray("tracklist").objects().firstOrNull { sameTitle(listOf(title), it.optString("title")) }
@@ -961,7 +1016,12 @@ object SongDna {
         d.album?.let { put("al", it) }; d.releaseDate?.let { put("rd", it) }; d.label?.let { put("lb", it) }
         d.isrc?.let { put("isrc", it) }; d.bpm?.let { put("bpm", it) }; d.language?.let { put("lang", it) }
         put("g", JSONArray(d.genres))
-        put("c", JSONArray(d.credits.map { JSONObject().put("r", it.role).put("n", it.name).put("s", it.source) }))
+        put("c", JSONArray(d.credits.map { c ->
+            JSONObject().put("r", c.role).put("n", c.name).put("s", c.source).apply {
+                c.mbid?.let { put("mb", it) }; c.geniusId?.let { put("gn", it) }; c.discogsId?.let { put("dc", it) }
+                c.ytId?.let { put("yt", it) }; c.image?.let { put("im", it) }
+            }
+        }))
         put("f", JSONArray(d.facts.map { JSONObject().put("x", it.text).put("s", it.source).put("u", it.url ?: "") }))
         put("cv", JSONArray(d.covers.map { JSONObject().put("u", it.url).put("l", it.label) }))
         put("rel", JSONArray(d.relations.map {
@@ -989,7 +1049,16 @@ object SongDna {
         bpm = o.optString("bpm").ifBlank { null },
         language = o.optString("lang").ifBlank { null },
         genres = o.optJSONArray("g").strings(),
-        credits = o.optJSONArray("c").objects().map { Credit(it.optString("r"), it.optString("n"), it.optString("s")) },
+        credits = o.optJSONArray("c").objects().map {
+            Credit(
+                it.optString("r"), it.optString("n"), it.optString("s"),
+                mbid = it.optString("mb").ifBlank { null },
+                geniusId = it.optLong("gn").takeIf { v -> v > 0 },
+                discogsId = it.optLong("dc").takeIf { v -> v > 0 },
+                ytId = it.optString("yt").ifBlank { null },
+                image = it.optString("im").ifBlank { null },
+            )
+        },
         facts = o.optJSONArray("f").objects().map { Fact(it.optString("x"), it.optString("s"), it.optString("u").ifBlank { null }) },
         covers = o.optJSONArray("cv").objects().map { Cover(it.optString("u"), it.optString("l")) },
         relations = o.optJSONArray("rel").objects().map {

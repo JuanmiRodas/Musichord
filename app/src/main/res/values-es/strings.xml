@@ -1988,4 +1988,18 @@
     <string name="song_dna_d_mood">Ambiente</string>
     <string name="song_dna_d_theme">Tema</string>
     <string name="song_dna_partial">%1$s no respondió esta vez; se volverá a preguntar esta noche.</string>
+    <string name="song_dna_contributors">Contribuidores</string>
+    <string name="song_dna_more_roles">+ %1$d funciones</string>
+    <string name="song_dna_in_library_count">%1$d en tu biblioteca</string>
+    <string name="song_dna_collab_count">%1$d colaboradores</string>
+    <string name="song_dna_back_to">Volver a %1$s</string>
+    <string name="song_dna_artist_profile">Perfil de artista</string>
+    <string name="song_dna_p_library">En tu biblioteca</string>
+    <string name="song_dna_p_collaborators">Ha trabajado con</string>
+    <string name="song_dna_p_works">Sus trabajos</string>
+    <string name="song_dna_p_about">Biografía</string>
+    <string name="song_dna_p_looking">Buscando sus trabajos…</string>
+    <string name="song_dna_p_none">No se han encontrado otros trabajos.</string>
+    <string name="song_dna_show_all">Ver todos (%1$d)</string>
+    <string name="song_dna_p_on_song">En esta canción</string>
 </resources>

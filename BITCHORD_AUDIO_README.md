@@ -1,6 +1,6 @@
 # BitChord Audio: resumen del fork y estado actual
 
-*Actualizado: 21 nov 2026 · última versión publicada: **v1.9.286***
+*Actualizado: 21 nov 2026 · última versión publicada: **v1.9.287***
 
 Repositorio: `JuanmiRodas/Musichord`. Es el fork «BitChord Audio» de BitChord, una app Android en Kotlin con Compose y Media3, organizada en los módulos `shared`, `sharedUi` y `app`.
 
@@ -188,6 +188,7 @@ Este documento resume las modificaciones hechas sobre BitChord y el punto en que
 - **Qué muestra:** sobre la canción (Wikipedia / Genius / Last.fm / Discogs), créditos agrupados (interpretación, composición y letra, arreglos, producción, sonido), conexiones (samples, interpolaciones, versiones, remixes, directos), otras versiones (`SongFamily`), dónde aparece (álbumes, temas de anime de AnimeThemes), portadas alternativas (→ selector de portada), detalles (álbum, fecha, sello, géneros, BPM, idioma, ISRC, oyentes), tu copia (ruta en pCloud / en el móvil, tamaño, formato) y la descripción del vídeo.
 - **Fuentes gratuitas:** créditos de YouTube Music (`MPTC` + id), MusicBrainz (+ obra) y Cover Art Archive, Wikidata/Wikipedia (es, en, ja), Genius (API web sin clave), Last.fm, iTunes, Deezer (BPM), AnimeThemes y **Discogs con token propio** (se pega en la propia página, «Añadir más fuentes»; prefs `bitchord_dna_keys`, no se sincronizan).
 - **Robustez (aprendido de MusicSmart, Navidrome y los clientes de YouTube Music):** se identifica la grabación por su **ISRC** (de Deezer) en MusicBrainz y Wikidata, no por el nombre; si no hay ISRC, título + artista + duración (±8 s). Un fallo de red, un 429 o un 5xx marca la fuente como «no respondió»: se reintenta a los 2 días y no se pierde lo que esa fuente dio antes. Un 404 cuenta como «no hay nada». TheAudioDB (clave pública gratuita) añade descripción, ambiente y videoclip.
+- **Contribuidores y páginas de persona (como SongDNA):** cuadrícula con foto (Genius, Deezer, YouTube Music) de cada persona, sus funciones y en cuántas canciones de tu biblioteca está. Al tocarla: su página con foto, datos (MusicBrainz), sus canciones en tu biblioteca, con quién ha trabajado (se puede saltar de persona en persona), todos sus trabajos (Genius, MusicBrainz, Discogs; tocar uno lo reproduce), biografía y botón «Perfil de artista». Las personas se buscan por los ids que dio cada fuente (no por el nombre cuando hay id). `DnaPeople`, archivo `song_dna_people.json` (copiado a pCloud); de noche se rellenan hasta 300 personas tras las canciones.
 - **Datos:** `song_dna.json` (`SongDna.FILE`), copiado a pCloud por `CloudBackup`. Relleno de toda la biblioteca de noche con `BackgroundHours` y WiFi (`SongDna.fillAll`); de día solo al abrir la página.
 - Archivos: `data/dna/SongDna.kt`, `data/dna/DnaKeys.kt`, `ui/components/SongDnaPage.kt`; el panel en `NowPlayingScreen` (`PlayerHost.SongDnaPanel`).
 

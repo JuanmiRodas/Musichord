@@ -63,6 +63,7 @@ import com.music.bitchord.data.SongInfo
 import com.music.bitchord.data.SongInfoRepository
 import com.music.bitchord.data.compactCount
 import com.music.bitchord.data.dna.DnaKeys
+import com.music.bitchord.data.dna.DnaPeople
 import com.music.bitchord.data.dna.DnaRoles
 import com.music.bitchord.data.dna.SongDna
 import com.music.bitchord.data.model.Song
@@ -129,9 +130,18 @@ fun SongDnaPage(
         value = withContext(Dispatchers.IO) { runCatching { fileRows(context, song) }.getOrDefault(emptyList()) }
     }
 
-    fun openArtist(name: String) {
-        onClose?.invoke()
-        ArtistPicker.goTo(Song(videoId = "", title = "", artist = name, thumbnailUrl = null))
+    // BitChord Audio: a person's page over the song's (a stack: from one person to who they worked with).
+    var people by remember(song.videoId) { mutableStateOf(listOf<Pair<SongDna.Credit, List<String>>>()) }
+    androidx.activity.compose.BackHandler(enabled = people.isNotEmpty()) { people = people.dropLast(1) }
+    val dnaChanges by SongDna.changes.collectAsStateWithLifecycle()
+    val peopleChanges by DnaPeople.changes.collectAsStateWithLifecycle()
+    // Who is on how many of your songs, and with how many others — one pass over what is known.
+    val index by produceState<Map<String, Pair<Int, Int>>>(emptyMap(), dnaChanges) {
+        value = withContext(Dispatchers.Default) { runCatching { libraryIndex() }.getOrDefault(emptyMap()) }
+    }
+    // Your songs by their DNA key, to play one from a person's page.
+    val pool by produceState<Map<String, Song>>(emptyMap(), song.videoId) {
+        value = withContext(Dispatchers.IO) { runCatching { libraryPool() }.getOrDefault(emptyMap()) }
     }
 
     fun playOther(title: String, artist: String, url: String?) {
@@ -143,6 +153,28 @@ fun SongDnaPage(
                 runCatching { uri.openUri(url) }
             }
         }
+    }
+
+    val top = people.lastOrNull()
+    if (top != null) {
+        PersonPage(
+            credit = top.first,
+            rolesHere = top.second,
+            backLabel = if (people.size > 1) people[people.size - 2].first.name else song.title,
+            peopleChanges = peopleChanges,
+            index = index,
+            modifier = modifier,
+            contentPadding = contentPadding,
+            onBack = { people = people.dropLast(1) },
+            onPerson = { c -> people = people + (c to emptyList()) },
+            onPlayLibrary = { d ->
+                val s = pool[d.key]
+                if (s != null) SongDnaActions.play?.invoke(s) else playOther(d.title, d.artist, null)
+            },
+            onPlayOther = { t, a, u -> playOther(t, a, u) },
+            onClose = onClose,
+        )
+        return
     }
 
     LazyColumn(modifier = modifier, state = listState, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -180,26 +212,30 @@ fun SongDnaPage(
             }
         }
 
-        // ── Credits ──
-        if (d != null && d.credits.isNotEmpty()) {
-            item("credits") {
-                SectionCard(stringResource(R.string.song_dna_credits)) {
-                    val groups = d.credits.groupBy { DnaRoles.group(it.role) }.toSortedMap()
-                    groups.forEach { (g, list) ->
-                        Text(
-                            stringResource(groupLabel(g)), color = Dim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
-                        )
-                        list.groupBy { it.name }.forEach { (name, roles) ->
-                            Column(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { openArtist(name) }.padding(vertical = 5.dp),
-                            ) {
-                                Text(name, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    roles.map { prettyRole(it.role) }.distinct().joinToString(", "),
-                                    color = Dim, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                )
+        // ── Contributors: the people, with their pictures, as SongDNA shows them ──
+        val contributors = d?.credits.orEmpty()
+            .filter { DnaRoles.group(it.role) != DnaRoles.Group.LABEL }
+            .groupBy { SongDna.personKey(it.name) }
+            .values.map { list -> list.sortedBy { DnaRoles.group(it.role).ordinal } }
+            .sortedBy { DnaRoles.group(it.first().role).ordinal }
+        if (contributors.isNotEmpty()) {
+            item("contributors") {
+                SectionCard(stringResource(R.string.song_dna_contributors)) {
+                    contributors.chunked(2).forEach { pair ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+                            pair.forEach { list ->
+                                val c = mergedCredit(list)
+                                val counts = index[SongDna.personKey(c.name)]
+                                ContributorCard(
+                                    credit = c,
+                                    image = c.image ?: DnaPeople.cached(c.name)?.image.also { peopleChanges },
+                                    roles = list.map { it.role }.map(::prettyRole).distinct(),
+                                    songs = counts?.first ?: 0,
+                                    collaborators = counts?.second ?: 0,
+                                    modifier = Modifier.weight(1f),
+                                ) { people = people + (c to list.map { it.role }.distinct()) }
                             }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
                 }
@@ -400,6 +436,250 @@ internal fun SongDnaDialog(song: Song, onDismiss: () -> Unit) {
     }
 }
 
+// ── People ─────────────────────────────────────────────────────────────────
+
+/** Every id any of a person's credits carries, on one credit. */
+private fun mergedCredit(list: List<SongDna.Credit>): SongDna.Credit = list.reduce { a, b ->
+    a.copy(
+        mbid = a.mbid ?: b.mbid, geniusId = a.geniusId ?: b.geniusId, discogsId = a.discogsId ?: b.discogsId,
+        ytId = a.ytId ?: b.ytId, image = a.image ?: b.image,
+    )
+}
+
+/** person → (songs of yours they are on, people they worked with on them). */
+private fun libraryIndex(): Map<String, Pair<Int, Int>> {
+    val songs = HashMap<String, Int>()
+    val with = HashMap<String, HashSet<String>>()
+    for (d in SongDna.all()) {
+        val keys = d.credits.filter { DnaRoles.group(it.role) != DnaRoles.Group.LABEL }.map { SongDna.personKey(it.name) }.toSet()
+        for (k in keys) {
+            songs[k] = (songs[k] ?: 0) + 1
+            with.getOrPut(k) { HashSet() }.addAll(keys - k)
+        }
+    }
+    return songs.mapValues { (k, n) -> n to (with[k]?.size ?: 0) }
+}
+
+private fun libraryPool(): Map<String, Song> {
+    val all = com.music.bitchord.data.LikedMusicCache.likedSongs.value +
+        com.music.bitchord.data.LocalLikes.liked.value.values +
+        runCatching { com.music.bitchord.data.webdav.WebDavRepository.library() }.getOrDefault(emptyList()) +
+        com.music.bitchord.data.OwnLibrary.uploads.value
+    val out = HashMap<String, Song>()
+    for (s in all) out.putIfAbsent(SongDna.keyOf(s), s)
+    return out
+}
+
+@Composable
+private fun Avatar(image: String?, name: String, size: Int) {
+    Box(
+        Modifier.size(size.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color(0xFF2E3138)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            name.trim().firstOrNull()?.uppercase() ?: "?",
+            color = Ink, fontSize = (size * 0.42f).sp, fontWeight = FontWeight.Bold,
+        )
+        if (image != null) {
+            AsyncImage(
+                model = image, contentDescription = name, contentScale = ContentScale.Crop,
+                modifier = Modifier.size(size.dp).clip(androidx.compose.foundation.shape.CircleShape),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContributorCard(
+    credit: SongDna.Credit,
+    image: String?,
+    roles: List<String>,
+    songs: Int,
+    collaborators: Int,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Avatar(image, credit.name, 92)
+        Text(
+            credit.name, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2,
+            overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        val roleLine = roles.first() + if (roles.size > 1) " " + stringResource(R.string.song_dna_more_roles, roles.size - 1) else ""
+        Text(
+            roleLine, color = Ink.copy(alpha = 0.85f), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        if (songs > 0) {
+            Text(
+                listOfNotNull(
+                    stringResource(R.string.song_dna_in_library_count, songs),
+                    stringResource(R.string.song_dna_collab_count, collaborators).takeIf { collaborators > 0 },
+                ).joinToString(" · "),
+                color = Dim, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** A person's page: who they are, what they did here, in your library, and everything else. */
+@Composable
+private fun PersonPage(
+    credit: SongDna.Credit,
+    rolesHere: List<String>,
+    backLabel: String,
+    peopleChanges: Int,
+    index: Map<String, Pair<Int, Int>>,
+    modifier: Modifier,
+    contentPadding: PaddingValues,
+    onBack: () -> Unit,
+    onPerson: (SongDna.Credit) -> Unit,
+    onPlayLibrary: (SongDna.Dna) -> Unit,
+    onPlayOther: (String, String, String?) -> Unit,
+    onClose: (() -> Unit)?,
+) {
+    val uri = LocalUriHandler.current
+    var loading by remember(credit.name) { mutableStateOf(DnaPeople.cached(credit.name) == null) }
+    val person by produceState(DnaPeople.cached(credit.name), credit.name) {
+        loading = true
+        value = runCatching { DnaPeople.get(credit) }.getOrNull() ?: value
+        loading = false
+    }
+    val library by produceState<List<DnaPeople.LibrarySong>>(emptyList(), credit.name, index) {
+        value = withContext(Dispatchers.Default) { DnaPeople.inLibrary(credit.name) }
+    }
+    val collaborators by produceState<List<Pair<SongDna.Credit, Int>>>(emptyList(), credit.name, index) {
+        value = withContext(Dispatchers.Default) { DnaPeople.collaborators(credit.name) }
+    }
+    var allWorks by remember(credit.name) { mutableStateOf(false) }
+    val state = rememberLazyListState()
+    val p = person
+    LazyColumn(modifier = modifier, state = state, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item("back") {
+            Text(
+                "‹  " + stringResource(R.string.song_dna_back_to, backLabel),
+                color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(vertical = 6.dp, horizontal = 2.dp),
+            )
+        }
+        item("who") {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Avatar(credit.image ?: p?.image, credit.name, 140)
+                Text(
+                    credit.name, color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 12.dp),
+                )
+                if (rolesHere.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.song_dna_p_on_song) + ": " + rolesHere.map(::prettyRole).distinct().joinToString(", "),
+                        color = Ink.copy(alpha = 0.85f), fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+                p?.facts?.forEach { Text(it, color = Dim, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+                index[SongDna.personKey(credit.name)]?.let { (n, w) ->
+                    Text(
+                        listOfNotNull(
+                            stringResource(R.string.song_dna_in_library_count, n),
+                            stringResource(R.string.song_dna_collab_count, w).takeIf { w > 0 },
+                        ).joinToString(" · "),
+                        color = Dim, fontSize = 12.sp,
+                    )
+                }
+                TextButton(onClick = {
+                    val id = p?.ytBrowseId ?: credit.ytId
+                    onClose?.invoke()
+                    val open = ArtistPicker.open
+                    if (id != null && id.startsWith("UC") && open != null) open(id)
+                    else ArtistPicker.goTo(Song(videoId = "", title = "", artist = credit.name, thumbnailUrl = null))
+                }) { Text(stringResource(R.string.song_dna_artist_profile), color = Ink, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+        if (library.isNotEmpty()) {
+            item("lib") {
+                SectionCard(stringResource(R.string.song_dna_p_library), badge = library.size.toString()) {
+                    library.take(40).forEach { l ->
+                        SongRow(
+                            l.dna.covers.firstOrNull()?.url, l.dna.title,
+                            listOf(l.dna.artist, l.roles.map(::prettyRole).distinct().joinToString(", ")).filter { it.isNotBlank() }.joinToString(" · "),
+                        ) { onPlayLibrary(l.dna) }
+                    }
+                }
+            }
+        }
+        if (collaborators.isNotEmpty()) {
+            item("collabs") {
+                SectionCard(stringResource(R.string.song_dna_p_collaborators)) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        items(collaborators) { (c, n) ->
+                            Column(
+                                Modifier.width(84.dp).clip(RoundedCornerShape(10.dp)).clickable { onPerson(c) },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Avatar(c.image ?: DnaPeople.cached(c.name)?.image.also { peopleChanges }, c.name, 64)
+                                Text(
+                                    c.name, color = Ink, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 6.dp),
+                                )
+                                Text(stringResource(R.string.song_dna_in_library_count, n), color = Dim, fontSize = 10.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item("works") {
+            SectionCard(stringResource(R.string.song_dna_p_works), badge = p?.works?.size?.takeIf { it > 0 }?.toString()) {
+                val works = p?.works.orEmpty()
+                when {
+                    works.isEmpty() && loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(14.dp), color = Dim, strokeWidth = 1.75.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.song_dna_p_looking), color = Dim, fontSize = 13.sp)
+                    }
+                    works.isEmpty() -> Text(stringResource(R.string.song_dna_p_none), color = Dim, fontSize = 13.sp)
+                    else -> {
+                        (if (allWorks) works else works.take(25)).forEach { w ->
+                            SongRow(
+                                w.art, w.title,
+                                listOfNotNull(
+                                    w.artist.ifBlank { null }, w.year,
+                                    w.role.split(", ").filter { it.isNotBlank() }.map(::prettyRole).distinct().joinToString(", ").ifBlank { null },
+                                ).joinToString(" · "),
+                            ) { onPlayOther(w.title, w.artist.ifBlank { credit.name }, w.url) }
+                        }
+                        if (!allWorks && works.size > 25) {
+                            Text(
+                                stringResource(R.string.song_dna_show_all, works.size), color = Ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp).clickable { allWorks = true },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        p?.about?.let { text ->
+            item("about") { SectionCard(stringResource(R.string.song_dna_p_about), badge = p.aboutSource) { Expandable(text) } }
+        }
+        p?.links?.takeIf { it.isNotEmpty() }?.let { links ->
+            item("links") {
+                SectionCard(stringResource(R.string.song_dna_sources)) {
+                    links.forEach { l ->
+                        Text(
+                            l.label, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.fillMaxWidth().clickable { runCatching { uri.openUri(l.url) } }.padding(vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ── Pieces ─────────────────────────────────────────────────────────────────
 
 @Composable
@@ -541,8 +821,22 @@ private fun groupLabel(g: DnaRoles.Group): Int = when (g) {
     DnaRoles.Group.OTHER -> R.string.song_dna_g_other
 }
 
-/** "mix (assistant)" → "Mix (assistant)"; MusicBrainz's and Genius's lower-case roles capitalised. */
-private fun prettyRole(r: String): String = r.trim().replace('_', ' ').replaceFirstChar { it.uppercase() }
+private val ROLES_ES = mapOf(
+    "performer" to "Intérprete", "main artist" to "Artista principal", "featured" to "Artista invitado/a",
+    "composer" to "Compositor/a", "lyricist" to "Letrista", "writer" to "Autor/a", "songwriter" to "Autor/a",
+    "arranger" to "Arreglista", "producer" to "Productor/a", "co-producer" to "Coproductor/a", "executive producer" to "Productor/a ejecutivo/a",
+    "engineer" to "Ingeniero/a", "mix" to "Mezcla", "mixed by" to "Mezcla", "mastering" to "Masterización", "recording" to "Grabación",
+    "vocals" to "Voz", "lead vocals" to "Voz principal", "background vocals" to "Coros", "vocal" to "Voz", "instrument" to "Instrumento",
+    "guitar" to "Guitarra", "bass guitar" to "Bajo", "drums" to "Batería", "piano" to "Piano", "keyboard" to "Teclados", "strings" to "Cuerdas",
+    "programming" to "Programación", "orchestrator" to "Orquestación", "conductor" to "Director/a", "track" to "En una canción",
+)
+
+/** "mix (assistant)" → "Mix (assistant)"; common roles in Spanish when the phone is. */
+private fun prettyRole(r: String): String {
+    val t = r.trim().replace('_', ' ')
+    if (java.util.Locale.getDefault().language == "es") ROLES_ES[t.lowercase()]?.let { return it }
+    return t.replaceFirstChar { it.uppercase() }
+}
 
 @Composable
 private fun relationLabel(kind: String): String = when (kind) {
