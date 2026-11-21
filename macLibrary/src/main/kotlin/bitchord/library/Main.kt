@@ -94,7 +94,8 @@ private fun App(state: LibraryState) {
     fun scan() {
         if (state.busy != null) return
         scope.launch {
-            state.busy = "Leyendo la biblioteca…"
+            state.busy = "Leyendo la biblioteca y las fuentes…"
+            File(state.settings.root).mkdirs()
             val folders = listOf(state.settings.root) + state.settings.extra
             state.tracks = Scanner.scan(folders.filter { File(it).isDirectory }) { done, total ->
                 state.progress = done.toFloat() / total.coerceAtLeast(1)
@@ -155,7 +156,7 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
     val extra = state.tracks - lib.toSet()
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            Card("Tu biblioteca · ${lib.size} archivos") {
+            Card("Biblioteca limpia · ${lib.size} archivos") {
                 Text(state.settings.root, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
                 Line("MP3 320", lib.count { it.mp3_320 }.toString())
@@ -173,12 +174,55 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
             }
         }
         if (extra.isNotEmpty()) item {
-            Card("Carpetas por integrar · ${extra.size} archivos") {
+            Card("Fuentes (solo lectura) · ${extra.size} archivos") {
                 state.settings.extra.forEach { Text(it, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp) }
                 Line("MP3 320", extra.count { it.mp3_320 }.toString())
                 Line("Sin pérdida", extra.count { it.lossless }.toString())
                 Line("Por debajo de 320 u otro formato", extra.count { !it.mp3_320 && !it.lossless }.toString(), warn = true)
                 Line("Sin portada", extra.count { !it.hasCover }.toString(), warn = true)
+            }
+        }
+        item {
+            Card("Construir la biblioteca limpia") {
+                Text(
+                    "De cada canción se copia la mejor versión de las fuentes (sin pérdida → MP3 320; si no, MP3 320 auténtico; si no, el mejor MP3 mientras tanto, apuntado en la to-do). " +
+                        "AAC, m4a, opus, webm y wma no se copian. Las fuentes no se tocan nunca.",
+                    color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                val sources = remember { Sources.load() }
+                sources.forEach { s ->
+                    var preview by remember(state.tracks) { mutableStateOf<String?>(null) }
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.name, color = Color.White, fontWeight = FontWeight.Medium)
+                            Text(preview ?: s.path, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+                        }
+                        OutlinedButton(enabled = state.busy == null, onClick = {
+                            val p = Builder.plan(listOf(s), state.tracks, state.settings.root)
+                            preview = "Se copiarían ${p.copy.size} (" + p.copy.groupingBy { it.reason }.eachCount().entries.joinToString { "${it.value} ${it.key}" } +
+                                ") · no se copian ${p.skipped.size}"
+                        }) { Text("Ver qué se copia") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(enabled = state.busy == null, onClick = {
+                            scope.launch {
+                                state.busy = "Copiando desde ${s.name}…"
+                                val p = Builder.plan(listOf(s), state.tracks, state.settings.root)
+                                var ok = 0
+                                var failed = 0
+                                withContext(Dispatchers.IO) {
+                                    p.copy.forEachIndexed { i, item ->
+                                        Builder.copy(item).onSuccess { ok++ }.onFailure { failed++; state.ops().log("app", "build error ${item.track.path}: ${it.message}") }
+                                        state.progress = (i + 1f) / p.copy.size.coerceAtLeast(1)
+                                    }
+                                }
+                                state.ops().log("app", "build ${s.name}: $ok copied, $failed failed")
+                                state.busy = null
+                                state.message = "$ok copiadas desde ${s.name}" + if (failed > 0) ", $failed con error (ver registro)" else ""
+                            }
+                        }) { Text("Construir") }
+                    }
+                }
             }
         }
         item {
@@ -333,11 +377,27 @@ private fun SettingsPane(state: LibraryState) {
     var extra by remember { mutableStateOf(state.settings.extra.joinToString("\n")) }
     var phone by remember { mutableStateOf(state.settings.phoneTodo) }
     Column(Modifier.widthIn(max = 800.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedTextField(root, { root = it }, label = { Text("Biblioteca (carpeta Música en pCloud Drive)") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(extra, { extra = it }, label = { Text("Carpetas por integrar (una por línea)") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+        fun pick(): String? {
+            System.setProperty("apple.awt.fileDialogForDirectories", "true")
+            val d = FileDialog(null as Frame?, "Elige una carpeta", FileDialog.LOAD).apply { isVisible = true }
+            System.setProperty("apple.awt.fileDialogForDirectories", "false")
+            return d.file?.let { File(d.directory, it).path }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(root, { root = it }, label = { Text("Biblioteca limpia (se crea si no existe)") }, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = { pick()?.let { root = it } }) { Text("Elegir…") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(extra, { extra = it }, label = { Text("Fuentes que se leen (una por línea, nunca se modifican)") }, modifier = Modifier.weight(1f), minLines = 3)
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = { pick()?.let { extra = (extra.lines().filter { l -> l.isNotBlank() } + it).joinToString("\n") } }) { Text("Añadir…") }
+        }
+        Text("Las reglas de cada fuente (p. ej. qué álbumes de Yuki Kajiura se copian) están en ${File(Store.dir, "sources.json").path}", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
         OutlinedTextField(phone, { phone = it }, label = { Text("To-do del móvil (lo escribe BitChord)") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = {
-            val s = Store.Settings(root.trim(), extra.lines().map { it.trim() }.filter { it.isNotEmpty() }, phone.trim())
+            val s = Store.Settings(Paths.resolve(root.trim()), extra.lines().map { Paths.resolve(it.trim()) }.filter { it.isNotEmpty() }, Paths.resolve(phone.trim()))
+            File(s.root).mkdirs()
             Store.save(s)
             state.settings = s
             state.recompute()

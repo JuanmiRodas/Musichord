@@ -17,6 +17,9 @@ Uso: bitchord-library <orden> [opciones]
   undo              Deshace el último lote de movimientos (--batch <id> para otro)
   convert           Convierte los FLAC de la biblioteca a MP3 320 (--only <carpeta>)
   claude            Informe para pegar en la conversación con Claude
+  sources           Las fuentes (solo lectura) y sus reglas
+  build             Construye la biblioteca limpia desde las fuentes: --source "<nombre>",
+                    --dry-run para ver qué se copiaría, --only <texto> para una parte
 
 Opciones:
   --root <carpeta>        La biblioteca (por defecto la de la app)
@@ -32,11 +35,12 @@ fun cli(args: Array<String>) = runBlocking {
     fun flag(name: String) = "--$name" in args
     val cmd = args.firstOrNull() ?: "help"
     val settings = Store.load()
-    val root = (opt("root") ?: settings.root).trimEnd('/')
-    val extra = opt("extra")?.split(',')?.map { it.trim().trimEnd('/') }?.filter { it.isNotEmpty() } ?: settings.extra
+    val root = Paths.resolve(opt("root") ?: settings.root).trimEnd('/')
+    val sources = Sources.load()
+    val extra = opt("extra")?.split(',')?.map { Paths.resolve(it.trim()).trimEnd('/') }?.filter { it.isNotEmpty() } ?: settings.extra
     val folders = (listOf(root) + extra).filter { File(it).isDirectory }
     val deadline = System.currentTimeMillis() + (opt("max-seconds")?.toLongOrNull() ?: 86_400L) * 1000
-    if (!File(root).isDirectory && cmd != "help") { println("No encuentro la biblioteca: $root"); return@runBlocking }
+    if (cmd != "help") File(root).mkdirs()
     val ops = Ops(root)
     Scanner.loadIndex()
 
@@ -100,6 +104,39 @@ fun cli(args: Array<String>) = runBlocking {
             ops.log("cli", "convert: $ok of ${list.size} lossless files made MP3 320")
         }
         "claude" -> println(ops.forClaude())
+        "sources" -> sources.forEach { s ->
+            println("${s.name}: ${s.path} (${if (File(s.path).isDirectory) "ok" else "NO ENCONTRADA"}, ${s.mode}${s.target?.let { " → $it" } ?: ""})")
+        }
+        "build" -> {
+            val wanted = opt("source")
+            val chosen = sources.filter { wanted == null || it.name.contains(wanted, ignoreCase = true) }
+            if (chosen.isEmpty()) { println("No hay ninguna fuente «$wanted». Mira «sources»."); return@runBlocking }
+            val known = Scanner.known(listOf(root) + chosen.map { it.path })
+            val plan = Builder.plan(chosen, known, root)
+            val only = opt("only")
+            val items = plan.copy.filter { only == null || it.target.contains(only, ignoreCase = true) || it.track.path.contains(only, ignoreCase = true) }
+            println("Fuentes: ${chosen.joinToString { it.name }} · ${known.size - Scanner.known(listOf(root)).size} archivos leídos")
+            println("Se copiarían ${items.size}: " + items.groupingBy { it.reason }.eachCount().entries.joinToString { "${it.value} ${it.key}" })
+            println("No se copian ${plan.skipped.size}: " + plan.skipped.groupingBy { it.second }.eachCount().entries.joinToString { "${it.value} ${it.key}" })
+            File(ops.state, "build-plan.csv").writeText(buildString {
+                appendLine("origen,destino,motivo")
+                items.forEach { appendLine("\"${it.track.path}\",\"${it.target}\",\"${it.reason}\"") }
+                plan.skipped.forEach { (t, why) -> appendLine("\"${t.path}\",,\"$why\"") }
+            })
+            if (flag("dry-run")) {
+                items.take(30).forEach { println("${it.track.path.removePrefix(it.source.path)}\n  → ${it.target.removePrefix(root)}  [${it.reason}]") }
+                println("— Lista completa en ${File(ops.state, "build-plan.csv").path}")
+                return@runBlocking
+            }
+            var ok = 0
+            var failed = 0
+            for (i in items) {
+                if (System.currentTimeMillis() > deadline) break
+                Builder.copy(i).onSuccess { ok++ }.onFailure { failed++; println("ERROR ${i.track.path}: ${it.message}") }
+            }
+            ops.log("cli", "build ${chosen.joinToString { it.name }}: $ok copied, $failed failed, ${items.size - ok - failed} left")
+            println("$ok copiadas, $failed con error, ${items.size - ok - failed} pendientes (vuelve a lanzar «build» para seguir)")
+        }
         else -> println(HELP)
     }
 }

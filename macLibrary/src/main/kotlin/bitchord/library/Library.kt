@@ -20,23 +20,29 @@ object Store {
     val dir = File(System.getProperty("user.home"), "Library/Application Support/BitChord Library").apply { mkdirs() }
     private val settingsFile = File(dir, "settings.json")
 
+    /**
+     * [root]: the clean library being built (never a source). [extra]: the sources' folders,
+     * read only (see sources.json for their rules).
+     */
     data class Settings(
-        val root: String = File(System.getProperty("user.home"), "pCloud Drive/pCloud Backup/MacBookAirdeJuanmi/Music/Música").path,
-        val extra: List<String> = listOf(File(System.getProperty("user.home"), "Downloads/Discografías").path),
+        val root: String = File(System.getProperty("user.home"), "pCloud Drive/Biblioteca").path,
+        val extra: List<String> = Sources.load().map { it.path },
         val phoneTodo: String = File(System.getProperty("user.home"), "pCloud Drive/.bitchord-audio/todo-phone.json").path,
     )
 
     fun load(): Settings = runCatching {
         val o = JSONObject(settingsFile.readText())
+        // v1 kept the old Música as "the library": it is a source now, never written to.
+        if (o.optInt("v") < 2) error("old settings")
         Settings(
             root = o.optString("root").ifBlank { Settings().root },
             extra = o.optJSONArray("extra")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: Settings().extra,
             phoneTodo = o.optString("phoneTodo").ifBlank { Settings().phoneTodo },
         )
-    }.getOrDefault(Settings())
+    }.getOrDefault(Settings()).let { s -> s.copy(root = Paths.resolve(s.root), extra = s.extra.map(Paths::resolve), phoneTodo = Paths.resolve(s.phoneTodo)) }
 
     fun save(s: Settings) {
-        settingsFile.writeText(JSONObject().put("root", s.root).put("extra", JSONArray(s.extra)).put("phoneTodo", s.phoneTodo).toString(2))
+        settingsFile.writeText(JSONObject().put("v", 2).put("root", s.root).put("extra", JSONArray(s.extra)).put("phoneTodo", s.phoneTodo).toString(2))
     }
 }
 
