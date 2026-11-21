@@ -26,7 +26,12 @@ dependencies {
     runtimeOnly("org.bytedeco:javacpp:$javacpp:$arch")
 }
 
-kotlin { jvmToolchain(21) }
+kotlin {
+    jvmToolchain(21)
+    // Bytecode for Java 11: the jar also runs on older Javas (Claude's shell has 11).
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11) }
+}
+java { targetCompatibility = JavaVersion.VERSION_11 }
 
 compose.desktop {
     application {
