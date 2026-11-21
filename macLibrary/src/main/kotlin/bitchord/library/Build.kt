@@ -150,9 +150,12 @@ object Builder {
     private fun clean(s: String) = s.replace(BAD, " ").replace(Regex("\\s+"), " ").trim().trimEnd('.')
 
     /** "[Nemuri] Bishōjo Senshi Sailor Moon 美少女戦士セーラームーン (1992-2000) [MP3]" → its name; aliases from collections.json. */
-    private val aliases: Map<String, String> by lazy {
-        runCatching {
-            val o = JSONObject(File(Store.dir, "collections.json").readText()).getJSONObject("aliases")
+    @Volatile private var aliases: Map<String, String> = emptyMap()
+
+    /** `<library>/.bitchord-library/collections.json`: {"aliases": {"美少女戦士セーラームーン": "Sailor Moon"}} — one collection under several names. */
+    private fun loadAliases(root: String) {
+        aliases = runCatching {
+            val o = JSONObject(File(root, ".bitchord-library/collections.json").readText()).getJSONObject("aliases")
             o.keys().asSequence().associate { norm(it) to o.getString(it) }
         }.getOrDefault(emptyMap())
     }
@@ -284,14 +287,36 @@ object Builder {
         return out
     }
 
+    /** Accents and case aside: "Pokémon" = "Pokemon". */
+    private fun plain(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\\p{M}"), "").let(::norm)
+
+    /** A tag that names no artist: a category, a grab-bag, a file name. */
+    private val NOT_ARTIST = Regex("(?i)(^(anime|videojuegos?|games?|ost|soundtracks?|unknown.*|desconocid.*)$)|\\.(mp3|m4a|flac|wav)\\b")
+    private fun notArtist(s: String) = s.isBlank() || NOT_ARTIST.containsMatchIn(s.trim()) || GRAB_BAG.matches(s.trim()) || s.trim().lowercase().startsWith("música ")
+
     fun plan(sources: List<Source>, tracks: List<Track>, targetRoot: String): Plan {
+        loadAliases(targetRoot)
         val skipped = ArrayList<Pair<Track, String>>()
         val cands = candidates(sources, tracks, skipped)
         val have = tracks.filter { it.path.startsWith("$targetRoot/") }.associateBy { key(it) }
         val byKey = cands.groupBy { key(it.track) }
         val names = artistNames(sources, tracks)
-        fun shown(n: String) = names[akey(n)] ?: n
-        fun ownerOf(t: Track) = firstArtist(t.albumArtist.takeUnless { it.isBlank() || VARIOUS.matches(it.trim()) } ?: t.artist).ifBlank { t.artist }
+        // collections.json's aliases name artists and collections alike ("美少女戦士セーラームーン" → "Sailor Moon").
+        fun shown(n: String) = aliases[norm(n)] ?: names[akey(n)] ?: n
+        fun ownerOf(t: Track): String {
+            val aa = firstArtist(t.albumArtist)
+            if (aa.isNotBlank() && !VARIOUS.matches(aa) && !notArtist(aa)) return aa
+            val a = firstArtist(t.artist)
+            return if (notArtist(a)) "" else a
+        }
+        // A source with rules takes in its people's songs from every other source too
+        // (Kalafina, See-Saw… under Yuki Kajiura): their folders, by name.
+        val absorbed = HashMap<String, String>()
+        cands.filter { it.homeKind == 3 }.forEach { c ->
+            val parts = c.home.split('/')
+            absorbed.putIfAbsent(akey(shown(parts.last())), c.home)
+            c.source.mainArtist?.let { absorbed.putIfAbsent(akey(shown(it)), parts.first()) }
+        }
         // Artists' song counts (for the 5-song rule), counted once per recording.
         val artistSongs = byKey.values.mapNotNull { l -> l.maxBy { it.homeKind }.takeIf { it.homeKind == 1 } }
             .groupingBy { akey(shown(ownerOf(it.track))) }.eachCount()
@@ -300,11 +325,12 @@ object Builder {
         val alternatives = HashMap<String, List<String>>()
         val items = byKey.mapNotNull { (k, list) ->
             val best = list.maxWith(compareBy<Cand>({ rank(it.track) }, { richness(it.track) }, { it.track.kbps }))
-            val homeKind = list.maxOf { it.homeKind }
+            var homeKind = list.maxOf { it.homeKind }
             val placed = list.filter { it.homeKind == homeKind }
-            val home = placed.groupingBy { it.home }.eachCount().maxBy { it.value }.key
+            var home = placed.groupingBy { it.home }.eachCount().maxBy { it.value }.key
+            if (homeKind == 1) absorbed[akey(shown(ownerOf(best.track)))]?.let { home = it; homeKind = 3 }
             val inHome = placed.filter { it.home == home }
-            val chosen = if (homeKind >= 2) inHome.maxWith(compareBy({ albumSize[home.lowercase() to norm(it.album)] ?: 0 }, { -(it.year?.toIntOrNull() ?: 9999) }))
+            val chosen = if (inHome.isEmpty()) best else if (homeKind >= 2) inHome.maxWith(compareBy({ albumSize[home.lowercase() to norm(it.album)] ?: 0 }, { -(it.year?.toIntOrNull() ?: 9999) }))
                 else inHome.maxWith(compareBy({ rank(it.track) }, { richness(it.track) }))
             alternatives[k] = list.map { it.albumDir }.distinct().filter { it != chosen.albumDir }
             val existing = have[k]
@@ -312,16 +338,19 @@ object Builder {
             val t = best.track
             val rawArtist = t.artist.ifBlank { chosen.track.artist }
             val artist = if (rawArtist.contains(',') || rawArtist.contains('&')) rawArtist else shown(rawArtist)
+            val owner = ownerOf(t)
             val albumArtist = when (homeKind) {
-                3, 2 -> home.substringBefore('/')
-                else -> shown(ownerOf(t))
+                3 -> shown(home.substringBefore('/'))
+                2 -> home.substringBefore('/')
+                else -> if (owner.isBlank()) "Otros artistas" else shown(owner)
             }
             val folder = when (homeKind) {
-                3, 2 -> home.split('/').joinToString("/") { clean(it) }
-                else -> if ((artistSongs[akey(albumArtist)] ?: 0) >= 5) clean(albumArtist) else "Otros artistas"
+                3 -> (listOf(shown(home.substringBefore('/'))) + home.split('/').drop(1)).joinToString("/") { clean(it) }
+                2 -> home.split('/').joinToString("/") { clean(it) }
+                else -> if (owner.isNotBlank() && (artistSongs[akey(albumArtist)] ?: 0) >= 5) clean(albumArtist) else "Otros artistas"
             }
             // An album named only as its collection or folder ("Sailor Moon/Sailor moon") is no album.
-            val album = chosen.album.takeUnless { it.isBlank() || norm(it) == norm(home.substringAfterLast('/')) || GRAB_BAG.matches(it.trim()) } ?: "Sueltas"
+            val album = chosen.album.takeUnless { it.isBlank() || plain(it) == plain(home.substringAfterLast('/')) || plain(it) == plain(albumArtist) || GRAB_BAG.matches(it.trim()) } ?: "Sueltas"
             val year = chosen.year ?: t.year
             val no = chosen.track.trackNo ?: t.trackNo
             val disc = chosen.track.discNo
@@ -333,7 +362,7 @@ object Builder {
                 source = best.source, track = t, target = "$targetRoot/$folder/$albumDir/$name.mp3",
                 reason = when (rank(t)) { 4 -> "sin pérdida → MP3 320"; 3 -> "MP3 320"; else -> "MP3 ${t.kbps} kbps (mientras tanto; a la to-do)" },
                 album = album, year = year, trackNo = no, albumArtist = albumArtist,
-                grouping = if (homeKind >= 2) home.substringBefore('/') else null,
+                grouping = if (homeKind >= 2) shown(home.substringBefore('/')) else null,
                 cover = chosen.albumDir, key = k,
             )
         }.filter { !File(it.target).exists() }
