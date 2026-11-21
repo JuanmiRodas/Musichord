@@ -194,11 +194,14 @@ fun SongActionsMenu(
      * as before — present when the id is there, absent when it never was.
      */
     resolvingLinks: Boolean = false,
+    /** BitChord Audio: Song info opened elsewhere (the player's DNA page); null opens it as a window. */
+    onSongInfo: (() -> Unit)? = null,
 ) {
     var showingSongInfo by remember(song.videoId) { mutableStateOf(false) }
     var pickingSleepTimer by remember { mutableStateOf(false) }
     // A menu has no pages to swap, so Song Info opens as a dialog.
-    if (showingSongInfo) SongInfoDialog(song) { showingSongInfo = false }
+    // BitChord Audio: Song info is the song's DNA page (credits, story, connections, your copy).
+    if (showingSongInfo) SongDnaDialog(song) { showingSongInfo = false }
     // Neutral rather than the sleeve's colours: the panel floats over the page
     // or the player, and an accent pitched against the artwork's tint is not
     // guaranteed to read against the panel.
@@ -481,7 +484,8 @@ fun SongActionsMenu(
             }
         }
         ActionRow(SfIcons.Info, stringResource(R.string.song_info), accent = palette.accent) {
-            showingSongInfo = true
+            // From the player: its own page under it comes up instead of a window.
+            if (onSongInfo != null) onSongInfo() else showingSongInfo = true
         }
         // BitChord Audio: correct the song's details (and its cover).
         ActionRow(SfIcons.Pencil, stringResource(R.string.edit_info), accent = palette.accent) {

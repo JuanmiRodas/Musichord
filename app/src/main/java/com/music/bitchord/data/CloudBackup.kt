@@ -43,7 +43,7 @@ object CloudBackup {
         "bitchord_youtube_refused",
         "bitchord_verified_copies",
     )
-    private val FILES = listOf(com.music.bitchord.playback.smart.VideoAligner.FILE)
+    private val FILES = listOf(com.music.bitchord.playback.smart.VideoAligner.FILE, com.music.bitchord.data.dna.SongDna.FILE)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -163,6 +163,7 @@ object CloudBackup {
         if (restored > 0) {
             TrackLog.d(TAG, "backup: $restored sets restored from pCloud")
             com.music.bitchord.playback.smart.VideoAligner.reload(context)
+            com.music.bitchord.data.dna.SongDna.load()
         }
     }
 

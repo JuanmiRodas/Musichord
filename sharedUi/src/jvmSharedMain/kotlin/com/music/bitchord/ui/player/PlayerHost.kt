@@ -106,6 +106,24 @@ interface PlayerHost {
     /** BitChord Audio: the artist line tapped — one artist opens, several ask which. False: not handled. */
     fun goToArtist(song: com.music.bitchord.data.model.Song): Boolean = false
 
+    /** BitChord Audio: whether this platform has the song's DNA page under the player. */
+    val songDnaSupported: Boolean get() = false
+
+    /** BitChord Audio: asks the player to scroll up to its DNA page (⋯ → Song info); the count changes. */
+    val songDnaOpenRequests: StateFlow<Int> get() = NoDnaRequests
+
+    /**
+     * BitChord Audio: the song's DNA — credits, its story, alternative covers, the
+     * songs it is connected to, where your copy lives — as a list under the player.
+     */
+    @Composable
+    fun SongDnaPanel(
+        song: Song,
+        listState: androidx.compose.foundation.lazy.LazyListState,
+        onClose: () -> Unit,
+        modifier: Modifier,
+    ) = Unit
+
     /** BitChord Audio: video mode's lyrics size, as a scale. */
     val videoModeLyricsScale: StateFlow<Float> get() = NoVideoScale
 
@@ -326,6 +344,8 @@ data class CastUi(
     /** BitChord Audio: the speaker last cast to, for the one-tap button; null hides it. */
     val recentName: String? = null,
 )
+
+private val NoDnaRequests: StateFlow<Int> = MutableStateFlow(0)
 
 /** Where the installed [PlayerHost] lives. */
 object PlayerPlatform {

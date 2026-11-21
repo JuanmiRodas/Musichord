@@ -248,7 +248,7 @@ object AnimeThemes {
         (runCatching { OwnFileMatcher.allKeys(s) }.getOrDefault(emptySet()).map { it.removePrefix("~") } + fold(s))
             .filter { it.length >= 2 }.toSet()
 
-    private fun sameTitle(song: Song, t: Theme): Boolean {
+    internal fun sameTitle(song: Song, t: Theme): Boolean {
         val mine = titleKeys(song.title)
         val theirs = titleKeys(t.title) + (t.titleNative?.let(::titleKeys) ?: emptySet())
         val foldedMine = mine.map(::fold).toSet()
@@ -261,7 +261,7 @@ object AnimeThemes {
             .map { fold(it) }.filter { it.length >= 2 }.toSet()
 
     /** Whether someone in [t]'s credits is someone in [song]'s, any order, loosely spelt. */
-    private fun sameArtist(song: Song, t: Theme): Boolean {
+    internal fun sameArtist(song: Song, t: Theme): Boolean {
         val mine = song.artist.split(',', '&', '、').map { it.trim() }.filter { it.isNotEmpty() }
         if (mine.isEmpty() || mine.all { com.music.bitchord.data.sources.TrackMatcher.isPlaceholderArtist(it) }) return true
         val theirs = t.artists

@@ -139,6 +139,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
@@ -1291,6 +1292,109 @@ fun NowPlayingScreen(
     PlayerBackHandler(enabled = showAudioPipeline) { showAudioPipeline = false }
 
     PlayerBackHandler(enabled = showCast) { showCast = false }
+
+    // BitChord Audio: the song's DNA under the player — credits, its story, the
+    // songs it is connected to, where your copy lives. The player scrolls up out
+    // of the way (a swipe up on the controls, or ⋯ → Song info) and the page
+    // under it scrolls on; at its top, a swipe down brings the player back.
+    // [dnaShown] is how far, in pixels, the player has gone up.
+    val dnaSupported = PlayerPlatform.host.songDnaSupported
+    val dnaShown = remember { mutableFloatStateOf(0f) }
+    val dnaHeight = remember { mutableFloatStateOf(0f) }
+    val dnaVisible by remember { derivedStateOf { dnaShown.floatValue > 0.5f } }
+    val dnaScope = androidx.compose.runtime.rememberCoroutineScope()
+    val dnaAnim = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
+    val dnaList = androidx.compose.foundation.lazy.rememberLazyListState()
+    val dnaSettleTo: (Boolean, Float) -> Unit = remember {
+        { open, velocity ->
+            dnaAnim[0]?.cancel()
+            dnaAnim[0] = dnaScope.launch {
+                val target = if (open) dnaHeight.floatValue else 0f
+                animate(
+                    initialValue = dnaShown.floatValue,
+                    targetValue = target,
+                    initialVelocity = velocity,
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                        stiffness = 450f,
+                    ),
+                ) { v, _ -> dnaShown.floatValue = v }
+                if (!open) dnaList.scrollToItem(0)
+            }
+        }
+    }
+    // [fingerVelocity]: the finger's, in px/s — negative going up, which opens.
+    val dnaSettle: (Float) -> Unit = remember {
+        { fingerVelocity ->
+            val h = dnaHeight.floatValue
+            val s = dnaShown.floatValue
+            val open = when {
+                fingerVelocity < -900f -> true
+                fingerVelocity > 900f -> false
+                else -> s > h * 0.3f
+            }
+            dnaSettleTo(open, -fingerVelocity)
+        }
+    }
+    val dnaDragBy: (Float) -> Unit = remember {
+        { dy ->
+            dnaAnim[0]?.cancel()
+            dnaShown.floatValue = (dnaShown.floatValue - dy).coerceIn(0f, dnaHeight.floatValue)
+        }
+    }
+    val dnaConnection = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(
+                available: Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): Offset {
+                // Finger up while the page isn't all the way up yet: the page comes up first.
+                val s = dnaShown.floatValue
+                val h = dnaHeight.floatValue
+                if (available.y < 0f && s < h) {
+                    val take = maxOf(available.y, -(h - s))
+                    dnaDragBy(take)
+                    return Offset(0f, take)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): Offset {
+                // The list at its top and the finger still going down: the player comes back.
+                if (available.y > 0f && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) {
+                    val take = minOf(available.y, dnaShown.floatValue)
+                    if (take > 0f) {
+                        dnaDragBy(take)
+                        return Offset(0f, take)
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                val s = dnaShown.floatValue
+                if (s > 0.5f && s < dnaHeight.floatValue - 0.5f) {
+                    dnaSettle(available.y)
+                    return available
+                }
+                return androidx.compose.ui.unit.Velocity.Zero
+            }
+        }
+    }
+    PlayerBackHandler(enabled = dnaVisible) { dnaSettleTo(false, 0f) }
+    // ⋯ → Song info, from the player: the page comes up.
+    val dnaRequest by PlayerPlatform.host.songDnaOpenRequests.collectAsStateWithLifecycle()
+    val dnaRequestSeen = remember { intArrayOf(dnaRequest) }
+    LaunchedEffect(dnaRequest) {
+        if (dnaRequest != dnaRequestSeen[0]) {
+            dnaRequestSeen[0] = dnaRequest
+            if (dnaSupported && dnaHeight.floatValue > 0f) dnaSettleTo(true, 0f)
+        }
+    }
 
     PlayerBackHandler(enabled = lyricsOffsetOpen, onBack = onDismissLyricsOffset)
 
@@ -2838,6 +2942,8 @@ fun NowPlayingScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        // BitChord Audio: scrolled up out of the way by the song's DNA page.
+                        .graphicsLayer { translationY = -dnaShown.floatValue }
                         .windowInsetsPadding(stableStatusBarInsets())
                         .navigationBarsPadding()
                         // Observe unclaimed taps across the whole Canvas. Buttons and
@@ -3012,7 +3118,21 @@ fun NowPlayingScreen(
                                     val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, _ ->
                                         change.consume()
                                     }
-                                    if (drag != null) verticalDrag(drag.id) { it.consume() }
+                                    if (drag != null && dnaSupported && !panelUp) {
+                                        // BitChord Audio: below the sleeve, a vertical drag scrolls the
+                                        // player up to the song's DNA. Positions are taken on the screen:
+                                        // this column itself moves with the finger.
+                                        val tracker = VelocityTracker()
+                                        var last = drag.position.y - dnaShown.floatValue
+                                        val ok = verticalDrag(drag.id) { ch ->
+                                            val y = ch.position.y - dnaShown.floatValue
+                                            dnaDragBy(y - last)
+                                            last = y
+                                            tracker.addPosition(ch.uptimeMillis, Offset(0f, y))
+                                            ch.consume()
+                                        }
+                                        dnaSettle(if (ok) tracker.calculateVelocity().y else 0f)
+                                    } else if (drag != null) verticalDrag(drag.id) { it.consume() }
                                 }
                             }
                             .padding(horizontal = PLAYER_GUTTER),
@@ -4752,6 +4872,62 @@ fun NowPlayingScreen(
                     }
                     }
                     }
+                    }
+                }
+
+                // BitChord Audio: the song's DNA, the page under the player.
+                if (dnaSupported) {
+                    Box(Modifier.matchParentSize().onSizeChanged { dnaHeight.floatValue = it.height.toFloat() }) {
+                        if (dnaVisible) {
+                            Column(
+                                Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer { translationY = dnaHeight.floatValue - dnaShown.floatValue }
+                                    .background(Color.Black.copy(alpha = 0.62f))
+                                    .nestedScroll(dnaConnection)
+                                    .windowInsetsPadding(stableStatusBarInsets()),
+                            ) {
+                                // The grabber: drag it (or tap it) to bring the player back.
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(28.dp)
+                                        .pointerInput(Unit) {
+                                            awaitEachGesture {
+                                                val down = awaitFirstDown()
+                                                val tracker = VelocityTracker()
+                                                var last = down.position.y + (dnaHeight.floatValue - dnaShown.floatValue)
+                                                var moved = false
+                                                val ok = verticalDrag(down.id) { ch ->
+                                                    val y = ch.position.y + (dnaHeight.floatValue - dnaShown.floatValue)
+                                                    if (kotlin.math.abs(y - last) > 0f) moved = true
+                                                    dnaDragBy(y - last)
+                                                    last = y
+                                                    tracker.addPosition(ch.uptimeMillis, Offset(0f, y))
+                                                    ch.consume()
+                                                }
+                                                if (!moved) dnaSettleTo(false, 0f)
+                                                else dnaSettle(if (ok) tracker.calculateVelocity().y else 0f)
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .width(38.dp)
+                                            .height(5.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(Color.White.copy(alpha = 0.6f)),
+                                    )
+                                }
+                                PlayerPlatform.host.SongDnaPanel(
+                                    song = song,
+                                    listState = dnaList,
+                                    onClose = { dnaSettleTo(false, 0f) },
+                                    modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+                                )
+                            }
+                        }
                     }
                 }
             }

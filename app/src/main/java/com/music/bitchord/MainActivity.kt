@@ -4574,6 +4574,13 @@ private fun BitChordApp(
                 song = song,
                 signedIn = signedIn,
                 likeStatus = likeStatusOf(song),
+                // BitChord Audio: from the player, Song info scrolls the player up to its DNA page.
+                onSongInfo = if (fromPlayer) {
+                    {
+                        songActions = null
+                        com.music.bitchord.ui.components.SongDnaActions.openInPlayer()
+                    }
+                } else null,
                 onPlayNext = { playNext(song); songActions = null },
                 onAddToQueue = { addToQueue(song); songActions = null },
                 onStartRadio = { startRadio(song); songActions = null },
@@ -5885,6 +5892,15 @@ private fun BitChordApp(
         com.music.bitchord.ui.components.LibraryReviewHost()
         com.music.bitchord.ui.components.LinkCheckHost()
         com.music.bitchord.ui.components.CleanNowHost()
+        androidx.compose.runtime.SideEffect {
+            com.music.bitchord.ui.components.SongDnaActions.play = { s ->
+                playFrom(listOf(s), 0, QueueSource(s.title, PlaybackSourceType.SEARCH))
+            }
+            com.music.bitchord.ui.components.SongDnaActions.openAlbum = { id, title, cover ->
+                dismissPlayer()
+                viewModel.openDetail(id, title, "", cover, BrowseType.ALBUM)
+            }
+        }
         com.music.bitchord.ui.components.AppearsOnHost(
             onOpenAlbum = { id, title, cover -> viewModel.openDetail(id, title, "", cover, BrowseType.ALBUM) },
             onPlay = { s -> playFrom(listOf(s), 0, QueueSource(s.title, PlaybackSourceType.SEARCH)) },

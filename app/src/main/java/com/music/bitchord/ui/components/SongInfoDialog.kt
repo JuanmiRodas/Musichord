@@ -140,13 +140,16 @@ private fun SongInfoRow(label: String, value: String?) {
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // BitChord Audio: both sides share the width — a long label no longer squeezes the value
+        // into a column one letter wide.
         Text(
             text = label,
+            modifier = Modifier.weight(0.5f),
             style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
             color = onSurface.copy(alpha = 0.6f),
         )
         Spacer(Modifier.width(12.dp))
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+        Box(Modifier.weight(0.5f), contentAlignment = Alignment.CenterEnd) {
             if (value == null) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(14.dp),

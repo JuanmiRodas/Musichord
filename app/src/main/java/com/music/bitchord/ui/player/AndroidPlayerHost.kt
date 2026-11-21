@@ -171,6 +171,20 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         return true
     }
 
+    // BitChord Audio: the song's DNA page under the player.
+    override val songDnaSupported: Boolean get() = true
+    override val songDnaOpenRequests: StateFlow<Int> get() = com.music.bitchord.ui.components.SongDnaActions.openRequests
+
+    @androidx.compose.runtime.Composable
+    override fun SongDnaPanel(
+        song: Song,
+        listState: androidx.compose.foundation.lazy.LazyListState,
+        onClose: () -> Unit,
+        modifier: androidx.compose.ui.Modifier,
+    ) {
+        com.music.bitchord.ui.components.SongDnaPage(song = song, modifier = modifier, listState = listState, onClose = onClose)
+    }
+
     override fun albumPageOf(song: com.music.bitchord.data.model.Song): String? =
         com.music.bitchord.data.AlbumAppearances.pageOf(song)
     override val videoModeLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.lyricsScale

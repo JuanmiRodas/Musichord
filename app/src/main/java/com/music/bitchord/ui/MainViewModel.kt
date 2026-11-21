@@ -2219,6 +2219,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.music.bitchord.data.names.OfficialNames.enqueue(it)
                 // BitChord Audio: every song's other performances, mapped in the background.
                 com.music.bitchord.data.SongFamily.mapAll()
+                // BitChord Audio: the songs' DNA for your whole library, at night.
+                com.music.bitchord.data.dna.SongDna.fillAll()
                 // BitChord Audio: covers for your local likes shown without one.
                 viewModelScope.launch(Dispatchers.IO) { runCatching { com.music.bitchord.data.LocalLikes.fillCovers() } }
                 // BitChord Audio: karaoke versions out of your likes (asked for once).

@@ -1,6 +1,6 @@
 # BitChord Audio: resumen del fork y estado actual
 
-*Actualizado: 21 nov 2026 · última versión publicada: **v1.9.283***
+*Actualizado: 21 nov 2026 · última versión publicada: **v1.9.285***
 
 Repositorio: `JuanmiRodas/Musichord`. Es el fork «BitChord Audio» de BitChord, una app Android en Kotlin con Compose y Media3, organizada en los módulos `shared`, `sharedUi` y `app`.
 
@@ -182,6 +182,16 @@ Este documento resume las modificaciones hechas sobre BitChord y el punto en que
   - Solo con WiFi y sin ahorro de batería. Nunca sube dos veces el mismo archivo y nunca borra nada.
   - Se activa o desactiva en Ajustes.
   - La idea es limpiar después la biblioteca en el Mac con una app propia.
+
+### 2.12 ADN de la canción (como SongDNA de Spotify)
+- **Dónde:** bajo el reproductor. Se desliza hacia arriba desde los controles (o ⋯ → «Información de la canción»); con la lista arriba del todo, deslizar hacia abajo devuelve el reproductor. Desde el menú de cualquier otra canción se abre la misma página en una ventana.
+- **Qué muestra:** sobre la canción (Wikipedia / Genius / Last.fm / Discogs), créditos agrupados (interpretación, composición y letra, arreglos, producción, sonido), conexiones (samples, interpolaciones, versiones, remixes, directos), otras versiones (`SongFamily`), dónde aparece (álbumes, temas de anime de AnimeThemes), portadas alternativas (→ selector de portada), detalles (álbum, fecha, sello, géneros, BPM, idioma, ISRC, oyentes), tu copia (ruta en pCloud / en el móvil, tamaño, formato) y la descripción del vídeo.
+- **Fuentes gratuitas:** créditos de YouTube Music (`MPTC` + id), MusicBrainz (+ obra) y Cover Art Archive, Wikidata/Wikipedia (es, en, ja), Genius (API web sin clave), Last.fm, iTunes, Deezer (BPM), AnimeThemes y **Discogs con token propio** (se pega en la propia página, «Añadir más fuentes»; prefs `bitchord_dna_keys`, no se sincronizan).
+- **Datos:** `song_dna.json` (`SongDna.FILE`), copiado a pCloud por `CloudBackup`. Relleno de toda la biblioteca de noche con `BackgroundHours` y WiFi (`SongDna.fillAll`); de día solo al abrir la página.
+- Archivos: `data/dna/SongDna.kt`, `data/dna/DnaKeys.kt`, `ui/components/SongDnaPage.kt`; el panel en `NowPlayingScreen` (`PlayerHost.SongDnaPanel`).
+
+### 2.13 Descargas de listas («Música que te gusta»)
+- Arreglado en v1.9.284: la sincronización en segundo plano no incluía los likes locales (pCloud) y los borraba 30 s después de descargarlos.
 
 ---
 
