@@ -146,6 +146,14 @@ object KeptPlaylists {
             pendingRemoval.remove(id)
             // Back in a kept list meanwhile (re-liked, added again): kept.
             if (owners[id]?.isNotEmpty() == true || latest.values.any { id in it }) return@launch
+            // Still a local like (pCloud file, download): Liked Music still has it,
+            // whatever list came in without it.
+            if (k == LIKED && com.music.bitchord.data.LocalLikes.liked.value.containsKey(id)) {
+                owners.getOrPut(id) { ConcurrentHashMap.newKeySet() }.add(k)
+                save()
+                TrackLog.d(TAG, "kept downloaded: $id is still a local like — kept")
+                return@launch
+            }
             owners.remove(id)
             save()
             Downloads.cancel(id)

@@ -2241,14 +2241,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             @OptIn(kotlinx.coroutines.FlowPreview::class)
             kotlinx.coroutines.flow.combine(
                 LikedMusicCache.likedSongs,
+                com.music.bitchord.data.LocalLikes.liked,
                 com.music.bitchord.download.KeptPlaylists.on,
                 com.music.bitchord.data.settings.AppSettings.meteredConnection,
                 com.music.bitchord.data.settings.AppSettings.wifiOnlyDownloads,
-            ) { songs, on, _, _ -> songs to on }
+            ) { songs, _, on, _, _ -> songs to on }
                 .debounce(5_000)
-                .collect { (songs, on) ->
+                .collect { (youtube, on) ->
                     val kept = com.music.bitchord.download.KeptPlaylists
                     kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        // Liked Music as shown: YouTube's likes plus your local likes (pCloud
+                        // files, downloads). Without them a "complete" list lacked every local
+                        // like, so those downloads were deleted 30 s after being saved.
+                        val songs = withLocalLikes(youtube)
                         if (songs.isNotEmpty()) kept.sync(kept.LIKED, songs, complete = true, title = getApplication<Application>().getString(R.string.liked_music_pin_title))
                         for (k in on - kept.LIKED) {
                             val list = com.music.bitchord.data.PlaylistPageCache.load("VL$k") ?: com.music.bitchord.data.PlaylistPageCache.load(k) ?: continue
