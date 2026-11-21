@@ -237,6 +237,29 @@ object WebDavRepository {
     }
 
     /** A URL with no folder in it ("https://ewebdav.pcloud.com/"). */
+    /**
+     * BitChord Audio: where your music lives on the drive, from the last listing — the folders
+     * (a few levels down) holding at least 20 of its songs. Never the phone backup ("/Music"
+     * at the top, a mirror of the phone) nor folders this app writes.
+     */
+    private fun musicRootsFromLastListing(): List<String> {
+        val songs = inMemory ?: saved() ?: return emptyList()
+        val counts = HashMap<String, Int>()
+        for (s in songs) {
+            val url = s.videoId.removePrefix("webdav:")
+            val uri = runCatching { java.net.URI(url.replace(" ", "%20")) }.getOrNull() ?: continue
+            val segs = (uri.rawPath ?: continue).trim('/').split('/')
+            if (segs.size < 2) continue
+            val depth = minOf(4, segs.size - 1)
+            val prefix = segs.take(depth).joinToString("/")
+            counts[prefix] = (counts[prefix] ?: 0) + 1
+        }
+        val top = "${java.net.URI(WebDavConfig.normalizeUrl(AppSettings.webdavUrl.value)).let { "${it.scheme}://${it.host}" }}/"
+        return counts.filter { (k, n) ->
+            n >= 20 && !k.equals("Music", true) && !k.startsWith("Music/", true) && !k.startsWith("Playlists", true)
+        }.keys.sorted().map { top + it + "/" }
+    }
+
     fun isServerRoot(url: String): Boolean = runCatching {
         java.net.URI(WebDavConfig.normalizeUrl(url)).path.orEmpty().trim('/').isEmpty()
     }.getOrDefault(false)
@@ -276,7 +299,20 @@ object WebDavRepository {
             // BitChord Audio: never the whole drive — a folder that is the server's root (a
             // sign-in that left the address bare, the folder list not read yet) listed every
             // folder in pCloud (thousands of requests, the memory full, playback stalled).
-            .filter { f -> !isServerRoot(f.url).also { root -> if (root) TrackLog.w(TAG, "WebDAV: not listing ${f.url} — it is the whole drive") } }
+            // Instead: the folders your music was found in last time (since 19 Nov the library
+            // was never listed again, so files moved or renamed in pCloud stayed at their old
+            // address — 404s, songs that wouldn't play, download or show a cover).
+            .flatMap { f ->
+                if (!isServerRoot(f.url)) return@flatMap listOf(f)
+                val known = musicRootsFromLastListing()
+                if (known.isEmpty()) {
+                    TrackLog.w(TAG, "WebDAV: not listing ${f.url} — it is the whole drive")
+                    emptyList()
+                } else {
+                    TrackLog.d(TAG, "WebDAV: the whole drive is chosen — listing the folders your music was in: ${known.joinToString { android.net.Uri.decode(it) }}")
+                    known.mapIndexed { i, u -> f.copy(id = "${f.id}#$i", url = u) }
+                }
+            }
         val listed = folders.mapNotNull { folder ->
             WebDavClient.listLibrary(folder.url, username, password, maxFiles = 50_000)
                 .onFailure { TrackLog.w(TAG, "WebDAV: listing ${folder.url} failed: ${it.message}") }
@@ -316,6 +352,9 @@ object WebDavRepository {
         publishLyrics(listing.lyrics.map { it.url })
         inMemory = songs
         savedFile?.let { SongListStore.save(it, songs) }
+        // BitChord Audio: likes of files that have moved or been renamed, moved to them.
+        runCatching { com.music.bitchord.data.LocalLikes.relink(songs) }
+            .onFailure { TrackLog.w(TAG, "likes: relinking failed: ${it.message}") }
         readMissingTags(listing.audio, username, password)
         startPrefs?.edit()?.putLong("listed_at", System.currentTimeMillis())?.apply()
         // Liked Music's best sources: only songs not worked out before.

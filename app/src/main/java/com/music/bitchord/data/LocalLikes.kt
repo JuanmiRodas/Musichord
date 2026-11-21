@@ -291,6 +291,47 @@ object LocalLikes {
         if (gone.isNotEmpty()) TrackLog.d("BitChord", "likes: ${gone.size} duplicate like(s) removed")
     }
 
+    /**
+     * Likes of your files that are no longer where they were (moved or renamed in pCloud —
+     * they answered 404: no playing, no download, no cover) moved onto the same song in the
+     * library just listed: in the same folder first, else anywhere. Its place in the list kept.
+     */
+    fun relink(library: List<Song>) {
+        if (library.isEmpty()) return
+        fun dec(u: String) = runCatching { java.net.URLDecoder.decode(u.replace("+", "%2B"), "UTF-8") }.getOrDefault(u)
+        val here = library.mapTo(HashSet()) { dec(it.videoId) }
+        val stale = _liked.value.values.filter { it.videoId.startsWith("webdav:") && dec(it.videoId) !in here }
+        if (stale.isEmpty()) return
+        val byArtist = library.groupBy { OwnFileMatcher.key(it.artist.split(',', '&', '·').first().trim()) }
+        val taken = _liked.value.keys.mapTo(HashSet()) { dec(it) }
+        var moved = 0
+        for (old in stale) {
+            val artistKey = OwnFileMatcher.key(old.artist.split(',', '&', '·').first().trim())
+            val pool = (byArtist[artistKey].orEmpty()).ifEmpty { library }
+            val folder = dec(old.videoId).substringBeforeLast('/')
+            val match = pool.filter { dec(it.videoId) !in taken && sameSong(old, it) }
+                .minByOrNull { if (dec(it.videoId).substringBeforeLast('/') == folder) 0 else 1 }
+                ?: continue
+            val anchor = anchors[old.videoId]
+            val kept = match.copy(thumbnailUrl = match.thumbnailUrl ?: old.thumbnailUrl, durationText = match.durationText ?: old.durationText)
+            anchors.remove(old.videoId)
+            anchor?.let { anchors[kept.videoId] = it }
+            _liked.value = _liked.value - old.videoId + (kept.videoId to kept)
+            prefs?.edit()
+                ?.remove(LIKED + old.videoId)
+                ?.putString(LIKED + kept.videoId, songJson(kept, anchor))
+                ?.remove(GONE + kept.videoId)
+                ?.apply()
+            taken += dec(kept.videoId)
+            moved++
+            TrackLog.d("BitChord", "likes: '${old.title}' moved in pCloud — the like follows it to ${dec(kept.videoId).substringAfterLast('/')}")
+        }
+        if (moved > 0) {
+            TrackLog.d("BitChord", "likes: $moved like(s) of moved files relinked, ${stale.size - moved} not found in the library")
+            CloudBackup.soon(PREFS)
+        }
+    }
+
     fun setLocal(song: Song, like: Boolean) {
         val id = song.videoId
         if (like) {
