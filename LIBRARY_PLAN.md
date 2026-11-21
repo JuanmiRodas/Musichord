@@ -33,7 +33,7 @@ Objetivo: toda la música que te gusta acaba en `pCloud Drive/pCloud Backup/MacB
 - Hecho en v1.9.288: `LibraryQuality`.
   - El espejo y las copias a pCloud solo suben MP3 o sin pérdida, y nada que ya esté en la biblioteca.
   - La limpieza ya no convierte a AAC.
-  - Por la noche, con WiFi, las descargas que no son MP3 320 se sustituyen sin avisar por la copia de la biblioteca, si es la misma grabación.
+  - Por la noche, con WiFi, las descargas que no son MP3 320 se sustituyen sin avisar por la copia de la biblioteca: huella acústica comprobada y la antigua borrada solo después de registrar la nueva.
   - La to-do del móvil se escribe en `pCloud/.bitchord-audio/todo-phone.json`.
 
 ## App del Mac (`macLibrary/`, Compose Desktop; workflow `mac.yml`, pre-release `mac-library-1.0.N`)

@@ -200,7 +200,7 @@ Este documento resume las modificaciones hechas sobre BitChord y el punto en que
 - **BitChord** (`data/webdav/LibraryQuality.kt`):
   - el espejo y las copias a pCloud solo suben MP3 o sin pérdida, y nada que ya esté en la biblioteca;
   - la limpieza ya no convierte a AAC;
-  - de noche, con WiFi, se sustituyen las descargas por la copia de la biblioteca si es la misma grabación;
+  - de noche, con WiFi, se sustituyen las descargas por la copia de la biblioteca: se baja aparte, se comprueba que es mejor y que la huella acústica coincide (error < 0,33), se registra la nueva y solo entonces se borra la antigua;
   - la to-do del móvil va a `.bitchord-audio/todo-phone.json`.
 - **App del Mac «BitChord Library»** (`macLibrary/`, Compose Desktop, workflow `mac.yml`): se publica como pre-release `mac-library-1.0.N` con un `.dmg` para Apple Silicon. El actualizador del móvil no la ve.
 - **Auditoría del 21 nov:**

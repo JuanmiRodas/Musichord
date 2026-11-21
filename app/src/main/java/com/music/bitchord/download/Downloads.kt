@@ -879,6 +879,32 @@ object Downloads {
         }
     }
 
+    /**
+     * BitChord Audio: the download of [videoId] replaced by [file] (already checked to be
+     * the same recording, and better). The new file is put in place and recorded first;
+     * the old one is deleted only after that, so the song is never left without a copy.
+     */
+    internal suspend fun replaceWith(context: Context, videoId: String, file: File, format: String): Boolean = withContext(Dispatchers.IO) {
+        val old = _saved.value[videoId] ?: return@withContext false
+        val dir = File(context.filesDir, "downloads-library").apply { mkdirs() }
+        val target = File(dir, file.name).let { t ->
+            if (!t.exists()) t else File(dir, t.nameWithoutExtension + " (" + System.currentTimeMillis() + ")." + t.extension)
+        }
+        if (!file.renameTo(target)) {
+            runCatching { file.copyTo(target, overwrite = false) }.onFailure { return@withContext false }
+            file.delete()
+        }
+        if (target.length() <= 0) { target.delete(); return@withContext false }
+        val newUri = Uri.fromFile(target).toString()
+        record(
+            saved = { m -> m.mapValues { (_, v) -> if (v == old) newUri else v } },
+            meta = { m -> m.mapValues { (_, v) -> if (v.uri == old) v.copy(uri = newUri, downloadFormat = format) else v } },
+        )
+        // Recorded: the old file can go now.
+        runCatching { DownloadStore.delete(context, old.toUri()) }
+        true
+    }
+
     /** BitChord Audio: a saved file moved to [to] (see [DownloadLayout.reorganise]). */
     fun relocate(from: String, to: String) {
         record(

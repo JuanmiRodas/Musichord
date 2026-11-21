@@ -23,11 +23,10 @@ import org.json.JSONObject
  * AAC, m4a, opus or webm. So:
  *  - [isKeepable]: what may go up to pCloud at all (MP3 or lossless; the copies and the
  *    phone's mirror ask it before every upload);
- *  - [upgradeNight]: a download that isn't MP3 320 or lossless, of a song the library now
- *    has as an MP3 or lossless file of the same recording (same title in any script, same
- *    artist, length within 2 s), is downloaded again — the downloader takes the library's
- *    file over YouTube's when it is better. Quietly, at night, on Wi-Fi; each pair tried
- *    once, so a library file that turns out no better is not fetched every night;
+ *  - [upgradeNight]: a download that isn't MP3 320 or lossless is replaced by the
+ *    library's file of the same recording — checked by fingerprint, and the old file
+ *    deleted only once the new one is in place. Quietly, at night, on Wi-Fi; each pair
+ *    tried once;
  *  - [writeTodo]: the downloads the library has no good copy of yet go to
  *    `.bitchord-audio/todo-phone.json` on pCloud, for the Mac app's to-do list.
  */
@@ -83,32 +82,82 @@ object LibraryQuality {
         }
     }
 
-    /** Downloads replaced by the library's better file of the same recording. */
+    /**
+     * Downloads replaced by the library's better file of the same recording, safely:
+     *  1. the library's file is downloaded beside the current download (nothing touched yet);
+     *  2. it must really be better — lossless, or an MP3 of 315 kbps or more;
+     *  3. both are fingerprinted, as the link check does: only a bit error under 0.33
+     *     (the same recording) goes on;
+     *  4. the new file is put in place and recorded, and only then is the old one deleted.
+     * Any step that fails leaves the current download exactly as it was. A song playing
+     * right now waits for the next round.
+     */
     private suspend fun upgradeNight() {
         val ctx = app ?: return
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val user = AppSettings.webdavUsername.value
+        val pass = AppSettings.webdavPassword.value
+        val work = java.io.File(ctx.cacheDir, "library-upgrade").apply { mkdirs() }
         var n = 0
         for (s in Downloads.savedMetadataSongs()) {
             if (!BackgroundHours.now() || AppSettings.meteredConnection.value != false) break
             if (WebDavConfig.isWebDavId(s.videoId)) continue
-            val format = Downloads.savedEntry(s.videoId)?.second
+            val (current, format) = Downloads.savedEntry(s.videoId) ?: continue
             if (isFinal(format)) continue
             val copy = libraryCopy(s) ?: continue
             val tried = "tried:" + s.videoId + "|" + copy.videoId
             if (prefs.getBoolean(tried, false)) continue
-            prefs.edit().putBoolean(tried, true).apply()
-            // The library's file must answer before the phone's copy goes.
+            // Not while it plays.
+            if (com.music.bitchord.data.lyrics.CurrentLyrics.lines.value?.first == s.videoId) continue
             val url = WebDavConfig.fileUrlOf(copy.videoId) ?: continue
-            val there = WebDavClient.exists(url, AppSettings.webdavUsername.value, AppSettings.webdavPassword.value).getOrDefault(false)
-            if (!there) continue
-            TrackLog.d(TAG, "download upgraded: '${s.title}' ${format ?: "?"} → your library's ${copy.videoId.substringAfterLast('/').substringAfterLast('.').uppercase()}")
-            runCatching { Downloads.delete(ctx, s.videoId) }
-            Downloads.enqueue(ctx, s, "library")
-            n++
-            delay(4_000)
+            val ext = java.net.URLDecoder.decode(url.substringAfterLast('/'), "UTF-8").substringAfterLast('.', "mp3").lowercase()
+            val name = java.net.URLDecoder.decode(url.substringAfterLast('/'), "UTF-8").replace(Regex("""[\\/:*?"<>|]"""), " ")
+            val tmp = java.io.File(work, name.ifBlank { "copy.$ext" })
+            try {
+                // 1. Fetched beside the current one.
+                if (WebDavClient.download(url, user, pass, tmp).isFailure || tmp.length() <= 0) continue
+                // 2. Really better.
+                val kbps = bitrateOf(tmp)
+                val lossless = ext in setOf("flac", "wav", "aiff", "aif", "alac")
+                if (!lossless && (ext != "mp3" || (kbps ?: 0) < 315)) {
+                    prefs.edit().putBoolean(tried, true).apply()
+                    TrackLog.d(TAG, "download upgrade: '${s.title}' — the library's file is ${ext.uppercase()} ${kbps ?: "?"} kbps, not better; kept")
+                    continue
+                }
+                // 3. The same recording, by ear.
+                val ber = com.music.bitchord.playback.smart.AudioCheck.berBetween(ctx, android.net.Uri.parse(current), tmp)
+                if (ber == null || ber >= com.music.bitchord.playback.smart.AudioCheck.SAME_BELOW) {
+                    prefs.edit().putBoolean(tried, true).apply()
+                    TrackLog.d(TAG, "download upgrade: '${s.title}' — fingerprint ${ber?.let { "%.2f".format(it) } ?: "unreadable"}, not the same recording; kept")
+                    continue
+                }
+                // 4. In place first, the old one deleted after.
+                val newFormat = if (lossless) "${ext.uppercase()} · lossless (your library)" else "MP3 · ${kbps} kbps (your library)"
+                if (Downloads.replaceWith(ctx, s.videoId, tmp, newFormat)) {
+                    prefs.edit().putBoolean(tried, true).apply()
+                    n++
+                    TrackLog.d(TAG, "download upgraded: '${s.title}' ${format ?: "?"} → $newFormat (fingerprint ${"%.2f".format(ber)})")
+                }
+            } finally {
+                tmp.delete()
+            }
+            delay(2_000)
         }
         if (n > 0) TrackLog.d(TAG, "library quality: $n downloads replaced by your library's copies")
     }
+
+    /** The file's bitrate in kbps, from its header (or its size and length). */
+    private fun bitrateOf(f: java.io.File): Int? = runCatching {
+        val r = android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(f.path)
+            r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull()?.let { it / 1000 }
+                ?: r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0 }
+                    ?.let { ms -> (f.length() * 8 / ms).toInt() }
+        } finally {
+            r.release()
+        }
+    }.getOrNull()
 
     /** What the phone has that the library still lacks in good quality → the Mac app's to-do. */
     private suspend fun writeTodo() {

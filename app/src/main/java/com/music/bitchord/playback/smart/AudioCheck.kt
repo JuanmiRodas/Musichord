@@ -418,6 +418,19 @@ object AudioCheck {
         runCatching { source.close() }
     }
 
+    /**
+     * BitChord Audio: how different [download] and [file] sound (the lowest bit error over
+     * every shift, as the link check measures it): under 0.33 the same recording, over
+     * 0.42 another one. Null when either can't be read.
+     */
+    internal fun berBetween(context: Context, download: Uri, file: File): Double? {
+        val a = LocalAudioSource.open(context.contentResolver, download)?.let { print(it) } ?: return null
+        val b = print(FileSource(file)) ?: return null
+        return bestBer(a, b)
+    }
+
+    const val SAME_BELOW = 0.33
+
     /** 32 bits a frame: the sign of each band's energy step, against the frame before. */
     internal fun fingerprint(samples: FloatArray, rate: Double): IntArray {
         val window = FloatArray(FRAME) { (0.5 - 0.5 * cos(2 * PI * it / (FRAME - 1))).toFloat() }
