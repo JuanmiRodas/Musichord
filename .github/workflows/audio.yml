@@ -5,6 +5,11 @@ name: BitChord Audio APK
 on:
   push:
     branches: [main]
+    # BitChord Audio: the Mac app has its own workflow (mac.yml).
+    paths-ignore:
+      - 'macLibrary/**'
+      - '.github/workflows/mac.yml'
+      - 'LIBRARY_PLAN.md'
   workflow_dispatch:
 
 permissions:

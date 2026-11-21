@@ -1,0 +1,47 @@
+name: BitChord Library (Mac)
+
+# The Mac app that tidies the music library on pCloud (macLibrary/). Built on a
+# GitHub Mac and published as a pre-release, so the phone's updater never sees it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'macLibrary/**'
+      - '.github/workflows/mac.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-library
+  cancel-in-progress: true
+
+jobs:
+  dmg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: gradle
+
+      - name: Build the app
+        run: |
+          chmod +x gradlew
+          ./gradlew -Pbitchord.mac=true -Pbitchord.libraryVersion=1.0.${{ github.run_number }} :macLibrary:packageDmg --stacktrace 2>&1 | tee build.log
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mac-library-1.0.${{ github.run_number }}
+          name: BitChord Library (Mac) 1.0.${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          body: |
+            The Mac app that tidies the BitChord Audio library on pCloud (Apple Silicon).
+            Unsigned: after copying it to Applications, run `xattr -cr "/Applications/BitChord Library.app"` once.
+          files: macLibrary/build/compose/binaries/main/dmg/*.dmg

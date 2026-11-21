@@ -18,6 +18,9 @@ dependencyResolutionManagement {
 rootProject.name = "BitChord"
 include(":shared")
 include(":sharedUi")
+// BitChord Audio: the Mac library app — only in its own workflow (JDK 21, -Pbitchord.mac=true).
+val macOnly = providers.gradleProperty("bitchord.mac").orNull == "true"
+if (macOnly) include(":macLibrary")
 
 // The Android module only when there is an SDK to build it against. A machine
 // set up for the desktop alone has none, and including it there fails at
@@ -33,7 +36,7 @@ val androidSdk: String? = file("local.properties")
     ?: System.getenv("ANDROID_HOME")
     ?: System.getenv("ANDROID_SDK_ROOT")
 
-if (androidSdk != null && file(androidSdk).isDirectory) {
+if (!macOnly && androidSdk != null && file(androidSdk).isDirectory) {
     include(":app")
     include(":tv")
     include(":wearos")
