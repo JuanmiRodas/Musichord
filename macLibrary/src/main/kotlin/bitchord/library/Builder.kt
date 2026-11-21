@@ -170,9 +170,32 @@ object Builder {
 
     private val KARAOKE = Regex("(?i)karaoke|カラオケ|off[ -]?vocal|instrumental|inst\\.\\)|\\(inst\\)|backing track|オリジナル・カラオケ")
 
-    fun plan(sources: List<Source>, tracks: List<Track>, targetRoot: String): Plan {
+    /**
+     * `<library>/.bitchord-library/quarantine.json`: folders and files that never enter the library
+     * (the clips in "Música de los vídeos OPS", and their copies another tool renamed and spread
+     * over other folders — found by their audio, see LIBRARY_PLAN.md). Sources stay untouched.
+     */
+    class Quarantine(val folders: List<String>, val files: Map<String, String>) {
+        fun reason(path: String): String? {
+            val p = Words.nfc(path)
+            files[p]?.let { return "cuarentena: $it" }
+            return if (folders.any { p.startsWith("$it/") }) "cuarentena: clip de vídeo (${folders.first { p.startsWith("$it/") }.substringAfterLast('/')})" else null
+        }
+        companion object {
+            fun load(root: String) = runCatching {
+                val o = JSONObject(File(root, ".bitchord-library/quarantine.json").readText())
+                val fo = o.optJSONArray("folders")?.let { a -> (0 until a.length()).map { Words.nfc(a.getString(it)).trimEnd('/') } }.orEmpty()
+                val fi = o.optJSONObject("files")?.let { f -> f.keys().asSequence().associate { Words.nfc(it) to f.getString(it) } }.orEmpty()
+                Quarantine(fo, fi)
+            }.getOrDefault(Quarantine(emptyList(), emptyMap()))
+        }
+    }
+
+    fun plan(sources: List<Source>, allTracks: List<Track>, targetRoot: String): Plan {
         loadAliases(targetRoot)
         val skipped = ArrayList<Pair<Track, String>>()
+        val quarantine = Quarantine.load(targetRoot)
+        val tracks = allTracks.filter { t -> quarantine.reason(t.path)?.let { skipped += t to it; false } ?: true }
         val people = People()
         val bySource = sources.associateWith { s -> tracks.filter { it.path.startsWith(s.path + "/") } }
 

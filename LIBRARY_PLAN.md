@@ -85,3 +85,8 @@ Objetivo: toda la música que te gusta acaba en `pCloud Drive/pCloud Backup/MacB
 - **Para Claude**: `live.json` (estado cada pocos segundos), `log.txt` (una línea por archivo), `inbox/*.json` → `outbox/*.txt` (`status`, `stop`, `scan`, `build`, `scan+build`, `update` con `then`, `cli` con `args`). La app se actualiza sola (`Updater`, releases `mac-library-*`).
 - **ffmpeg colgado**: las órdenes externas ya no pueden bloquear (salida a archivo + límite de tiempo); por eso se quedaba parada en 3751.
 - Pendiente: identificar por huella (AcoustID) lo que queda en «Sin identificar» (sobre todo «Música de los vídeos OPS»).
+
+## 22 nov: cuarentena de «Música de los vídeos OPS» (1.0.13)
+- Esa carpeta (1155 clips de openings/endings de vídeos, nombres originales tipo «a1 jap Pokémon», «a2 jap saiyukiend») queda fuera de la biblioteca y no se toca.
+- Otra herramienta había copiado clips suyos a otras carpetas con nombres nuevos («Detective conan ending 17», «Gundam se - Ending», «Ufo Baby»…). Se encontraron comparando con los originales: misma duración (±0,06 s) y mismo audio (MD5 de los paquetes MP3, que no cambia al cambiar etiquetas o nombre) → 75 copias exactas, todas en `Música(1)/Anime`; más 3 recodificadas (misma duración y envolvente de audio con correlación ≥ 0,98: «jirachi ending», «Parade», «Bleach - Rolling Star»).
+- `<biblioteca>/.bitchord-library/quarantine.json` ({"folders": [...], "files": {ruta: motivo}}): el plan no copia nada de ahí, y al ordenar se quitan de la biblioteca los archivos que la app ya había copiado de ellos (5). Orden `quarantine` en la línea de comandos.

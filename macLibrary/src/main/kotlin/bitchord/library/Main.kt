@@ -300,6 +300,12 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
                     Button(enabled = state.busy == null, onClick = { state.build() }) { Text("Construir y ordenar") }
                     if (Live.job != null) OutlinedButton(onClick = { state.stop() }) { Text("Parar") }
                 }
+                val quarantine = remember(state.tracks) { Builder.Quarantine.load(state.settings.root) }
+                if (quarantine.folders.isNotEmpty() || quarantine.files.isNotEmpty()) Text(
+                    "En cuarentena (no se copian; las fuentes no se tocan): ${quarantine.folders.joinToString { it.substringAfterLast('/') }}" +
+                        (if (quarantine.files.isNotEmpty()) " y ${quarantine.files.size} copias suyas en otras carpetas" else ""),
+                    color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+                )
                 if (Live.unmatched.isNotEmpty()) Text("${Live.unmatched.size} archivos de la biblioteca que la app no hizo y no reconoce se han dejado donde estaban (lista en live.json)", color = Color(0xFFFFB4A9), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
         }

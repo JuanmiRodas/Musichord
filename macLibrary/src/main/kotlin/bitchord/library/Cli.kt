@@ -21,6 +21,7 @@ Uso: bitchord-library <orden> [opciones]
   build             Construye la biblioteca y la ordena con el plan (mueve lo ya copiado,
                     copia lo que falta, quita lo que sobra): --source "<nombre>",
                     --dry-run para ver el plan, --only <texto> para filtrar lo que se enseña
+  quarantine        Lo que nunca entra en la biblioteca (quarantine.json)
   covers            Portadas alternativas propuestas pendientes de aprobar
   free              Carpetas de las fuentes ya cubiertas por la biblioteca (para liberar espacio)
   archive           Copia a --to <carpeta> y comprueba las carpetas cubiertas (--folder <texto>);
@@ -123,7 +124,7 @@ fun cli(args: Array<String>, inApp: Boolean = false) = runBlocking {
             println("Fuentes: ${chosen.joinToString { it.name }} · ${known.size - Scanner.known(listOf(root)).size} archivos leídos")
             println("En la biblioteca ${items.size}: ${items.count { it.reason == "MP3 320" }} MP3 320, ${items.count { it.reason.startsWith("sin pérdida") }} desde sin pérdida, " +
                 "${items.count { it.reason.contains("mientras") }} por debajo de 320 (mientras tanto, en la to-do)")
-            println("No se copian ${plan.skipped.size}: " + plan.skipped.groupingBy { it.second }.eachCount().entries.joinToString { "${it.value} ${it.key}" })
+            println("No se copian ${plan.skipped.size}: " + plan.skipped.groupingBy { it.second.substringBefore(":") }.eachCount().entries.joinToString { "${it.value} ${it.key}" })
             File(ops.state, "build-plan.csv").writeText(buildString {
                 appendLine("origen,destino,motivo")
                 items.forEach { appendLine("\"${it.track.path}\",\"${it.target}\",\"${it.reason}\"") }
@@ -135,6 +136,11 @@ fun cli(args: Array<String>, inApp: Boolean = false) = runBlocking {
                 return@runBlocking
             }
             println(Engine.build(chosen, known, root))
+        }
+        "quarantine" -> Builder.Quarantine.load(root).let { q ->
+            println("Carpetas en cuarentena: ${q.folders.joinToString()}")
+            q.files.entries.forEach { println("${it.key}  (${it.value})") }
+            println("— ${q.files.size} archivos sueltos en cuarentena")
         }
         "covers" -> Covers(root).pending().let { p ->
             p.take(40).forEach { println("${it.key}: ${it.alternative.name} (de ${it.from})") }
