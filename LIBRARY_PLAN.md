@@ -55,3 +55,19 @@ Objetivo: toda la música que te gusta acaba en `pCloud Drive/pCloud Backup/MacB
   - listas `.m3u8`;
   - huella acústica (Chromaprint) para emparejar versiones.
 - **Fase 4:** reproductor de escritorio de BitChord integrado, partiendo del `desktopApp` del fork de ayhamo, para sustituir a Apple Music en el Mac.
+
+
+## Cambio del 21 nov (noche): biblioteca nueva desde fuentes de solo lectura
+
+- **Biblioteca nueva:** `~/pCloud Drive/Biblioteca`, en la nube. Hacen falta ~123 GB y el Mac solo tiene 43 GB libres.
+- **Fuentes, que nunca se modifican:** `~/Desktop/Música`, `~/Music/Música(1)`, `~/Downloads/Discografías` y `~/pCloud Drive/OnlineOnly/Yuki Kajiura`.
+- **Reglas de la carpeta de Kajiura:**
+  - entran FICTION, The Works, todos los directos y conciertos, todos los singles y sus grupos (FictionJunction, YUUKA, ASUKA, Kalafina, See-Saw, Saeko Chiba);
+  - de las bandas sonoras, solo las pistas cantadas.
+- **Calidad:** de cada canción se copia la mejor versión. Si solo hay MP3 por debajo de 320 o falsos 320, se copian mientras tanto y van a la to-do. No se copian karaoke, «off vocal» ni instrumentales.
+- **Colecciones:** carpetas de muchos artistas cuyo nombre aparece en las canciones (anime, juegos, series). Cada canción va al álbum de la colección que más canciones reúne.
+- **Alias:** van en `Biblioteca/.bitchord-library/collections.json`, por ejemplo «美少女戦士セーラームーン» → «Sailor Moon».
+- **Artistas:** una carpeta por persona, con el nombre «Romaji (日本語)».
+- **Portadas alternativas:** base de portadas sin duplicados, una por álbum, y propuestas para aprobar en la to-do.
+- **Liberar espacio:** las carpetas de las fuentes ya cubiertas se archivan en `OnlineOnly/Antigua biblioteca de música`, se comprueban y se borran del Mac.
+- **Pendiente:** BitChord, con la carpeta de discografía como recurso de la página de artista (álbumes por año fusionados con YouTube Music sin repetir, y vídeos de conciertos).
