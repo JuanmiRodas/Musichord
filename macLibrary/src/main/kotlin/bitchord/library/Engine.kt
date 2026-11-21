@@ -305,18 +305,33 @@ object Updater {
 
     private fun num(v: String) = v.split('.').map { it.toIntOrNull() ?: 0 }.let { p -> p.getOrElse(0) { 0 } * 1_000_000 + p.getOrElse(1) { 0 } * 1000 + p.getOrElse(2) { 0 } }
 
-    fun latest(): Release? = runCatching {
-        val c = URL(API).openConnection() as HttpURLConnection
+    private fun get(url: String): String? = runCatching {
+        val c = URL(url).openConnection() as HttpURLConnection
         c.setRequestProperty("User-Agent", "BitChord-Library"); c.setRequestProperty("Accept", "application/vnd.github+json")
         c.connectTimeout = 15000; c.readTimeout = 20000
-        val a = JSONArray(c.inputStream.bufferedReader().readText())
-        (0 until a.length()).map { a.getJSONObject(it) }.filter { it.optString("tag_name").startsWith("mac-library-") }.mapNotNull { r ->
-            val v = r.getString("tag_name").removePrefix("mac-library-")
-            val assets = r.optJSONArray("assets") ?: return@mapNotNull null
-            val dmg = (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".dmg") } ?: return@mapNotNull null
-            Release(v, dmg.getString("browser_download_url"))
-        }.maxByOrNull { num(it.version) }
+        if (c.responseCode != 200) null else c.inputStream.bufferedReader().readText()
     }.getOrNull()
+
+    private fun release(r: JSONObject): Release? {
+        if (!r.optString("tag_name").startsWith("mac-library-")) return null
+        val v = r.getString("tag_name").removePrefix("mac-library-")
+        val assets = r.optJSONArray("assets") ?: return null
+        val dmg = (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".dmg") } ?: return null
+        return Release(v, dmg.getString("browser_download_url"))
+    }
+
+    /** The newest Mac release: from the list, and by asking for the next versions one by one (the list can lag). */
+    fun latest(): Release? {
+        val listed = get(API.replace("per_page=40", "per_page=100"))?.let { t -> runCatching { JSONArray(t) }.getOrNull() }
+            ?.let { a -> (0 until a.length()).mapNotNull { release(a.getJSONObject(it)) } }.orEmpty()
+        val parts = current.split('.')
+        val base = parts.dropLast(1).joinToString(".")
+        val n = parts.lastOrNull()?.toIntOrNull()
+        val probed = if (n == null || base.isEmpty()) emptyList() else (n + 1..n + 6).mapNotNull { i ->
+            get("https://api.github.com/repos/JuanmiRodas/Musichord/releases/tags/mac-library-$base.$i")?.let { runCatching { release(JSONObject(it)) }.getOrNull() }
+        }
+        return (listed + probed).maxByOrNull { num(it.version) }
+    }
 
     fun newer(): Release? = latest()?.takeIf { num(it.version) > num(current) }
 
