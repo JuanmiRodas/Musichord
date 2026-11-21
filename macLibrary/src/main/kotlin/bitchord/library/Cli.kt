@@ -20,6 +20,10 @@ Uso: bitchord-library <orden> [opciones]
   sources           Las fuentes (solo lectura) y sus reglas
   build             Construye la biblioteca limpia desde las fuentes: --source "<nombre>",
                     --dry-run para ver qué se copiaría, --only <texto> para una parte
+  covers            Portadas alternativas propuestas pendientes de aprobar
+  free              Carpetas de las fuentes ya cubiertas por la biblioteca (para liberar espacio)
+  archive           Copia a --to <carpeta> y comprueba las carpetas cubiertas (--folder <texto>);
+                    con --delete, después las borra del Mac
 
 Opciones:
   --root <carpeta>        La biblioteca (por defecto la de la app)
@@ -130,12 +134,38 @@ fun cli(args: Array<String>) = runBlocking {
             }
             var ok = 0
             var failed = 0
+            val covers = Covers(root)
             for (i in items) {
                 if (System.currentTimeMillis() > deadline) break
-                Builder.copy(i).onSuccess { ok++ }.onFailure { failed++; println("ERROR ${i.track.path}: ${it.message}") }
+                Builder.copy(i, covers).onSuccess { ok++; covers.propose(i.key, plan.alternatives[i.key].orEmpty()) }
+                    .onFailure { failed++; println("ERROR ${i.track.path}: ${it.message}") }
+                if ((ok + failed) % 50 == 0) covers.save()
             }
+            covers.save()
             ops.log("cli", "build ${chosen.joinToString { it.name }}: $ok copied, $failed failed, ${items.size - ok - failed} left")
             println("$ok copiadas, $failed con error, ${items.size - ok - failed} pendientes (vuelve a lanzar «build» para seguir)")
+        }
+        "covers" -> Covers(root).pending().let { p ->
+            p.take(40).forEach { println("${it.key}: ${it.alternative.name} (de ${it.from})") }
+            println("— ${p.size} portadas alternativas por revisar (apruébalas o descártalas en la app, pestaña To-do)")
+        }
+        "free", "archive" -> {
+            val folders = FreeSpace.scan(sources, Scanner.known(listOf(root) + sources.map { it.path }), root)
+            val full = folders.filter { it.covered == it.files }
+            if (cmd == "free") {
+                full.forEach { println("LISTA  ${"%.1f".format(it.bytes / 1e9)} GB  ${it.source.name} / ${File(it.path).name} (${it.files} canciones)") }
+                folders.filter { it.covered < it.files }.take(30).forEach { println("FALTAN ${it.files - it.covered} de ${it.files}  ${it.source.name} / ${File(it.path).name}") }
+                println("— ${full.size} carpetas listas para archivar: ${"%.1f".format(full.sumOf { it.bytes } / 1e9)} GB")
+            } else {
+                val to = opt("to") ?: return@runBlocking println("Falta --to <carpeta de archivo>")
+                val only = opt("folder")
+                full.filter { only == null || File(it.path).name.contains(only, ignoreCase = true) }.forEach { f ->
+                    if (System.currentTimeMillis() > deadline) return@forEach
+                    FreeSpace.archive(f, Paths.resolve(to), delete = flag("delete"))
+                        .onSuccess { println("ARCHIVADA ${File(f.path).name} → $it") }.onFailure { println("ERROR ${File(f.path).name}: ${it.message}") }
+                }
+                ops.log("cli", "archive ${only ?: "(all ready)"} → $to${if (flag("delete")) " (deleted from the Mac)" else ""}")
+            }
         }
         else -> println(HELP)
     }

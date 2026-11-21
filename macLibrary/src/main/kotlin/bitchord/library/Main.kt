@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -84,6 +85,7 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
     SUMMARY("Resumen", Icons.Filled.Insights),
     TODO("To-do", Icons.Filled.Checklist),
     NAMES("Nombres", Icons.Filled.DriveFileRenameOutline),
+    FREE("Liberar espacio", Icons.Filled.CleaningServices),
     SETTINGS("Ajustes", Icons.Filled.Settings),
 }
 
@@ -127,6 +129,7 @@ private fun App(state: LibraryState) {
                 Tab.SUMMARY -> Summary(state, scope)
                 Tab.TODO -> TodoList(state)
                 Tab.NAMES -> Names(state)
+                Tab.FREE -> FreeSpacePane(state, scope)
                 Tab.SETTINGS -> SettingsPane(state)
             }
         }
@@ -211,10 +214,14 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
                                 var ok = 0
                                 var failed = 0
                                 withContext(Dispatchers.IO) {
+                                    val covers = Covers(state.settings.root)
                                     p.copy.forEachIndexed { i, item ->
-                                        Builder.copy(item).onSuccess { ok++ }.onFailure { failed++; state.ops().log("app", "build error ${item.track.path}: ${it.message}") }
+                                        Builder.copy(item, covers).onSuccess { ok++; covers.propose(item.key, p.alternatives[item.key].orEmpty()) }
+                                            .onFailure { failed++; state.ops().log("app", "build error ${item.track.path}: ${it.message}") }
                                         state.progress = (i + 1f) / p.copy.size.coerceAtLeast(1)
+                                        if (i % 50 == 0) covers.save()
                                     }
+                                    covers.save()
                                 }
                                 state.ops().log("app", "build ${s.name}: $ok copied, $failed failed")
                                 state.busy = null
@@ -291,35 +298,138 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
 @Composable
 private fun TodoList(state: LibraryState) {
     var phone by remember { mutableStateOf(false) }
+    var showCovers by remember { mutableStateOf(false) }
+    val covers = remember(state.settings.root, state.tracks) { Covers(state.settings.root) }
+    var proposals by remember(covers) { mutableStateOf(covers.pending()) }
     val list = if (phone) state.phoneTodos else state.todos
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FilterChip(selected = !phone, onClick = { phone = false }, label = { Text("Biblioteca (${state.todos.size})") })
+            FilterChip(selected = !phone && !showCovers, onClick = { phone = false; showCovers = false }, label = { Text("Biblioteca (${state.todos.size})") })
             Spacer(Modifier.width(8.dp))
-            FilterChip(selected = phone, onClick = { phone = true }, label = { Text("Solo en el móvil (${state.phoneTodos.size})") })
+            FilterChip(selected = phone && !showCovers, onClick = { phone = true; showCovers = false }, label = { Text("Solo en el móvil (${state.phoneTodos.size})") })
+            Spacer(Modifier.width(8.dp))
+            FilterChip(selected = showCovers, onClick = { showCovers = true }, label = { Text("Portadas alternativas (${proposals.size})") })
             Spacer(Modifier.weight(1f))
             OutlinedButton(onClick = {
                 val d = FileDialog(null as Frame?, "Guardar la to-do", FileDialog.SAVE).apply { file = "to-do biblioteca.csv"; isVisible = true }
                 if (d.file != null) File(d.directory, d.file).writeText(Todos.csv(list))
             }) { Text("Exportar CSV") }
         }
+        if (showCovers) {
+            Text(
+                "Portadas de otras publicaciones donde está la misma grabación. Apruébalas para que BitChord pueda mostrarlas como portadas alternativas.",
+                color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, modifier = Modifier.padding(vertical = 10.dp),
+            )
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(proposals.take(500)) { p ->
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.05f)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CoverImage(p.primary)
+                        Text("  →  ", color = Color.White)
+                        CoverImage(p.alternative)
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text(p.key.substringBefore('|'), color = Color.White, fontWeight = FontWeight.Medium, maxLines = 1)
+                            Text("De: " + File(p.from).name, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        TextButton(onClick = { covers.decide(p.key, p.alternative.name, false); covers.save(); proposals = covers.pending() }) { Text("Descartar") }
+                        Button(onClick = { covers.decide(p.key, p.alternative.name, true); covers.save(); proposals = covers.pending() }) { Text("Aprobar") }
+                    }
+                }
+            }
+        } else {
+            Text(
+                "Lo que hay que sustituir por una versión MP3 320 auténtica o sin pérdida de la misma grabación, agrupado por discografía, álbum o canción.",
+                color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, modifier = Modifier.padding(vertical = 10.dp),
+            )
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(list) { t ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.05f)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(t.what, color = Color.White, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${t.group} · ${t.reason}", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (t.paths.isNotEmpty()) TextButton(onClick = {
+                            runCatching { ProcessBuilder("open", "-R", t.paths.first()).start() }
+                        }) { Text("Mostrar") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoverImage(f: File?) {
+    val bmp = remember(f) {
+        f?.takeIf { it.isFile }?.let { runCatching { org.jetbrains.skia.Image.makeFromEncoded(it.readBytes()).toComposeImageBitmap() }.getOrNull() }
+    }
+    Box(Modifier.size(72.dp).clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = 0.08f))) {
+        if (bmp != null) androidx.compose.foundation.Image(bmp, null, modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+    }
+}
+
+/** Source folders whose every song is already in the library, at least as good: archived online, then off the Mac. */
+@Composable
+private fun FreeSpacePane(state: LibraryState, scope: kotlinx.coroutines.CoroutineScope) {
+    val home = System.getProperty("user.home")
+    var archive by remember { mutableStateOf("$home/pCloud Drive/OnlineOnly/Antigua biblioteca de música") }
+    val folders = remember(state.tracks) { FreeSpace.scan(Sources.load(), state.tracks, state.settings.root) }
+    val ready = folders.filter { it.covered == it.files }
+    var chosen by remember(folders) { mutableStateOf(ready.map { it.path }.toSet()) }
+    var confirm by remember { mutableStateOf(false) }
+    Column {
+        Text("Liberar espacio", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
         Text(
-            "Lo que hay que sustituir por una versión MP3 320 auténtica o sin pérdida de la misma grabación, agrupado por discografía, álbum o canción.",
+            "Carpetas de tus fuentes cuyas canciones ya están TODAS en la biblioteca con igual o mejor calidad. Se copian al archivo online, se comprueba que cada archivo llegó entero y solo entonces se borran del Mac. " +
+                "${ready.size} listas (${"%.1f".format(ready.sumOf { it.bytes } / 1e9)} GB).",
             color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, modifier = Modifier.padding(vertical = 10.dp),
         )
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(list) { t ->
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.05f)).padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(t.what, color = Color.White, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${t.group} · ${t.reason}", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        OutlinedTextField(archive, { archive = it }, label = { Text("Archivo online") }, modifier = Modifier.fillMaxWidth())
+        Row(Modifier.padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = chosen.isNotEmpty() && state.busy == null, onClick = { confirm = true }) {
+                Text("Archivar y borrar ${chosen.size} carpetas (${"%.1f".format(ready.filter { it.path in chosen }.sumOf { it.bytes } / 1e9)} GB)")
+            }
+            OutlinedButton(onClick = { chosen = if (chosen.isEmpty()) ready.map { it.path }.toSet() else emptySet() }) { Text(if (chosen.isEmpty()) "Marcar todas" else "Desmarcar todas") }
+        }
+        if (confirm) AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("¿Archivar y borrar del Mac?") },
+            text = { Text("${chosen.size} carpetas se copiarán a «$archive», se comprobarán archivo por archivo y después se borrarán del Mac. La copia online queda.") },
+            confirmButton = { Button(onClick = {
+                confirm = false
+                scope.launch {
+                    state.busy = "Archivando…"
+                    var ok = 0
+                    val errors = ArrayList<String>()
+                    withContext(Dispatchers.IO) {
+                        val list = ready.filter { it.path in chosen }
+                        list.forEachIndexed { i, f ->
+                            FreeSpace.archive(f, Paths.resolve(archive), delete = true).onSuccess { ok++ }.onFailure { errors += "${File(f.path).name}: ${it.message}" }
+                            state.progress = (i + 1f) / list.size
+                        }
                     }
-                    if (t.paths.isNotEmpty()) TextButton(onClick = {
-                        runCatching { ProcessBuilder("open", "-R", t.paths.first()).start() }
-                    }) { Text("Mostrar") }
+                    state.ops().log("app", "free space: $ok folders archived to $archive and deleted; ${errors.size} errors ${errors.take(3)}")
+                    state.busy = null
+                    state.message = "$ok carpetas archivadas y borradas del Mac" + if (errors.isNotEmpty()) " · ${errors.size} con error: ${errors.first()}" else ""
+                }
+            }) { Text("Archivar y borrar") } },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancelar") } },
+        )
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(folders) { f ->
+                val isReady = f.covered == f.files
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.04f)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = f.path in chosen, enabled = isReady, onCheckedChange = { c -> chosen = if (c) chosen + f.path else chosen - f.path })
+                    Column(Modifier.weight(1f)) {
+                        Text("${f.source.name} / ${File(f.path).name}", color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            if (isReady) "Todas sus ${f.files} canciones están en la biblioteca" else "Faltan ${f.files - f.covered} de ${f.files} en la biblioteca",
+                            color = if (isReady) Color(0xFF7FD3C8) else Color.White.copy(alpha = 0.5f), fontSize = 12.sp,
+                        )
+                    }
+                    Text("%.2f GB".format(f.bytes / 1e9), color = Color.White.copy(alpha = 0.7f))
                 }
             }
         }
