@@ -96,3 +96,8 @@ Objetivo: toda la música que te gusta acaba en `pCloud Drive/pCloud Backup/MacB
 - Guarda en `<álbum>/Imágenes/` todas sus imágenes (portada, contraportada, libreto, discos, obi…) y `album.json` (fuente, URL, catálogo, fecha, duraciones, créditos/notas). No sobrescribe. Estado en `.bitchord-library/albums.json` (cada álbum una vez; los dudosos se reintentan a los 7 días). Una petición por segundo y servidor.
 - App: tarjeta «Información y escaneos de los álbumes»; línea de comandos/buzón: `albums [--dry-run] [--only texto]`.
 - Pendiente: mostrarlas en «Más información de la canción» de BitChord; usar muestras de audio de esas webs para identificar canciones; enlazar portadas alternativas.
+
+## 22 nov (madrugada): pCloud Drive por lotes (1.0.18)
+- pCloud Drive no deja mover ni borrar archivos que aún está subiendo, y lo escrito ocupa su caché en el disco del Mac. Ahora: antes de ordenar se espera a que pCloud lo haya subido todo; lo que falta se copia en lotes de ~10 GB hechos en `~/Music/.bitchord-staging`, se pasan a pCloud Drive y el siguiente lote espera a que pCloud termine de subir y haya sitio en el disco.
+- Cómo sabe la app lo que le queda a pCloud: cuenta las operaciones pendientes en su base de datos (`~/.pcloud/data.db`, tabla `fstask`, solo lectura); si no puede leerla, prueba a renombrar un archivo de control en la biblioteca.
+- Estado, registro y buzón en `~/Music/.bitchord-live` (disco del Mac).

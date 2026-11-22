@@ -118,6 +118,8 @@ object Engine {
         // What the library holds now (names as the disk spells them; compared in one form).
         Live.phase = "mirando lo que ya hay"
         val rootFile = File(root)
+        // On pCloud Drive, files still uploading can't be moved: wait until it has uploaded everything.
+        if (PCloud.isDrive(root)) PCloud.waitReady(rootFile, "antes de ordenar")
         // Folders whose name differs only in case ("NARUTO" → "Naruto"): renamed first, so songs land in the right one.
         fixCase(rootFile, plan.copy.map { rel(File(it.target).parent) }.toSet())
         val onDisk = HashMap<String, File>()
@@ -252,25 +254,58 @@ object Engine {
         tagPool.shutdown()
         while (!tagPool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
         manifest.save(); covers.save()
-        // 3. Copy what the library still lacks, a few at a time.
+        // 3. Copy what the library still lacks. Into pCloud Drive, in batches of about 10 GB: each
+        // made on the Mac's own disk, then moved into pCloud, and the next one only once pCloud has
+        // uploaded it (pCloud holds files it is still uploading, and its cache fills the disk).
         Live.phase = "copiando lo que falta"
         val missing = plan.copy.filter { it.target !in held && !File(it.target).exists() }
-        val pool = Executors.newFixedThreadPool(workers)
-        for (i in missing) pool.submit {
-            if (Live.stop) return@submit
-            Live.current = rel(i.target)
-            Builder.copy(i, covers).onSuccess {
-                manifest.files[rel(i.target)] = Words.nfc(i.track.path)
-                synchronized(covers) { covers.propose(i.key, plan.alternatives[i.key].orEmpty()) }
-                Scanner.put(libraryTrack(i, File(i.target)))
-                Live.copied.incrementAndGet()
-                ops.log("app", "copied ${i.track.path} → ${rel(i.target)} [${i.reason}]")
-            }.onFailure { Live.error("${i.track.path}: ${it.message}"); ops.log("app", "error copying ${i.track.path}: ${it.message}") }
-            if (Live.done.incrementAndGet() % 25 == 0) { manifest.save(); synchronized(covers) { covers.save() } }
-            Live.write()
+        val onPCloud = PCloud.isDrive(root)
+        fun estimate(i: Builder.Item) = if (i.track.lossless) ((i.track.seconds ?: 240.0) * 40_000).toLong() else i.track.size
+        val batches = if (!onPCloud) listOf(missing) else missing.fold(ArrayList<ArrayList<Builder.Item>>()) { acc, i ->
+            if (acc.isEmpty() || acc.last().sumOf(::estimate) + estimate(i) > PCloud.BATCH) acc.add(ArrayList())
+            acc.last().add(i); acc
         }
-        pool.shutdown()
-        while (!pool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
+        val staging = File(System.getProperty("user.home"), "Music/.bitchord-staging")
+        for ((n, batch) in batches.withIndex()) {
+            if (Live.stop) break
+            if (onPCloud) PCloud.waitReady(rootFile, "antes del lote ${n + 1} de ${batches.size}")
+            Live.phase = if (onPCloud) "lote ${n + 1} de ${batches.size}: preparando en el Mac" else "copiando lo que falta"
+            val pool = Executors.newFixedThreadPool(workers)
+            val made = java.util.Collections.synchronizedList(ArrayList<Pair<Builder.Item, File>>())
+            for (i in batch) pool.submit {
+                if (Live.stop) return@submit
+                Live.current = rel(i.target)
+                val local = if (onPCloud) i.copy(target = File(staging, rel(i.target)).path) else i
+                File(local.target).delete()
+                Builder.copy(local, covers).onSuccess {
+                    made += i to File(local.target)
+                    synchronized(covers) { covers.propose(i.key, plan.alternatives[i.key].orEmpty()) }
+                }.onFailure { Live.error("${i.track.path}: ${it.message}"); ops.log("app", "error copying ${i.track.path}: ${it.message}") }
+                if (!onPCloud) Live.done.incrementAndGet()
+                Live.write()
+            }
+            pool.shutdown()
+            while (!pool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
+            // Into the library (on pCloud: a move from the Mac's disk into pCloud Drive).
+            if (onPCloud) Live.phase = "lote ${n + 1} de ${batches.size}: pasando a pCloud"
+            for ((i, f) in made) {
+                val target = File(i.target)
+                val ok = if (!onPCloud) true else io(300) {
+                    target.parentFile.mkdirs()
+                    runCatching { java.nio.file.Files.move(f.toPath(), target.toPath()); true }.getOrElse { ex -> lastIoError = "${ex.javaClass.simpleName}: ${ex.message}"; false }
+                } == true
+                if (ok) {
+                    manifest.files[rel(i.target)] = Words.nfc(i.track.path)
+                    Scanner.put(libraryTrack(i, target))
+                    Live.copied.incrementAndGet()
+                    ops.log("app", "copied ${i.track.path} → ${rel(i.target)} [${i.reason}]")
+                } else Live.error("no se pudo pasar a pCloud ${rel(i.target)} ($lastIoError)")
+                if (onPCloud) Live.done.incrementAndGet()
+                Live.write()
+            }
+            manifest.save(); covers.save(); Scanner.saveIndex()
+        }
+        if (onPCloud) staging.walkBottomUp().filter { it.isDirectory }.forEach { it.delete() }
         Live.done.addAndGet(plan.copy.size - missing.size - held.size)
         manifest.save(); covers.save(); Scanner.saveIndex()
         // What pCloud wouldn't delete before: deleted now if it lets.
@@ -436,5 +471,54 @@ object Updater {
             .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null"))).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD)
             .start().waitFor(10, TimeUnit.SECONDS)
         progress("Versión ${r.version} descargada: la app se cierra y se vuelve a abrir sola")
+    }
+}
+
+/**
+ * pCloud Drive: files it hasn't uploaded yet can't be moved or deleted, and what is written
+ * there waits in its cache on the Mac's disk until uploaded. The app asks pCloud how many
+ * operations it still has pending (its own database, read only); if that can't be read, it tries
+ * moving a test file back and forth.
+ */
+object PCloud {
+    const val BATCH = 10L * 1024 * 1024 * 1024
+    fun isDrive(path: String) = path.contains("/pCloud Drive/") || path.endsWith("/pCloud Drive")
+
+    /** Operations pCloud still has to upload, from ~/.pcloud/data.db; null if it can't be read. */
+    fun pending(): Int? = runCatching {
+        val db = File(System.getProperty("user.home"), ".pcloud/data.db")
+        if (!db.isFile) return null
+        val (code, out) = Tools.run("/usr/bin/sqlite3", "-readonly", db.path, "SELECT COUNT(*) FROM fstask;", timeoutSec = 20)
+        if (code != 0) null else out.trim().lines().lastOrNull()?.trim()?.toIntOrNull()
+    }.getOrNull()
+
+    /** Whether pCloud lets a file be renamed (it doesn't while uploading it). */
+    private fun probe(root: File): Boolean {
+        val f = File(root, ".bitchord-check")
+        if (!f.exists()) { runCatching { f.writeText("ok") }; return false }
+        val g = File(root, ".bitchord-check2")
+        return f.renameTo(g) && g.renameTo(f)
+    }
+
+    /** Waits (telling what) until pCloud has uploaded everything and the disk has room for a batch. */
+    fun waitReady(root: File, why: String) {
+        var since = System.currentTimeMillis()
+        var idleSince = 0L
+        while (!Live.stop) {
+            val p = pending()
+            val free = File(System.getProperty("user.home")).usableSpace
+            val roomy = free > BATCH + 3L * 1024 * 1024 * 1024
+            val idle = if (p != null) p == 0 else probe(root)
+            if (idle && roomy) return
+            // Uploaded but the disk still full (pCloud keeps its cache): go on after 20 minutes anyway if 5 GB are free.
+            if (idle) { if (idleSince == 0L) idleSince = System.currentTimeMillis() } else idleSince = 0L
+            if (idle && System.currentTimeMillis() - idleSince > 1_200_000 && free > 5L * 1024 * 1024 * 1024) return
+            Live.phase = "esperando a pCloud $why: " + (if (p != null) "$p operaciones por subir" else "aún subiendo") +
+                (if (!roomy) " · ${free / 1_000_000_000} GB libres en el Mac" else "")
+            Live.current = ""
+            Live.write(force = true)
+            if (System.currentTimeMillis() - since > 600_000) { Ops(root.path).log("app", "pCloud: ${Live.phase}"); since = System.currentTimeMillis() }
+            Thread.sleep(30_000)
+        }
     }
 }
