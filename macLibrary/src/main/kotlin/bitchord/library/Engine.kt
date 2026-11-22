@@ -197,7 +197,7 @@ object Engine {
             stuck = 0
             val moved = io(60) {
                 targetFile.parentFile.mkdirs()
-                curFile.renameTo(targetFile) || run {
+                runCatching { java.nio.file.Files.move(curFile.toPath(), targetFile.toPath()); true }.getOrElse { ex -> lastIoError = "${ex.javaClass.simpleName}: ${ex.message}"; false } || run {
                     // Same name in another form (accents, case): through a temporary name.
                     val tmp = File(targetFile.parentFile, ".mv-" + System.nanoTime() + ".mp3")
                     curFile.renameTo(tmp) && tmp.renameTo(targetFile)
@@ -211,7 +211,7 @@ object Engine {
                 Live.moved.incrementAndGet()
                 ops.log("app", "moved $cur → $target")
                 if (better) replace += i to targetFile else placed += i to targetFile
-            } else { Live.error("no se pudo mover $cur → $target"); ops.log("app", "error moving $cur → $target") }
+            } else { Live.error("no se pudo mover $cur ($lastIoError)"); ops.log("app", "error moving $cur → $target: $lastIoError") }
             Live.done.incrementAndGet()
             if (Live.done.get() % 50 == 0) manifest.save()
             Live.write()
@@ -238,12 +238,13 @@ object Engine {
             val result = if (better) Builder.copy(tmp, covers) else Builder.copy(tmp, covers, from = f)
             result.onSuccess {
                 val path = f.path
-                if (f.delete() && File(tmp.target).renameTo(File(path))) {
+                val del = runCatching { java.nio.file.Files.delete(f.toPath()); null }.getOrElse { ex -> "${ex.javaClass.simpleName}: ${ex.message}" }
+                if (del == null && File(tmp.target).renameTo(File(path))) {
                     if (better) manifest.files[rel(path)] = Words.nfc(i.track.path)
                     Scanner.put(libraryTrack(i, File(path)))
                     if (better) Live.copied.incrementAndGet()
                     ops.log("app", (if (better) "replaced with a better copy " else "tags fixed ") + rel(path))
-                } else { File(tmp.target).delete(); Live.error("no se pudo cambiar ${rel(path)}") }
+                } else { File(tmp.target).delete(); Live.error("no se pudo cambiar ${rel(path)} (${del ?: "no se pudo renombrar"})") }
             }.onFailure { Live.error("${rel(f.path)}: ${it.message}"); ops.log("app", "error fixing ${rel(f.path)}: ${it.message}") }
             if (Live.done.incrementAndGet() % 25 == 0) { manifest.save(); covers.save() }
             Live.write()
@@ -301,6 +302,7 @@ object Engine {
         }
     }
 
+    @Volatile private var lastIoError = ""
     private val ioPool = Executors.newCachedThreadPool { r -> Thread(r).apply { isDaemon = true } }
 
     /** A file operation that pCloud Drive may hold: given up on after [seconds] (null). */
