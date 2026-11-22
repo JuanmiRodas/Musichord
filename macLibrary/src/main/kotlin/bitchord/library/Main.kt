@@ -109,7 +109,7 @@ class LibraryState {
             busy = "Actualizando a la versión ${r.version}…"
             val ok = withContext(Dispatchers.IO) {
                 if (then != null) runCatching { File(settings.root, ".bitchord-library/resume.json").writeText(org.json.JSONObject().put("then", then).toString()) }
-                Updater.prepare(r, File(settings.root, ".bitchord-library/update.log")) { busy = it }
+                Updater.prepare(r, File(Live.dir, "update.log")) { busy = it }
             }
             ok.onSuccess { Scanner.saveIndex(); quit() }.onFailure { busy = null; message = "No se pudo actualizar: ${it.message}" }
         }
@@ -334,8 +334,8 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
         item {
             Card("Hablar con Claude") {
                 Text(
-                    "Claude ve lo que hace la app (.bitchord-library/live.json y log.txt, dentro de la biblioteca) y le puede dar órdenes mientras está abierta " +
-                        "(archivos en .bitchord-library/inbox: construir, parar, leer, actualizar o cualquier orden de la línea de comandos). Versión ${Updater.current}.",
+                    "Claude ve lo que hace la app (live.json y log.txt en ~/Music/.bitchord-live) y le puede dar órdenes mientras está abierta " +
+                        "(archivos en ~/Music/.bitchord-live/inbox: construir, parar, leer, actualizar o cualquier orden de la línea de comandos). Versión ${Updater.current}.",
                     color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp,
                 )
                 Spacer(Modifier.height(8.dp))

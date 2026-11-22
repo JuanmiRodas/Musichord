@@ -577,8 +577,8 @@ object Builder {
         val codec = if (reencode) listOf("-c:a", "libmp3lame", "-b:a", "320k") else listOf("-c:a", "copy")
         val args = listOf(Tools.ffmpeg, "-nostdin", "-v", "error", "-y") + inputs + maps + listOf("-c:v", "copy", "-disposition:v", "attached_pic") +
             codec + listOf("-map_metadata", "0", "-id3v2_version", "3") + meta + listOf("-f", "mp3", tmp.path)
-        val (code, msg) = Tools.run(*args.toTypedArray(), timeoutSec = 900)
-        if (code != 0 || tmp.length() == 0L) { tmp.delete(); error("ffmpeg ${if (code == -1) "no respondió en 15 min" else "falló"}: ${msg.take(300)}") }
+        val (code, msg) = Tools.run(*args.toTypedArray(), timeoutSec = 300)
+        if (code != 0 || tmp.length() == 0L) { tmp.delete(); error("ffmpeg ${if (code == -1) "no respondió en 5 min" else "falló"}: ${msg.take(300)}") }
         check(tmp.renameTo(out)) { "no se pudo renombrar" }
         covers?.recordPrimary(i.key, i.cover)
         out.path

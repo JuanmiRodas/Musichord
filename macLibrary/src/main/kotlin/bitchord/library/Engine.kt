@@ -32,10 +32,16 @@ class Manifest(root: String) {
 }
 
 /**
- * What the app is doing, for the window and for Claude: `<library>/.bitchord-library/live.json`
+ * What the app is doing, for the window and for Claude: `~/Music/.bitchord-live/live.json`
  * (rewritten every few seconds) and one line per file in `log.txt`.
  */
 object Live {
+    /**
+     * On the Mac's own disk (`~/Music/.bitchord-live`), not in pCloud Drive: pCloud shows a file
+     * only once it has synced it, so status and orders there arrive late or half-written.
+     */
+    val dir: File get() = File(System.getProperty("user.home"), "Music/.bitchord-live").apply { mkdirs() }
+
     @Volatile var stop = false
     @Volatile var job: String? = null
     @Volatile var phase = ""
@@ -70,7 +76,7 @@ object Live {
         else -> "$j · $phase: ${done.get()} de $total (${copied.get()} copiadas, ${moved.get()} movidas, ${deleted.get()} quitadas, ${failed.get()} con error)"
     }
 
-    fun write(force: Boolean = false) {
+    @Synchronized fun write(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (!force && now - written < 2000) return
         written = now
@@ -81,7 +87,9 @@ object Live {
                 .put("done", done.get()).put("copied", copied.get()).put("moved", moved.get()).put("deleted", deleted.get()).put("failed", failed.get())
                 .put("started", started).put("summary", summary()).put("lastCommand", lastCommand)
                 .put("errors", JSONArray(synchronized(errors) { errors.toList() })).put("unmatched", JSONArray(unmatched.take(300)))
-            File(r, ".bitchord-library/live.json").writeText(o.toString(2))
+            val tmp = File(dir, "live.json.tmp")
+            tmp.writeText(o.put("library", r).toString(2))
+            tmp.renameTo(File(dir, "live.json"))
         }
     }
 }
@@ -156,11 +164,11 @@ object Engine {
             if (Live.stop) break
             Live.current = r
             val f = onDisk[r]!!
-            val gone = runCatching { java.nio.file.Files.delete(f.toPath()); true }.getOrElse { e ->
+            val gone = io(60) { runCatching { java.nio.file.Files.delete(f.toPath()); true }.getOrElse { e ->
                 // pCloud Drive may refuse to delete a file it is still uploading: out of sight instead.
                 val bin = File(rootFile, ".papelera").apply { mkdirs() }
                 f.renameTo(File(bin, System.nanoTime().toString() + "-" + f.name)).also { if (!it) Live.error("no se pudo quitar $r: ${e.javaClass.simpleName} ${e.message.orEmpty()}") }
-            }
+            } } ?: false
             if (gone) { Live.deleted.incrementAndGet(); manifest.files.remove(r); Scanner.forget(f.path); ops.log("app", "removed $r (no song of the plan)") }
             Live.done.incrementAndGet(); Live.write()
         }
@@ -187,13 +195,16 @@ object Engine {
                 Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue
             }
             stuck = 0
-            targetFile.parentFile.mkdirs()
-            val moved = curFile.renameTo(targetFile) || run {
-                // Same name in another form (accents, case): through a temporary name.
-                val tmp = File(targetFile.parentFile, ".mv-" + System.nanoTime() + ".mp3")
-                curFile.renameTo(tmp) && tmp.renameTo(targetFile)
+            val moved = io(60) {
+                targetFile.parentFile.mkdirs()
+                curFile.renameTo(targetFile) || run {
+                    // Same name in another form (accents, case): through a temporary name.
+                    val tmp = File(targetFile.parentFile, ".mv-" + System.nanoTime() + ".mp3")
+                    curFile.renameTo(tmp) && tmp.renameTo(targetFile)
+                }
             }
-            if (moved) {
+            if (moved == null) { Live.error("pCloud no responde al mover $cur (se deja para la próxima vez)"); Live.done.incrementAndGet(); continue }
+            if (moved == true) {
                 manifest.files.remove(cur)
                 manifest.files[target] = curSource ?: Words.nfc(i.track.path)
                 Scanner.moved(curFile.path, targetFile.path)
@@ -290,6 +301,11 @@ object Engine {
         }
     }
 
+    private val ioPool = Executors.newCachedThreadPool { r -> Thread(r).apply { isDaemon = true } }
+
+    /** A file operation that pCloud Drive may hold: given up on after [seconds] (null). */
+    private fun <T> io(seconds: Long, block: () -> T): T? = runCatching { ioPool.submit(java.util.concurrent.Callable { block() }).get(seconds, TimeUnit.SECONDS) }.getOrNull()
+
     /** A file the app just wrote, as the index will know it. */
     private fun libraryTrack(i: Builder.Item, f: File) = i.track.copy(
         path = f.path, size = f.length(), modified = f.lastModified(), codec = "mp3",
@@ -302,7 +318,7 @@ object Engine {
 
 /**
  * Orders from Claude (or anyone) while the app is open: JSON files dropped in
- * `<library>/.bitchord-library/inbox/` — {"cmd": "build"}, {"cmd": "stop"}, {"cmd": "scan"},
+ * `~/Music/.bitchord-live/inbox/` — {"cmd": "build"}, {"cmd": "stop"}, {"cmd": "scan"},
  * {"cmd": "update"}, {"cmd": "status"}, or {"cmd": "cli", "args": ["build", "--dry-run"]} for
  * any command-line order. Each is answered in `outbox/<same name>.txt` and the file moves to
  * `inbox/done/`.
@@ -311,7 +327,7 @@ object Inbox {
     data class Order(val file: File, val cmd: String, val args: List<String>, val then: String?)
 
     fun take(root: String): List<Order> {
-        val dir = File(root, ".bitchord-library/inbox").apply { mkdirs() }
+        val dir = File(Live.dir, "inbox").apply { mkdirs() }
         return dir.listFiles().orEmpty().filter { it.isFile && it.extension == "json" }.sortedBy { it.name }.mapNotNull { f ->
             val o = runCatching { JSONObject(f.readText()) }.getOrNull()
             val done = File(dir, "done").apply { mkdirs() }
@@ -322,7 +338,7 @@ object Inbox {
     }
 
     fun answer(root: String, name: String, text: String) {
-        runCatching { File(File(root, ".bitchord-library/outbox").apply { mkdirs() }, name.removeSuffix(".json") + ".txt").writeText(text) }
+        runCatching { File(File(Live.dir, "outbox").apply { mkdirs() }, name.removeSuffix(".json") + ".txt").writeText(text) }
     }
 
     /** A command-line order run inside the app, its printout as the answer. */

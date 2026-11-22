@@ -18,7 +18,8 @@ class Ops(val root: String) {
     val state = File(root, ".bitchord-library").apply { mkdirs() }
     private val journal = File(state, "journal.jsonl")
     private val planFile = File(state, "plan.json")
-    private val logFile = File(state, "log.txt")
+    // On the Mac's own disk (see Live.dir): pCloud Drive shows files late and doesn't take appends.
+    private val logFile = File(Live.dir, "log.txt")
 
     /**
      * One line per thing done. pCloud Drive doesn't take appends, so the last 4000 lines are
@@ -38,7 +39,7 @@ class Ops(val root: String) {
 
     fun flush() = synchronized(Ops) {
         runCatching {
-            val tmp = File(state, "log.txt.tmp")
+            val tmp = File(Live.dir, "log.txt.tmp")
             tmp.writeText(lines.joinToString("\n", postfix = "\n"))
             if (!tmp.renameTo(logFile)) { logFile.writeText(tmp.readText()); tmp.delete() }
         }
