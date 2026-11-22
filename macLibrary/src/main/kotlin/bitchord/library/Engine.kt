@@ -156,13 +156,20 @@ object Engine {
             if (Live.stop) break
             Live.current = r
             val f = onDisk[r]!!
-            if (f.delete()) { Live.deleted.incrementAndGet(); manifest.files.remove(r); Scanner.forget(f.path); ops.log("app", "removed $r (no song of the plan)") }
-            else Live.error("no se pudo quitar $r")
+            val gone = runCatching { java.nio.file.Files.delete(f.toPath()); true }.getOrElse { e ->
+                // pCloud Drive may refuse to delete a file it is still uploading: out of sight instead.
+                val bin = File(rootFile, ".papelera").apply { mkdirs() }
+                f.renameTo(File(bin, System.nanoTime().toString() + "-" + f.name)).also { if (!it) Live.error("no se pudo quitar $r: ${e.javaClass.simpleName} ${e.message.orEmpty()}") }
+            }
+            if (gone) { Live.deleted.incrementAndGet(); manifest.files.remove(r); Scanner.forget(f.path); ops.log("app", "removed $r (no song of the plan)") }
             Live.done.incrementAndGet(); Live.write()
         }
-        // 2. Put each song held at its place (and in its tags); a better copy replaces it.
+        // 2. Put each song held at its place: renamed (on pCloud Drive a rename is not uploaded
+        // again); a better copy found since replaces it.
         Live.phase = "ordenando lo ya copiado"
         val pending = ArrayDeque(plan.copy.filter { it.target in held })
+        val placed = ArrayList<Pair<Builder.Item, File>>()
+        val replace = ArrayList<Pair<Builder.Item, File>>()
         var stuck = 0
         while (pending.isNotEmpty() && !Live.stop) {
             val i = pending.removeFirst()
@@ -172,32 +179,66 @@ object Engine {
             val curFile = onDisk[cur]!!
             val curSource = manifest.files[cur]
             val better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (known[curSource]?.let { Builder.rank(it) } ?: 9)
-            if (curFile.path == i.target && !better) { Live.done.incrementAndGet(); continue }
             val targetFile = File(i.target)
-            if (targetFile.exists() && curFile.path.lowercase() != i.target.lowercase()) {
+            if (curFile.path == i.target) { if (better) replace += i to curFile else placed += i to curFile; Live.done.incrementAndGet(); continue }
+            if (targetFile.exists() && Words.nfc(curFile.path).lowercase() != Words.nfc(i.target).lowercase()) {
                 // Its place is still taken by a song that has to move first.
                 if (++stuck <= pending.size + 1) { pending.addLast(i); continue }
                 Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue
             }
             stuck = 0
-            val tmp = i.copy(target = File(targetFile.parentFile, ".new-" + targetFile.name).path)
-            File(tmp.target).delete()
-            val result = if (better) Builder.copy(tmp, covers) else Builder.copy(tmp, covers, from = curFile)
-            result.onSuccess {
-                if (curFile.path != targetFile.path) curFile.delete() else targetFile.delete()
-                if (File(tmp.target).renameTo(targetFile)) {
-                    manifest.files.remove(cur)
-                    manifest.files[target] = if (better) Words.nfc(i.track.path) else curSource ?: Words.nfc(i.track.path)
-                    Scanner.forget(curFile.path)
-                    Scanner.put(libraryTrack(i, targetFile))
-                    if (better) Live.copied.incrementAndGet() else Live.moved.incrementAndGet()
-                    ops.log("app", (if (better) "replaced (better copy) " else "moved ") + "$cur → $target")
-                } else Live.error("no se pudo renombrar $target")
-            }.onFailure { Live.error("$cur: ${it.message}"); ops.log("app", "error moving $cur: ${it.message}") }
+            targetFile.parentFile.mkdirs()
+            val moved = curFile.renameTo(targetFile) || run {
+                // Same name in another form (accents, case): through a temporary name.
+                val tmp = File(targetFile.parentFile, ".mv-" + System.nanoTime() + ".mp3")
+                curFile.renameTo(tmp) && tmp.renameTo(targetFile)
+            }
+            if (moved) {
+                manifest.files.remove(cur)
+                manifest.files[target] = curSource ?: Words.nfc(i.track.path)
+                Scanner.moved(curFile.path, targetFile.path)
+                Live.moved.incrementAndGet()
+                ops.log("app", "moved $cur → $target")
+                if (better) replace += i to targetFile else placed += i to targetFile
+            } else { Live.error("no se pudo mover $cur → $target"); ops.log("app", "error moving $cur → $target") }
             Live.done.incrementAndGet()
-            if (Live.done.get() % 25 == 0) { manifest.save(); covers.save() }
+            if (Live.done.get() % 50 == 0) manifest.save()
             Live.write()
         }
+        manifest.save()
+        // 2b. Tags: only files whose tags differ from the plan are rewritten (a few at a time);
+        // better copies replace the old ones.
+        Live.phase = "corrigiendo etiquetas y cambiando por mejores copias"
+        fun differs(i: Builder.Item, f: File): Boolean {
+            val t = Scanner.get(f.path)?.tags ?: return true
+            fun same(k: String, v: String?) = Words.nfc(t[k].orEmpty()).trim() == Words.nfc(v.orEmpty()).trim()
+            return !(same("title", i.title) && same("artist", i.artist) && same("album", i.album) && same("album_artist", i.albumArtist) &&
+                (t["date"] ?: t["year"]).orEmpty().take(4) == i.year.orEmpty() && t["track"]?.substringBefore('/')?.trim()?.toIntOrNull() == i.trackNo)
+        }
+        val retag = placed.filter { (i, f) -> differs(i, f) }.map { it to false } + replace.map { it to true }
+        Live.total += retag.size
+        val tagPool = Executors.newFixedThreadPool(workers)
+        for ((pair, better) in retag) tagPool.submit {
+            if (Live.stop) return@submit
+            val (i, f) = pair
+            Live.current = rel(f.path)
+            val tmp = i.copy(target = File(f.parentFile, ".new-" + f.name).path)
+            File(tmp.target).delete()
+            val result = if (better) Builder.copy(tmp, covers) else Builder.copy(tmp, covers, from = f)
+            result.onSuccess {
+                val path = f.path
+                if (f.delete() && File(tmp.target).renameTo(File(path))) {
+                    if (better) manifest.files[rel(path)] = Words.nfc(i.track.path)
+                    Scanner.put(libraryTrack(i, File(path)))
+                    if (better) Live.copied.incrementAndGet()
+                    ops.log("app", (if (better) "replaced with a better copy " else "tags fixed ") + rel(path))
+                } else { File(tmp.target).delete(); Live.error("no se pudo cambiar ${rel(path)}") }
+            }.onFailure { Live.error("${rel(f.path)}: ${it.message}"); ops.log("app", "error fixing ${rel(f.path)}: ${it.message}") }
+            if (Live.done.incrementAndGet() % 25 == 0) { manifest.save(); covers.save() }
+            Live.write()
+        }
+        tagPool.shutdown()
+        while (!tagPool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
         manifest.save(); covers.save()
         // 3. Copy what the library still lacks, a few at a time.
         Live.phase = "copiando lo que falta"
@@ -220,6 +261,8 @@ object Engine {
         while (!pool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
         Live.done.addAndGet(plan.copy.size - missing.size - held.size)
         manifest.save(); covers.save(); Scanner.saveIndex()
+        // What pCloud wouldn't delete before: deleted now if it lets.
+        File(rootFile, ".papelera").listFiles()?.forEach { runCatching { java.nio.file.Files.delete(it.toPath()) } }
         // 4. Empty folders go.
         rootFile.walkBottomUp().filter { it.isDirectory && it != rootFile && !it.path.contains("/.bitchord-library") }.forEach { d ->
             val left = d.listFiles().orEmpty()
@@ -229,6 +272,7 @@ object Engine {
             ": ${Live.copied.get()} copiadas, ${Live.moved.get()} movidas a su sitio, ${Live.deleted.get()} quitadas, ${Live.failed.get()} con error" +
             (if (unknown.isNotEmpty()) ", ${unknown.size} archivos sin identificar (en live.json)" else "")
         ops.log("app", "build: $summary")
+        ops.flush()
         Live.end(summary)
         return summary
     }
@@ -336,7 +380,7 @@ object Updater {
     fun newer(): Release? = latest()?.takeIf { num(it.version) > num(current) }
 
     /** Downloads [r] and leaves a helper waiting for this app to close; the caller then quits. */
-    fun prepare(r: Release, progress: (String) -> Unit = {}): Result<Unit> = runCatching {
+    fun prepare(r: Release, logTo: File? = null, progress: (String) -> Unit = {}): Result<Unit> = runCatching {
         val dir = File(System.getProperty("user.home"), "Library/Caches/BitChord Library").apply { mkdirs() }
         val dmg = File(dir, "BitChord-Library-${r.version}.dmg")
         progress("Descargando la versión ${r.version}…")
@@ -352,6 +396,8 @@ object Updater {
         script.writeText(
             """
             #!/bin/bash
+            set -x
+            date
             while kill -0 ${ProcessHandle.current().pid()} 2>/dev/null; do sleep 0.5; done
             MP=${'$'}(mktemp -d)
             hdiutil attach -nobrowse -quiet -mountpoint "${'$'}MP" "${dmg.path}" || exit 1
@@ -366,7 +412,11 @@ object Updater {
             """.trimIndent() + "\n"
         )
         script.setExecutable(true)
-        ProcessBuilder("/bin/bash", "-c", "nohup '${script.path}' > '${dir.path}/update.log' 2>&1 &").start().waitFor(10, TimeUnit.SECONDS)
+        val log = logTo ?: File(dir, "update.log")
+        // Detached twice over, so it outlives the app it is waiting for.
+        ProcessBuilder("/bin/bash", "-c", "( nohup /bin/bash '${script.path}' > '${log.path}' 2>&1 & ) ; exit 0")
+            .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null"))).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start().waitFor(10, TimeUnit.SECONDS)
         progress("Versión ${r.version} descargada: la app se cierra y se vuelve a abrir sola")
     }
 }

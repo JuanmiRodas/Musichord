@@ -20,10 +20,33 @@ class Ops(val root: String) {
     private val planFile = File(state, "plan.json")
     private val logFile = File(state, "log.txt")
 
+    /**
+     * One line per thing done. pCloud Drive doesn't take appends, so the last 4000 lines are
+     * kept in memory and the whole file is written again (at most every 2 s, and at the end).
+     */
     fun log(who: String, text: String) {
         val line = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + " [$who] " + text
-        runCatching { logFile.appendText(line + "\n") }
         println(line)
+        synchronized(Ops) {
+            if (lines.isEmpty()) runCatching { logFile.readLines().takeLast(4000).forEach { lines.addLast(it) } }
+            lines.addLast(line)
+            while (lines.size > 4000) lines.removeFirst()
+            val now = System.currentTimeMillis()
+            if (now - written > 2000 || text.startsWith("build:")) { written = now; flush() }
+        }
+    }
+
+    fun flush() = synchronized(Ops) {
+        runCatching {
+            val tmp = File(state, "log.txt.tmp")
+            tmp.writeText(lines.joinToString("\n", postfix = "\n"))
+            if (!tmp.renameTo(logFile)) { logFile.writeText(tmp.readText()); tmp.delete() }
+        }
+    }
+
+    companion object {
+        private val lines = ArrayDeque<String>()
+        @Volatile private var written = 0L
     }
 
     fun rel(path: String) = path.removePrefix(root).trimStart('/')

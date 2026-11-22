@@ -109,7 +109,7 @@ class LibraryState {
             busy = "Actualizando a la versión ${r.version}…"
             val ok = withContext(Dispatchers.IO) {
                 if (then != null) runCatching { File(settings.root, ".bitchord-library/resume.json").writeText(org.json.JSONObject().put("then", then).toString()) }
-                Updater.prepare(r) { busy = it }
+                Updater.prepare(r, File(settings.root, ".bitchord-library/update.log")) { busy = it }
             }
             ok.onSuccess { Scanner.saveIndex(); quit() }.onFailure { busy = null; message = "No se pudo actualizar: ${it.message}" }
         }
@@ -148,7 +148,8 @@ fun main(args: Array<String>) {
 private fun gui() = application {
     Scanner.loadIndex()
     val state = remember { LibraryState() }
-    state.quit = { exitApplication() }
+    // Quit for good (the updater waits for this process to end before swapping the app).
+    state.quit = { Scanner.saveIndex(); exitApplication(); Thread { Thread.sleep(1500); kotlin.system.exitProcess(0) }.start() }
     Window(
         onCloseRequest = { Live.stop = true; Scanner.saveIndex(); exitApplication() },
         title = "BitChord Library",
