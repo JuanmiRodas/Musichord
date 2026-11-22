@@ -55,6 +55,7 @@ class SoundCloudSource(
         limit: Int,
         waitForAll: Boolean,
         request: StreamRequest?,
+        target: TrackMatcher.Target?,
     ): List<Song> {
         TrackLog.d(TAG, "▶ SoundCloud search query=\"$query\" limit=$limit")
         val body = api("https://api-v2.soundcloud.com/search/tracks") {

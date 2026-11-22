@@ -32,6 +32,7 @@ class BilibiliSource(
         limit: Int,
         waitForAll: Boolean,
         request: StreamRequest?,
+        target: TrackMatcher.Target?,
     ): List<Song> {
         TrackLog.d(TAG, "▶ bilibili search query=\"$query\" limit=$limit")
         val wantsOther = NOT_THE_RECORDING.containsMatchIn(query)

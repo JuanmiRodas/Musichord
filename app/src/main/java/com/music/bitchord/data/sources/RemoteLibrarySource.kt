@@ -43,6 +43,7 @@ class RemoteLibrarySource(
         limit: Int,
         waitForAll: Boolean,
         request: StreamRequest?,
+        target: TrackMatcher.Target?,
     ): List<Song> {
         // "YouTube first" in Settings: your files never stand in for YouTube's.
         if (com.music.bitchord.data.settings.AppSettings.sourcePreference.value ==
