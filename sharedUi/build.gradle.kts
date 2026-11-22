@@ -98,8 +98,8 @@ kotlin {
             implementation("androidx.core:core-ktx:1.15.0")
             implementation("androidx.appcompat:appcompat:1.7.0")
             implementation("androidx.palette:palette-ktx:1.0.0")
-            // BitChord Audio: LastWave's liquid glass (the same library LastWave uses).
-            implementation("io.github.kyant0:backdrop:2.0.1")
+            // BitChord Audio: LastWave's liquid glass (the library LastWave uses; 1.0.5 is the one built on our Compose 1.10, same API).
+            implementation("io.github.kyant0:backdrop:1.0.5")
         }
     }
 }
