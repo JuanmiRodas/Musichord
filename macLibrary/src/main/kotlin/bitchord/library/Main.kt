@@ -631,10 +631,13 @@ private fun SettingsPane(state: LibraryState) {
         } else {
             var email by remember { mutableStateOf("") }
             var password by remember { mutableStateOf("") }
+            var code by remember { mutableStateOf("") }
+            var waitingCode by remember { mutableStateOf(false) }
             var status by remember { mutableStateOf<String?>(null) }
             val scope = rememberCoroutineScope()
             Text("Para construir la biblioteca en pCloud Drive la app usa pCloud directamente (mover al instante, subir y comprobar sin pasar por la caché de pCloud Drive). " +
-                "La contraseña solo se envía a pCloud y no se guarda; se guarda el permiso que pCloud devuelve.", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                "Se inicia sesión como en el móvil: correo y contraseña, y el código que pCloud envía por correo. La contraseña solo se envía a pCloud y no se guarda.",
+                color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(email, { email = it }, label = { Text("Correo de pCloud") }, singleLine = true, modifier = Modifier.weight(1f))
                 OutlinedTextField(password, { password = it }, label = { Text("Contraseña") }, singleLine = true, modifier = Modifier.weight(1f),
@@ -642,11 +645,23 @@ private fun SettingsPane(state: LibraryState) {
                 Button(enabled = email.isNotBlank() && password.isNotBlank(), onClick = {
                     scope.launch {
                         status = "Conectando…"
-                        val r = withContext(Dispatchers.IO) { PCloudApi.login(email.trim(), password) }
-                        password = ""
-                        r.onSuccess { account = PCloudApi.account(); status = null }.onFailure { status = "No se pudo: ${it.message}" }
+                        val r = withContext(Dispatchers.IO) { PCloudApi.startLogin(email.trim(), password) }
+                        r.onSuccess { done ->
+                            if (done) { password = ""; account = PCloudApi.account(); status = null }
+                            else { waitingCode = true; status = "pCloud te ha enviado un código por correo: escríbelo aquí abajo" }
+                        }.onFailure { status = it.message }
                     }
                 }) { Text("Iniciar sesión") }
+            }
+            if (waitingCode) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(code, { code = it }, label = { Text("Código de pCloud") }, singleLine = true, modifier = Modifier.weight(1f))
+                Button(enabled = code.isNotBlank(), onClick = {
+                    scope.launch {
+                        status = "Comprobando el código…"
+                        val r = withContext(Dispatchers.IO) { PCloudApi.finishLogin(email.trim(), code) }
+                        r.onSuccess { password = ""; code = ""; waitingCode = false; account = PCloudApi.account(); status = null }.onFailure { status = it.message }
+                    }
+                }) { Text("Confirmar") }
             }
             status?.let { Text(it, color = Color(0xFFFFB4A9), fontSize = 12.sp) }
         }

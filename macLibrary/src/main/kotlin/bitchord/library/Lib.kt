@@ -98,24 +98,56 @@ class PCloudApi(val host: String, private val auth: String) {
 
         fun account(): String? = runCatching { JSONObject(file.readText()).optString("email").ifBlank { null } }.getOrNull()
 
-        /** Signs in (Europe's servers first, then the US'), keeping only the token. */
-        fun login(email: String, password: String): Result<PCloudApi> = runCatching {
+        private fun post(host: String, method: String, params: Map<String, String>): JSONObject? = runCatching {
+            val body = params.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }
+            val c = URL("https://$host/$method").openConnection() as HttpURLConnection
+            c.doOutput = true; c.requestMethod = "POST"; c.connectTimeout = 20000; c.readTimeout = 30000
+            c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            c.outputStream.use { it.write(body.toByteArray()) }
+            JSONObject((if (c.responseCode < 400) c.inputStream else c.errorStream).bufferedReader().readText())
+        }.getOrNull()
+
+        private fun device() = mapOf(
+            "deviceid" to "bitchord-library-mac", "device" to "BitChord Library (Mac)", "os" to "4",
+            // A year, renewed by use; revocable from pcloud.com → Settings → Devices.
+            "authexpire" to (365 * 24 * 3600).toString(), "authinactiveexpire" to (90 * 24 * 3600).toString(),
+        )
+
+        private fun keep(host: String, o: JSONObject, email: String): PCloudApi? {
+            val t = o.optString("auth").ifBlank { return null }
+            val h = o.optString("apiserver").ifBlank { host }
+            file.writeText(JSONObject().put("host", h).put("auth", t).put("email", email).toString())
+            file.setReadable(false, false); file.setReadable(true, true)
+            return PCloudApi(h, t)
+        }
+
+        /** A code pCloud sent by email (or SMS/app for two-step accounts), waiting for [finishLogin]. */
+        @Volatile private var pending: Pair<String, String>? = null // token → host
+
+        /**
+         * Signs in the way pCloud's own apps do (and the phone): `login` with a device; when
+         * pCloud wants a code it emails one and answers with a token for it. Returns true when
+         * signed in, false when a code is needed ([finishLogin]).
+         */
+        fun startLogin(email: String, password: String): Result<Boolean> = runCatching {
             var last = "sin respuesta"
             for (host in listOf("eapi.pcloud.com", "api.pcloud.com")) {
-                val body = "getauth=1&logout=1&username=${URLEncoder.encode(email, "UTF-8")}&password=${URLEncoder.encode(password, "UTF-8")}"
-                val c = URL("https://$host/userinfo").openConnection() as HttpURLConnection
-                c.doOutput = true; c.requestMethod = "POST"; c.connectTimeout = 20000; c.readTimeout = 30000
-                c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                c.outputStream.use { it.write(body.toByteArray()) }
-                val o = JSONObject(c.inputStream.bufferedReader().readText())
-                if (o.optInt("result") == 0) {
-                    file.writeText(JSONObject().put("host", host).put("auth", o.getString("auth")).put("email", email).toString())
-                    file.setReadable(false, false); file.setReadable(true, true)
-                    return@runCatching PCloudApi(host, o.getString("auth"))
-                }
-                last = o.optString("error")
+                val o = post(host, "login", mapOf("getauth" to "1", "username" to email, "password" to password) + device()) ?: continue
+                if (o.optInt("result", -1) == 0 && keep(host, o, email) != null) return@runCatching true
+                val token = o.optString("token")
+                if (token.isNotBlank()) { pending = token to o.optString("apiserver").ifBlank { host }; return@runCatching false }
+                last = "${o.optInt("result")}: ${o.optString("error")}"
+                if (o.optInt("result") != 2321 && o.optInt("result") != 2000) break
             }
-            error(last)
+            error("pCloud no aceptó el inicio de sesión ($last)")
+        }
+
+        fun finishLogin(email: String, code: String): Result<PCloudApi> = runCatching {
+            val (token, host) = pending ?: error("pCloud no ha enviado ningún código: vuelve a iniciar sesión")
+            val o = post(host, "tfa_login", mapOf("getauth" to "1", "token" to token, "code" to code.trim(), "trustdevice" to "1") + device()) ?: error("pCloud no respondió")
+            if (o.optInt("result", -1) != 0) error("pCloud no aceptó el código (${o.optInt("result")}: ${o.optString("error")})")
+            pending = null
+            keep(host, o, email) ?: error("pCloud no devolvió permiso")
         }
 
         fun logout() { file.delete() }
