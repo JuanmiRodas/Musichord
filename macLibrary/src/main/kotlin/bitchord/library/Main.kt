@@ -104,8 +104,13 @@ class LibraryState {
     /** Downloads the newest version and restarts into it; [then] (e.g. "build") runs after the restart. */
     fun installUpdate(then: String? = null) {
         val r = update ?: return
-        if (busy != null) { message = "Termina o para la tarea en curso antes de actualizar"; return }
         scope.launch {
+            // Whatever is running stops first (a scan or a build goes on where it was after the restart).
+            if (busy != null) {
+                Live.stop = true; busy = "Parando lo que está en marcha para actualizar…"
+                withContext(Dispatchers.IO) { repeat(60) { if (Live.phase.isBlank() || Live.summary().isBlank()) return@repeat; Thread.sleep(500) } }
+                Live.stop = false
+            }
             busy = "Actualizando a la versión ${r.version}…"
             val ok = withContext(Dispatchers.IO) {
                 if (then != null) runCatching { File(Live.dir, "resume.json").writeText(org.json.JSONObject().put("then", then).toString()) }
@@ -208,7 +213,7 @@ private fun App(state: LibraryState) {
             state.update?.let { u ->
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Hay una versión nueva: ${u.version} (tienes ${Updater.current})", color = Color.White, modifier = Modifier.weight(1f))
-                    Button(enabled = state.busy == null, onClick = { state.installUpdate() }) { Text("Actualizar y reiniciar") }
+                    Button(onClick = { state.installUpdate() }) { Text("Actualizar y reiniciar") }
                 }
                 Spacer(Modifier.height(8.dp))
             }
