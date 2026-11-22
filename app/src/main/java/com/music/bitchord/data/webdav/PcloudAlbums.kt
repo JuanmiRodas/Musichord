@@ -26,8 +26,16 @@ object PcloudAlbums {
             WebDavRepository.library().firstOrNull { it.videoId == song.videoId }?.albumName?.takeIf { it.isNotBlank() }
         } else {
             null
-        }) ?: song.albumName?.takeIf { it.isNotBlank() } ?: return null
+        }) ?: song.albumName?.takeIf { it.isNotBlank() } ?: ""
+        if (album.isEmpty() && WebDavConfig.isWebDavId(song.videoId)) return null
         if (WebDavConfig.isWebDavId(song.videoId)) return LocalGroups.albumPageId(WebDavConfig.BROWSE_ID, album)
+        // Your own file of the song first: the album it is on in your library ("Guapa"),
+        // not the single YouTube files the song under.
+        runCatching {
+            com.music.bitchord.data.covers.CoverSources.filesOf(song).firstOrNull { !it.albumName.isNullOrBlank() }
+                ?.let { f -> OwnLibrary.albumPageFor(f.artist, f.albumName!!) ?: LocalGroups.albumPageId(WebDavConfig.BROWSE_ID, f.albumName!!).takeIf { WebDavConfig.isWebDavId(f.videoId) } }
+        }.getOrNull()?.let { return it }
+        if (album.isEmpty()) return null
         return runCatching { OwnLibrary.albumPageFor(song.artist, album) }.getOrNull()
     }
 

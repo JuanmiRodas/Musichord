@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap
 object CoverOverrides {
 
     private const val FILE = "covers.json"
+    private const val SAVED_AT = "_savedAt"
     private const val REMOTE_DIR = ".bitchord-audio"
 
     private val covers = ConcurrentHashMap<String, String>()
@@ -44,11 +45,23 @@ object CoverOverrides {
         ArtworkOverrides.lookup = { song -> if (covers.isEmpty()) null else get(song) }
         ArtworkOverrides.display = { song -> runCatching { pickedCopyOf(song) }.getOrNull() }
         scope.launch {
-            runCatching { local?.takeIf { it.isFile }?.readText() }.getOrNull()?.let { read(it, replace = true) }
-            remoteUrl()?.let { url ->
-                WebDavClient.readText(url, AppSettings.webdavUsername.value, AppSettings.webdavPassword.value, 4 * 1024 * 1024)
-                    .getOrNull()?.let { read(it, replace = false) }
+            val localText = runCatching { local?.takeIf { it.isFile }?.readText() }.getOrNull()
+            localText?.let { read(it, replace = true) }
+            val remoteText = remoteUrl()?.let { url ->
+                WebDavClient.readText(url, AppSettings.webdavUsername.value, AppSettings.webdavPassword.value, 4 * 1024 * 1024).getOrNull()
             }
+            // BitChord Audio: the newer copy wins whole. Merging the pCloud copy in name by name
+            // brought back every cover changed or removed since it was last written — a cover
+            // picked again went back to the old one on the next start.
+            val localAt = localText?.let(::savedAt) ?: 0L
+            val remoteAt = remoteText?.let(::savedAt) ?: 0L
+            when {
+                remoteText == null -> Unit
+                remoteAt > maxOf(localAt, lastSaved) -> { covers.clear(); read(remoteText, replace = true) }
+                localAt > remoteAt -> push()
+                localAt == 0L -> read(remoteText, replace = false)
+            }
+            initialized = true
             _version.value++
         }
     }
@@ -135,12 +148,24 @@ object CoverOverrides {
         changed()
     }
 
+    @Volatile private var initialized = false
+    @Volatile private var lastSaved = 0L
+
+    private fun savedAt(text: String): Long = runCatching { JSONObject(text).optLong(SAVED_AT, 0L) }.getOrDefault(0L)
+
+    private fun text(): String = JSONObject(covers as Map<*, *>).apply { put(SAVED_AT, lastSaved) }.toString()
+
     private fun changed() {
         answers.clear()
         scopedBases = null
         _version.value++
-        val text = JSONObject(covers as Map<*, *>).toString()
+        lastSaved = System.currentTimeMillis()
+        val text = text()
         local?.let { f -> runCatching { f.writeText(text) } }
+        push(text)
+    }
+
+    private fun push(text: String = text()) {
         scope.launch {
             val dir = remoteDir() ?: return@launch
             val u = AppSettings.webdavUsername.value
@@ -153,7 +178,11 @@ object CoverOverrides {
 
     private fun read(text: String, replace: Boolean) = runCatching {
         val o = JSONObject(text)
-        o.keys().forEach { k -> if (replace) covers[k] = o.getString(k) else covers.putIfAbsent(k, o.getString(k)) }
+        o.optLong(SAVED_AT, 0L).takeIf { it > lastSaved }?.let { lastSaved = it }
+        o.keys().forEach { k ->
+            if (k == SAVED_AT) return@forEach
+            if (replace) covers[k] = o.getString(k) else covers.putIfAbsent(k, o.getString(k))
+        }
         answers.clear()
         scopedBases = null
     }

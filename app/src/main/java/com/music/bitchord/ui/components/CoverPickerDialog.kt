@@ -109,7 +109,14 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
     fun applyCover() {
         val url = picked ?: return
         val targets = listOf(song) + albumSongs.filter { it.videoId in chosen }
-        CoverOverrides.set(targets, url)
+        // BitChord Audio: also on the copies the song is shown as — the file of yours that
+        // plays in its place, on its own album ("Guapa" under a YouTube single). Set only on
+        // the song, the cover never showed where that copy stands in for it, and came "back".
+        val copies = targets.flatMap { t ->
+            listOfNotNull(runCatching { CoverOverrides.pickedCopyOf(t) }.getOrNull()) +
+                runCatching { com.music.bitchord.data.covers.CoverSources.filesOf(t).take(1) }.getOrDefault(emptyList())
+        }
+        CoverOverrides.set((targets + copies).distinctBy { it.videoId }, url)
         if (saveToFiles && com.music.bitchord.data.settings.AppSettings.meteredConnection.value != false) {
             // On mobile data (or offline): written into the files later, on Wi-Fi.
             CoroutineScope(Dispatchers.IO).launch {
