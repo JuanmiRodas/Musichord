@@ -3080,6 +3080,9 @@ private fun BitChordApp(
                 if (!coveredByPlayer) drawContent()
             },
     ) {
+        // BitChord Audio: the screen's body in a lambda of its own — inlined into
+        // BitChordApp it made that one method too large for the JVM (64 KB).
+        SplitBody {
         // A pushed page replaces the tab content but leaves the tab bar and
         // mini player in place.
         //
@@ -6636,6 +6639,7 @@ private fun BitChordApp(
             )
         }
 
+        } // BitChord Audio: end of SplitBody
     }
 }
 
@@ -6651,6 +6655,10 @@ private val OnboardingDismissEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
 
 private fun tween(durationMillis: Int) =
     androidx.compose.animation.core.tween<Float>(durationMillis)
+
+/** BitChord Audio: runs [content] as a lambda of its own (see BitChordApp's body). */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.SplitBody(content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) = content()
 
 /** BitChord Audio: the dialogs our own features raise from anywhere in the app. */
 @Composable
