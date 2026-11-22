@@ -4696,6 +4696,37 @@ fun NowPlayingScreen(
                                     translation = if (withTranslation) lyricsTranslation.translatedLines else null,
                                     singleLine = true,
                                 )
+                                // BitChord Audio: the lyrics' shift shown for a moment at the top,
+                                // as in video mode, after each tap that changes it.
+                                run {
+                                    val shift = lyricsTranslation.offsetMs
+                                    var shiftShown by remember { mutableStateOf(false) }
+                                    var lastShift by remember(song.videoId) { mutableStateOf(shift) }
+                                    LaunchedEffect(shift) {
+                                        if (shift == lastShift) return@LaunchedEffect
+                                        lastShift = shift
+                                        shiftShown = true
+                                        delay(1_400)
+                                        shiftShown = false
+                                    }
+                                    androidx.compose.animation.AnimatedVisibility(
+                                        visible = shiftShown,
+                                        enter = androidx.compose.animation.fadeIn(tween(150)),
+                                        exit = androidx.compose.animation.fadeOut(tween(400)),
+                                        modifier = Modifier.align(Alignment.TopCenter),
+                                    ) {
+                                        Text(
+                                            text = (if (shift > 0) "+" else if (shift < 0) "−" else "±") +
+                                                "%.1f s".format(kotlin.math.abs(shift) / 1000f),
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color.Black.copy(alpha = 0.6f))
+                                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        )
+                                    }
+                                }
                                 androidx.compose.animation.AnimatedVisibility(
                                     visible = sizerShown,
                                     enter = androidx.compose.animation.fadeIn(tween(180)),
@@ -5359,8 +5390,7 @@ fun NowPlayingScreen(
                         // BitChord Audio: where the song plays from (and the cover
                         // button), under the controls rather than over the cover.
                         // (Where it plays from moved to the device's line at the foot.)
-                        Spacer(Modifier.height(4.dp))
-                        SleeveNerdStats(song = song, modifier = Modifier.fillMaxWidth(), withSource = false)
+                        // BitChord Audio: no format line here — the foot of the player has it already.
                     }
                     if (!hideVolumeBar) {
                         // The transport rides midway between the two blocks it

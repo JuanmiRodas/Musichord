@@ -44,8 +44,27 @@ object DisplayNames {
         if (original.isBlank() || !needsLatin(original) || hasLatinPart(original)) return original
         val l = latin?.invoke(kind, original.trim(), artist) ?: return original
         if (l.text.isBlank() || l.text.equals(original, ignoreCase = true)) return original
-        return original + " · " + (if (l.guessed) "≈" else "") + l.text
+        // BitChord Audio: "Romaji (原文)"; a version note ("Live", "TV size") said once, at the end.
+        val notes = NOTE.findAll(original).map { it.value.trim() }.toList()
+        var core = original
+        var latinCore = l.text
+        notes.forEach { n ->
+            core = core.replace(n, " ")
+            val inner = n.trim('(', ')', '[', ']', '（', '）', '【', '】', ' ', '-')
+            latinCore = latinCore.replace(Regex("\\s*[(\\[（【]?\\s*" + Regex.escape(inner) + "\\s*[)\\]）】]?", RegexOption.IGNORE_CASE), " ")
+        }
+        core = core.replace(Regex("\\s+"), " ").trim()
+        latinCore = latinCore.replace(Regex("\\s+"), " ").trim().ifBlank { l.text }
+        if (core.isBlank()) core = original
+        val suffix = if (notes.isEmpty()) "" else " " + notes.joinToString(" ")
+        return "$latinCore ($core)$suffix"
     }
+
+    /** A version note in brackets, or after a dash: "(LIVE)", "[TV size]", "- Live". */
+    private val NOTE = Regex(
+        """\s*(?:[(\[（【]\s*(?:tv\s*size|tv\s*ver(?:sion|\.)?|live|remix|instrumental|inst\.?|off\s*vocal|acoustic|short\s*ver(?:sion|\.)?|full\s*ver(?:sion|\.)?|movie\s*ver(?:sion|\.)?)\s*[)\]）】]|\s-\s*live)\s*$""",
+        RegexOption.IGNORE_CASE,
+    )
 
     fun title(title: String, artist: String?): String = one(Kind.TITLE, title, artist)
 

@@ -103,7 +103,8 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         override val reduceDynamicBlur get() = AppSettings.reduceDynamicBlur
         override val disableBlendEffects get() = AppSettings.disableBlendEffects
         override val showNerdStats get() = AppSettings.showNerdStats
-        override val showBestPart get() = AppSettings.showBestPart
+        // BitChord Audio: the "Best part" button is gone (it got in the way of the lyrics).
+        override val showBestPart: kotlinx.coroutines.flow.StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)
         override val showListenTogetherButton get() = AppSettings.showListenTogetherButton
         override val smartAnalysis get() = AppSettings.smartAnalysis
         override val automixDetail get() = AppSettings.automixDetail

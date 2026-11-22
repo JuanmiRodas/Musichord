@@ -87,11 +87,31 @@ object OfficialNames {
                 DisplayNames.Kind.ARTIST -> Kind.ARTIST
                 DisplayNames.Kind.ALBUM -> Kind.ALBUM
             }
-            get(k, original, artist)?.takeIf { it.latin.isNotBlank() }?.let { DisplayNames.Latin(it.latin, !it.source.official) }
+            get(k, original, artist)?.takeIf { it.latin.isNotBlank() }
+                // BitChord Audio: a title or album is shown in its Latin reading, not
+                // translated: an "official" name that isn't a reading of the original (an
+                // English release title) gives way to the romanization.
+                ?.takeIf { e -> kind == DisplayNames.Kind.ARTIST || e.source == Source.MANUAL || readsLike(original, e.latin, artist) }
+                ?.let { DisplayNames.Latin(it.latin, !it.source.official) }
                 // Nothing looked up yet: the romanization, marked, worked out aside and
                 // shown once ready (a redraw), so drawing a list never waits on it.
                 ?: AutoLatin.cached(original, artist)?.let { DisplayNames.Latin(it, guessed = true) }
         }
+    }
+
+    /** Whether [latin] reads like [original] (romaji of it), not a translation of it. */
+    private fun readsLike(original: String, latin: String, artist: String?): Boolean {
+        val reading = AutoLatin.cached(original, artist)
+            ?: com.music.bitchord.data.sources.JapaneseReading.romaji(original)
+            ?: return true
+        fun grams(x: String): Set<String> {
+            val k = com.music.bitchord.data.sources.JapaneseReading.soundKey(x)
+            return if (k.length < 2) setOf(k) else (0 until k.length - 1).map { k.substring(it, it + 2) }.toSet()
+        }
+        val a = grams(reading)
+        val b = grams(latin)
+        if (a.isEmpty() || b.isEmpty()) return true
+        return a.intersect(b).size.toDouble() / a.union(b).size >= 0.35
     }
 
     // ---- keys ------------------------------------------------------------------------

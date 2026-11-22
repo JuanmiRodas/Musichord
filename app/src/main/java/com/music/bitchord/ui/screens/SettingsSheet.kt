@@ -2435,21 +2435,7 @@ fun SettingsScreen(
                     onClick = { AppSettings.setSmartVersionAlignment(!smartVersionAlignment) },
                 )
             }
-            val bestPartTitle = stringResource(R.string.show_best_part)
-            row(bestPartTitle, "best part", "chorus", "skip", "replayed", "highlight") {
-                SettingsRow(
-                    icon = SfIcons.MusicNote,
-                    title = bestPartTitle,
-                    subtitle = stringResource(R.string.show_best_part_subtitle),
-                    trailing = {
-                        IosSwitch(
-                            checked = bestPart,
-                            onCheckedChange = AppSettings::setShowBestPart,
-                        )
-                    },
-                    onClick = { AppSettings.setShowBestPart(!bestPart) },
-                )
-            }
+            // BitChord Audio: no "Best part" button (it sat over the lyrics) — the setting went with it.
             val showNerdStatsTitle = stringResource(R.string.show_nerd_stats)
             row(showNerdStatsTitle, "debug", "bitrate", "codec") {
                 SettingsRow(
