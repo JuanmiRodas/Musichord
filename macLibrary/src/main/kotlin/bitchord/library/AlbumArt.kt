@@ -41,7 +41,7 @@ object AlbumArt {
             repeat(5) {
                 val c = URL(u).openConnection() as HttpURLConnection
                 c.setRequestProperty("User-Agent", UA); c.setRequestProperty("Accept", accept)
-                c.connectTimeout = 15000; c.readTimeout = 30000; c.instanceFollowRedirects = false
+                c.connectTimeout = 8000; c.readTimeout = 15000; c.instanceFollowRedirects = false
                 when (c.responseCode) {
                     in 200..299 -> return@runCatching c.inputStream.use { it.readBytes() }
                     in 300..399 -> u = URL(URL(u), c.getHeaderField("Location")).toString()
@@ -271,8 +271,13 @@ object Romaji {
     /** Looks up the names not asked yet (at most [max]); returns how many were found. */
     fun fill(names: Collection<String>, max: Int = 300): Int {
         val o = db(); var found = 0
-        for (n in names.map { Words.nfc(it.trim()) }.distinct().filter { it.isNotBlank() && !o.has(it) }.take(max)) {
-            if (Live.stop) break
+        val todo = names.map { Words.nfc(it.trim()) }.distinct().filter { it.isNotBlank() && !o.has(it) }.take(max)
+        val until = System.currentTimeMillis() + 4 * 60_000
+        Live.phase = "nombres en romaji (MusicBrainz)"; Live.total = todo.size; Live.done.set(0)
+        for (n in todo) {
+            if (Live.stop || System.currentTimeMillis() > until) break
+            Live.current = n; Live.done.incrementAndGet(); Live.write()
+            if (Live.done.get() % 20 == 0) runCatching { file.writeText(o.toString(1)) }
             val r = AlbumArt.json("https://musicbrainz.org/ws/2/artist/?query=${java.net.URLEncoder.encode("artist:\"$n\" OR alias:\"$n\"", "UTF-8")}&fmt=json&limit=3")
             val a = r?.optJSONArray("artists")?.let { x -> (0 until x.length()).map { x.getJSONObject(it) } }.orEmpty().firstOrNull { it.optInt("score") >= 90 }
             val latinName = a?.let { art ->

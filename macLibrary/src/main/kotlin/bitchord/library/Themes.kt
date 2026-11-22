@@ -40,8 +40,12 @@ object Themes {
     /** Looks up the collections not asked yet (at most [max]); returns how many got themes. */
     fun fill(series: Collection<String>, max: Int = 40): Int {
         val o = db(); var found = 0
-        for (s in series.distinct().filter { it.isNotBlank() && !o.has(Words.plain(it)) }.take(max)) {
-            if (Live.stop) break
+        val todo = series.distinct().filter { it.isNotBlank() && !o.has(Words.plain(it)) }.take(max)
+        val until = System.currentTimeMillis() + 4 * 60_000
+        Live.phase = "openings y endings (MyAnimeList)"; Live.total = todo.size; Live.done.set(0)
+        for (s in todo) {
+            if (Live.stop || System.currentTimeMillis() > until) break
+            Live.current = s; Live.done.incrementAndGet(); Live.write()
             val list = JSONArray()
             val r = AlbumArt.json("https://api.jikan.moe/v4/anime?q=${URLEncoder.encode(s, "UTF-8")}&type=tv&limit=10&order_by=members&sort=desc", 1200)
             val p = Words.plain(s)
@@ -84,8 +88,13 @@ object AlbumNames {
 
     fun fill(albums: Collection<String>, max: Int = 150): Int {
         val o = db(); var found = 0
-        for (a in albums.map { Words.nfc(it.trim()) }.distinct().filter { it.isNotBlank() && !o.has(it) }.take(max)) {
-            if (Live.stop) break
+        val todo = albums.map { Words.nfc(it.trim()) }.distinct().filter { it.isNotBlank() && !o.has(it) }.take(max)
+        val until = System.currentTimeMillis() + 4 * 60_000
+        Live.phase = "nombres de álbumes (VGMdb)"; Live.total = todo.size; Live.done.set(0)
+        for (a in todo) {
+            if (Live.stop || System.currentTimeMillis() > until) break
+            Live.current = a; Live.done.incrementAndGet(); Live.write()
+            if (Live.done.get() % 20 == 0) runCatching { file.writeText(o.toString(1)) }
             val q = a.replace(Regex("[〜～~「」『』【】]"), " ").replace(Regex("\\s+"), " ").trim()
             val res = AlbumArt.json("https://vgmdb.info/search/albums/${URLEncoder.encode(q, "UTF-8").replace("+", "%20")}?format=json", 1500)
                 ?.optJSONObject("results")?.optJSONArray("albums")

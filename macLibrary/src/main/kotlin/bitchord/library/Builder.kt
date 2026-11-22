@@ -804,8 +804,12 @@ object Builder {
         val japaneseOnly = plan.copy.map { it.albumArtist.ifBlank { it.artist } }.filter { n -> n.isNotBlank() && n.none { it in 'A'..'Z' || it in 'a'..'z' } }
         val series = plan.copy.mapNotNull { it.grouping }.groupingBy { it }.eachCount().filter { it.value >= 3 }.keys
         Live.phase = "buscando nombres en romaji y openings/endings de las series"; Live.write()
-        val found = runCatching { Romaji.fill(japaneseOnly) }.getOrDefault(0) + runCatching { Themes.fill(series) }.getOrDefault(0) +
-            runCatching { AlbumNames.fill(plan.japaneseAlbums) }.getOrDefault(0)
+        val r = runCatching { Romaji.fill(japaneseOnly) }.getOrDefault(0)
+        val t = runCatching { Themes.fill(series) }.getOrDefault(0)
+        val a = runCatching { AlbumNames.fill(plan.japaneseAlbums) }.getOrDefault(0)
+        Live.total = 0; Live.done.set(0); Live.current = ""
+        Live.phase = "planeando de nuevo con lo encontrado ($r nombres en romaji, $t series con openings/endings, $a álbumes)"; Live.write(force = true)
+        val found = if (Live.stop) 0 else r + t + a
         if (found > 0) plan = plan(sources, tracks, targetRoot)
         return plan
     }
