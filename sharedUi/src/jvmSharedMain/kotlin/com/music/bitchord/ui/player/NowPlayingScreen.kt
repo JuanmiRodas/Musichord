@@ -2494,6 +2494,10 @@ fun NowPlayingScreen(
     DisposableEffect(Unit) { onDispose { reportLiveCanvas(false) } }
     val frostOff by PlayerSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val frost = if (frostOff) null else PlayerPlatform.host.rememberPlayerFrost()
+    // BitChord Audio: the LastWave-style player, when chosen in Settings.
+    val lastWaveOn by PlayerSettings.lastWavePlayer.collectAsStateWithLifecycle()
+    val lastWaveLook = rememberLastWaveLook(lastWaveOn, remoteArt ?: song.thumbnailUrl, isPlaying)
+    CompositionLocalProvider(LocalLastWave provides lastWaveLook) {
     FrostedPlayerFrame(
         modifier = modifier,
         // Off where a music video is the backdrop: it can go bright under the
@@ -3097,6 +3101,20 @@ fun NowPlayingScreen(
                 )
                 if (videoDim > 0f) {
                     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = videoDim)))
+                }
+                // BitChord Audio: LastWave's moving colours along the bottom, one light per
+                // band, over the backdrop (and the framed video's dim), under the controls.
+                lastWaveLook?.let { look ->
+                    val glowAlpha by animateFloatAsState(
+                        targetValue = if (lyricsOpen || queueOpen || (videoEdge && !videoModeSquare)) 0f else 1f,
+                        animationSpec = tween(durationMillis = 600),
+                        label = "lastWaveGlow",
+                    )
+                    LastWaveBottomGlow(
+                        look = look,
+                        alpha = { glowAlpha },
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
 
                 // Mount once, behind the controls. A known portrait aspect changes the
@@ -5491,6 +5509,7 @@ fun NowPlayingScreen(
                 }
             }
         }
+    }
     }
 }
 

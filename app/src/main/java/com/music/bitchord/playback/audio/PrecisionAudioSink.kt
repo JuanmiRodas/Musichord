@@ -1,6 +1,7 @@
 package com.music.bitchord.playback.audio
 
 import android.util.Log
+import com.music.bitchord.ui.player.AudioBands
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
@@ -162,6 +163,8 @@ class PrecisionAudioSink(
      */
     private var delegateOffsetUs = 0L
 
+    private val bandTap = BandTap()
+
     private val loopScratch = FloatArray(AudioBlock.DEFAULT_CAPACITY_FRAMES * 2)
 
     override fun configure(audioSinkConfig: AudioSink.AudioSinkConfig) {
@@ -176,6 +179,7 @@ class PrecisionAudioSink(
 
                 // 1. Configure the Float32 DSP chain
                 dspChain.configure(sampleRate, channelCount)
+                bandTap.configure(sampleRate)
 
                 // 2. Ensure internal buffers are sized for max frames and channel count
                 ensureBuffers(channelCount)
@@ -410,6 +414,8 @@ class PrecisionAudioSink(
 
             // Process normalized Float32 samples through custom DSP chain
             dspChain.process(audioBlock)
+            // BitChord Audio: the LastWave player's bands, read here and handed over when heard.
+            if (AudioBands.wanted && isAudible()) bandTap.analyze(audioBlock, loopBlockUs)
 
             // Encode processed samples to target PCM output buffer (Float32 or PCM16)
             outputByteBuffer.clear()
@@ -499,6 +505,7 @@ class PrecisionAudioSink(
         // The delegate counts any silence the loop mix inserted, and none of the
         // frames it dropped; the player is told the track's own position.
         val position = delegatePosition - delegateOffsetUs
+        if (AudioBands.wanted && isAudible()) bandTap.publish(position)
         val processed = processedEndUs
         if (processed != C.TIME_UNSET) {
             dspChain.transition.leadUs = (processed - position).coerceAtLeast(0L)
@@ -656,6 +663,7 @@ class PrecisionAudioSink(
     }
 
     override fun flush() {
+        bandTap.clear()
         processedEndUs = C.TIME_UNSET
         dspChain.transition.leadUs = 0L
         loopInterrupted()
@@ -674,6 +682,7 @@ class PrecisionAudioSink(
     }
 
     override fun reset() {
+        bandTap.clear()
         processedEndUs = C.TIME_UNSET
         dspChain.transition.leadUs = 0L
         loopInterrupted()

@@ -104,8 +104,12 @@ fun ThinSlider(
      * are — see [vibrantChrome]. The colours are then the dodge's ink.
      */
     vibrant: Boolean = false,
+    /** BitChord Audio: the seek bar — drawn as LastWave's waves while that player style is on. */
+    wave: Boolean = false,
 ) {
     var dragging by remember { mutableStateOf(false) }
+    val look = if (wave) LocalLastWave.current else null
+    val wavePaths = remember { WavePaths() }
     val height by animateDpAsState(
         targetValue = if (dragging) activeHeight else idleHeight,
         animationSpec = spring(
@@ -186,7 +190,26 @@ fun ThinSlider(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(
+        if (look != null) Canvas(Modifier.fillMaxWidth().height(activeHeight + 22.dp)) {
+            val barH = height.toPx()
+            val top = size.height / 2f - barH / 2f
+            val cover = if (dragging) 0f else mixPulse?.cover ?: 0f
+            val base = value.coerceIn(0f, 1f)
+            drawLastWaveTrack(
+                look = look,
+                paths = wavePaths,
+                fraction = (base + (1f - base) * cover) * fillFactor,
+                baseHeight = barH,
+                inactive = Color.White.copy(alpha = 0.22f),
+                maxAmplitude = (top - 2.dp.toPx()).coerceAtLeast(0f),
+                showThumb = fillFactor > 0.5f,
+                underFill = {
+                    shownWindow?.takeIf { windowAlpha > 0f }?.let { window ->
+                        drawTransitionWindow(window, windowAlpha, markerColor, Size(size.width, barH), top, CornerRadius(barH / 2f))
+                    }
+                },
+            )
+        } else Canvas(
             Modifier
                 .fillMaxWidth()
                 .height(height)
@@ -204,34 +227,7 @@ fun ThinSlider(
             // It is painted across the bar's own capsule, so its ends dissolve
             // into the track instead of sitting on it as a second pill.
             shownWindow?.takeIf { windowAlpha > 0f }?.let { window ->
-                val from = size.width * window.start.coerceIn(0f, 1f)
-                val to = size.width * window.endInclusive.coerceIn(0f, 1f)
-                val span = to - from
-                if (span > 0f) {
-                    val feather = (span * WINDOW_FEATHER_SHARE)
-                        .coerceIn(WINDOW_FEATHER_MIN.toPx(), WINDOW_FEATHER_MAX.toPx())
-                        .coerceAtMost(span / 2f)
-                    val f = feather / span
-                    val full = markerColor.alpha * windowAlpha
-                    // Smoothstep down each feather: no slope break where the
-                    // ramp meets the flat middle, so there is no line for the
-                    // eye to catch at either end.
-                    val ramp = (0..WINDOW_FEATHER_STEPS).map { step ->
-                        val t = step / WINDOW_FEATHER_STEPS.toFloat()
-                        t to markerColor.copy(alpha = full * t * t * (3f - 2f * t))
-                    }
-                    val stops = ramp.map { (t, c) -> f * t to c } +
-                        ramp.reversed().map { (t, c) -> 1f - f * t to c }
-                    drawRoundRect(
-                        brush = Brush.horizontalGradient(
-                            colorStops = stops.toTypedArray(),
-                            startX = from,
-                            endX = to,
-                        ),
-                        size = size,
-                        cornerRadius = radius,
-                    )
-                }
+                drawTransitionWindow(window, windowAlpha, markerColor, size, 0f, radius)
             }
             // While a blend runs the whole bar is the fill, outgoing song and
             // incoming alike, and it is the fill's opacity that carries the mix:
@@ -280,6 +276,49 @@ fun ThinSlider(
             MixSheen(height = height, color = if (vibrant) Color.White.copy(alpha = 0.92f) else activeColor)
         }
     }
+}
+
+
+/** The Automix window marker along a bar of [bar] size whose top is at [top]. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTransitionWindow(
+    window: ClosedFloatingPointRange<Float>,
+    windowAlpha: Float,
+    markerColor: Color,
+    bar: Size,
+    top: Float,
+    radius: CornerRadius,
+) {
+    val size = bar
+    val from = size.width * window.start.coerceIn(0f, 1f)
+    val to = size.width * window.endInclusive.coerceIn(0f, 1f)
+    val span = to - from
+    if (span > 0f) {
+        val feather = (span * WINDOW_FEATHER_SHARE)
+            .coerceIn(WINDOW_FEATHER_MIN.toPx(), WINDOW_FEATHER_MAX.toPx())
+            .coerceAtMost(span / 2f)
+        val f = feather / span
+        val full = markerColor.alpha * windowAlpha
+        // Smoothstep down each feather: no slope break where the
+        // ramp meets the flat middle, so there is no line for the
+        // eye to catch at either end.
+        val ramp = (0..WINDOW_FEATHER_STEPS).map { step ->
+            val t = step / WINDOW_FEATHER_STEPS.toFloat()
+            t to markerColor.copy(alpha = full * t * t * (3f - 2f * t))
+        }
+        val stops = ramp.map { (t, c) -> f * t to c } +
+            ramp.reversed().map { (t, c) -> 1f - f * t to c }
+        drawRoundRect(
+            brush = Brush.horizontalGradient(
+                colorStops = stops.toTypedArray(),
+                startX = from,
+                endX = to,
+            ),
+            topLeft = androidx.compose.ui.geometry.Offset(0f, top),
+        size = size,
+            cornerRadius = radius,
+        )
+    }
+
 }
 
 private const val SHEEN_BAND_FRACTION = 0.34f

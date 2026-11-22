@@ -424,6 +424,8 @@ interface PlayerSettingsSource {
     val showNerdStats: StateFlow<Boolean>
     /** Whether the "Best Part" button is offered on the artwork. */
     val showBestPart: StateFlow<Boolean>
+    /** BitChord Audio: the LastWave-style player (waves, liquid glass, moving colours) instead of the classic one. */
+    val lastWavePlayer: StateFlow<Boolean> get() = defaultLastWavePlayer
     /** Whether the output / Listen Together pill sits under the transport. */
     val showListenTogetherButton: StateFlow<Boolean>
     val smartAnalysis: StateFlow<SmartAnalysis>
@@ -461,6 +463,7 @@ interface PlayerSettingsSource {
 internal val PlayerSettings: PlayerSettingsSource
     get() = PlayerPlatform.host.settings
 
+private val defaultLastWavePlayer: StateFlow<Boolean> = MutableStateFlow(false)
 private val defaultAutoMixArtwork: StateFlow<AutoMixArtworkPreferences> = MutableStateFlow(AutoMixArtworkPreferences())
 
 /** The lyric offset sheet's range, in milliseconds either way. */

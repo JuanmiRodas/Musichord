@@ -471,6 +471,9 @@ object AppSettings {
      */
     val showBestPart = MutableStateFlow(true)
 
+    /** BitChord Audio: the LastWave-style player instead of the classic one. Off unless chosen. */
+    val lastWavePlayer = MutableStateFlow(false)
+
     /** Show the output / Listen Together pill under the player's transport. */
     val showListenTogetherButton = MutableStateFlow(false)
 
@@ -1157,6 +1160,7 @@ object AppSettings {
         repeatMode.value = prefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF)
         showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
         showBestPart.value = prefs.getBoolean(KEY_BEST_PART, true)
+        lastWavePlayer.value = prefs.getBoolean(KEY_LASTWAVE_PLAYER, false)
         showListenTogetherButton.value = prefs.getBoolean(KEY_LISTEN_TOGETHER_BUTTON, false)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
         onboardingComplete.value = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false)
@@ -1595,6 +1599,11 @@ object AppSettings {
     fun setShowNerdStats(value: Boolean) {
         showNerdStats.value = value
         prefs.edit().putBoolean(KEY_NERD_STATS, value).apply()
+    }
+
+    fun setLastWavePlayer(value: Boolean) {
+        lastWavePlayer.value = value
+        prefs.edit().putBoolean(KEY_LASTWAVE_PLAYER, value).apply()
     }
 
     fun setShowBestPart(value: Boolean) {
@@ -2606,6 +2615,7 @@ object AppSettings {
     private const val KEY_REPEAT_MODE = "repeat_mode"
     private const val KEY_NERD_STATS = "show_nerd_stats"
     private const val KEY_BEST_PART = "show_best_part"
+    private const val KEY_LASTWAVE_PLAYER = "lastwave_player"
     private const val KEY_LISTEN_TOGETHER_BUTTON = "show_listen_together_button"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
     private const val KEY_REDUCE_ANIMATION = "reduce_animation"

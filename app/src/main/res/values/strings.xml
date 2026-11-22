@@ -2087,4 +2087,6 @@
     <string name="replay_year_summary_minutes">Minutes listened</string>
     <string name="replay_year_mute">Mute the story</string>
     <string name="replay_year_unmute">Unmute the story</string>
+    <string name="lastwave_player">Player style: LastWave</string>
+    <string name="lastwave_player_subtitle">Waves that move with the bass, mids and highs, liquid glass buttons and moving colours at the bottom. Off: the classic player</string>
 </resources>

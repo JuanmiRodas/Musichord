@@ -2106,4 +2106,6 @@
     <string name="drive_backup_row_subtitle">Copia y sincroniza Replay entre tus dispositivos</string>
     <string name="drive_over_cellular">Sincronizar con datos móviles</string>
     <string name="drive_over_cellular_subtitle">Si está desactivado, las sincronizaciones automáticas esperan al Wi-Fi</string>
+    <string name="lastwave_player">Estilo del reproductor: LastWave</string>
+    <string name="lastwave_player_subtitle">Ondas que se mueven con graves, medios y agudos, botones de cristal líquido y colores en movimiento abajo. Desactivado: el reproductor clásico</string>
 </resources>

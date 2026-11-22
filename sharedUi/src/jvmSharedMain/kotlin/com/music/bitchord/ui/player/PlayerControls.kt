@@ -258,6 +258,7 @@ internal fun PlayerScrubber(
             activeColor = ink?.active ?: Color.White.copy(alpha = 0.92f),
             inactiveColor = ink?.inactive ?: Color.White.copy(alpha = 0.26f),
             markerColor = ink?.marker ?: Color.White.copy(alpha = 0.5f),
+            wave = true,
         )
         Box(
             modifier = Modifier
@@ -694,7 +695,10 @@ internal fun TransportRow(
         if (isLoading) {
             // Same footprint as the play/pause target — a smaller box here
             // would shunt everything below it on every load.
-            Box(Modifier.size(playTouch), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.size(playTouch).lastWaveGlass(LocalLastWave.current != null, playSize + 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
                 CircularProgressIndicator(
                     color = Color.White,
                     strokeWidth = 3.dp,
@@ -1065,6 +1069,7 @@ internal fun CircleGlyph(
         )
         // Outside the blend: the rim is light catching the edge, not ink.
         Box(Modifier.matchParentSize().glassRim(CircleShape))
+        if (LocalLastWave.current != null) Box(Modifier.matchParentSize().lastWaveGlass(true))
         Crossfade(
             targetState = icon,
             animationSpec = tween(durationMillis = 180),
@@ -1209,6 +1214,11 @@ private fun TransportGlyph(
     Box(
         modifier = Modifier
             .size(touchSize)
+            // BitChord Audio: LastWave's liquid glass behind the glyph, same size and place.
+            .lastWaveGlass(
+                LocalLastWave.current != null,
+                if (playPauseMotion != null) size + 8.dp else size + 5.dp,
+            )
             .then(
                 if (skipMotion != null) Modifier.playerSkipPressCircle(
                     motion = skipMotion,
@@ -1364,6 +1374,7 @@ private fun Pill(
             .height(BOTTOM_ACTION_SIZE)
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.12f))
+            .lastWaveGlass(LocalLastWave.current != null)
             .animateContentSize(
                 animationSpec = spring(
                     dampingRatio = 0.82f,
@@ -1785,6 +1796,7 @@ private fun BottomGlyph(
     Box(
         modifier = Modifier
             .size(BOTTOM_ACTION_SIZE)
+            .lastWaveGlass(LocalLastWave.current != null && !highlighted, BOTTOM_ACTION_SIZE - 4.dp)
             // Lit, Apple's way: a rounded tile with the glyph cut out of it, the
             // artwork showing through. The glyph is drawn first and the tile over
             // it with SrcOut, which keeps the tile only where the glyph is not.

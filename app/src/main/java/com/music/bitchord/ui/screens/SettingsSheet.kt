@@ -2436,6 +2436,22 @@ fun SettingsScreen(
                 )
             }
             // BitChord Audio: no "Best part" button (it sat over the lyrics) — the setting went with it.
+            val lastWaveTitle = stringResource(R.string.lastwave_player)
+            row(lastWaveTitle, "lastwave", "style", "waves", "glass", "estilo", "ondas") {
+                val lastWave by AppSettings.lastWavePlayer.collectAsStateWithLifecycle()
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = lastWaveTitle,
+                    subtitle = stringResource(R.string.lastwave_player_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = lastWave,
+                            onCheckedChange = AppSettings::setLastWavePlayer,
+                        )
+                    },
+                    onClick = { AppSettings.setLastWavePlayer(!lastWave) },
+                )
+            }
             val showNerdStatsTitle = stringResource(R.string.show_nerd_stats)
             row(showNerdStatsTitle, "debug", "bitrate", "codec") {
                 SettingsRow(
