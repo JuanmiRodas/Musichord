@@ -121,13 +121,14 @@ fun cli(args: Array<String>, inApp: Boolean = false) = runBlocking {
             val chosen = sources.filter { wanted == null || it.name.contains(wanted, ignoreCase = true) }
             if (chosen.isEmpty()) { println("No hay ninguna fuente «$wanted». Mira «sources»."); return@runBlocking }
             val known = Scanner.known(listOf(root) + chosen.map { it.path })
-            val plan = Builder.plan(chosen, known, root)
+            val plan = if (flag("offline")) Builder.plan(chosen, known, root) else Builder.planLookingUp(chosen, known, root)
             val only = opt("only")
             val items = plan.copy.filter { only == null || it.target.contains(only, ignoreCase = true) || it.track.path.contains(only, ignoreCase = true) }
             println("Fuentes: ${chosen.joinToString { it.name }} · ${known.size - Scanner.known(listOf(root)).size} archivos leídos")
             println("En la biblioteca ${items.size}: ${items.count { it.reason == "MP3 320" }} MP3 320, ${items.count { it.reason.startsWith("sin pérdida") }} desde sin pérdida, " +
                 "${items.count { it.reason.contains("mientras") }} por debajo de 320 (mientras tanto, en la to-do)")
             println("No se copian ${plan.skipped.size}: " + plan.skipped.groupingBy { it.second.substringBefore(":") }.eachCount().entries.joinToString { "${it.value} ${it.key}" })
+            File(ops.state, "plan-overview.txt").writeText(Builder.overview(plan, root))
             File(ops.state, "build-plan.csv").writeText(buildString {
                 appendLine("origen,destino,motivo")
                 items.forEach { appendLine("\"${it.track.path}\",\"${it.target}\",\"${it.reason}\"") }

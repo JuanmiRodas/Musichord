@@ -95,6 +95,7 @@ object Words {
         Regex("「([^」]+)」").find(n)?.let { return year to it.groupValues[1].trim() }
         Regex("^(\\d{4})\\s*[-–.]\\s*(.+)$").find(n)?.let { m -> year = m.groupValues[1]; n = m.groupValues[2] }
         Regex("[(\\[](\\d{4})[)\\]]").find(n)?.let { m -> if (year == null) year = m.groupValues[1] }
+        Regex("[(\\[]((?:19|20)\\d{2})[.\\-/]\\d{1,2}[.\\-/]\\d{1,2}[)\\]]").find(n)?.let { m -> if (year == null) year = m.groupValues[1] }
         n = n.replace(Regex("\\[[^\\]]*]"), " ")
             .replace(Regex("(?i)\\((\\d{4}|mp3|flac|320k?|v0|web|cd|cdm|cds)\\)"), " ")
             .replace(Regex("(?i)\\b(320\\s?kbps|320k|mp3|flac|v0)\\b"), " ")

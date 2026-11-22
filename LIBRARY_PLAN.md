@@ -106,3 +106,17 @@ Objetivo: toda la música que te gusta acaba en `pCloud Drive/pCloud Backup/MacB
 - Con pCloud Drive (sistema de archivos) mover y borrar daba «Input/output error» y aparecían carpetas «(1)» (pCloud trata «é» compuesta y descompuesta como el mismo nombre). Ahora `Lib`/`PCloudLib`: listar la biblioteca (`listfolder` recursivo), mover (`renamefile`, al instante en el servidor), borrar, crear carpetas y subir (`uploadfile`), todo con la API. Cada canción que falta o que hay que re-etiquetar se hace en el Mac desde su fuente y se sube; nada pasa por la caché de pCloud Drive.
 - Inicio de sesión una vez en Ajustes (correo y contraseña van solo a pCloud; se guarda el token en `pcloud.json` de la app). Las cuentas con verificación en dos pasos no pueden usar este inicio de sesión.
 - Las fuentes con acentos en otra forma Unicode ya se reconocen (`Scanner.known`, `Builder.plan`).
+
+## 1.0.25 — lookups and structure fixes
+- Before building, the app looks up what the sources lack (kept in its data folder, asked once):
+  Latin names of people known only in Japanese (MusicBrainz → `romaji.json`), openings and endings
+  of each series in order (MyAnimeList through Jikan → `themes.json`), Latin names of albums known
+  only in Japanese (VGMdb → `album-names.json`, shown as «Latin (日本語)»).
+- A series' song that is an opening or ending goes in «<anime> Openings/Endings» numbered as aired;
+  one copy per opening/ending.
+- Spanish versions and fandubs go where the original song is, in «Canciones en español».
+- Disc folders («DISC 2 (…)») belong to the album above; titles cut at 30 letters are completed from
+  the file name; a series' name in front of a singer («Slayers; Megumi Hayashibara») is dropped.
+- Big artists' own albums named after a series (MEGUMIX) stay with the artist.
+- Kajiura's soundtracks are grouped by series (source folder, known series names, 「…」).
+- Report («Copiar informe para Claude»): version, last task, plan overview per folder, covers, updates.

@@ -164,6 +164,11 @@ class Ops(val root: String) {
             JSONObject().put("library", r.get("library")).put("to_merge", r.get("to_merge")).put("issues", r.get("issues")).toString(2)
         }) }
         appendLine("Plan de nombres: ${loadPlan().size} movimientos pendientes; lotes hechos: ${batches().joinToString { "${it.first} (${it.second})" }}")
+        appendLine("Versión de la app: ${Updater.current}")
+        runCatching { appendLine("— Última tarea —\n" + File(Live.dir, "live.json").readText()) }
+        runCatching { CoverReview.load().let { p -> appendLine("Portadas: " + p.groupingBy { it.status }.eachCount().entries.joinToString { "${it.value} ${it.key}" }) } }
+        runCatching { appendLine("— Plan —\n" + File(Live.dir, "plan-overview.txt").readText()) }
+        runCatching { File(Live.dir, "update.log").readLines().takeLast(8).takeIf { it.isNotEmpty() }?.let { appendLine("— Actualizaciones —"); it.forEach { l -> appendLine(l) } } }
         appendLine("— Últimas líneas del registro —")
         runCatching { logFile.readLines().takeLast(40).forEach { appendLine(it) } }
     }

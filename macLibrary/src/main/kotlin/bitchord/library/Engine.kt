@@ -179,13 +179,9 @@ object Engine {
         val ops = Ops(root)
         Live.begin("Construir y ordenar", root)
         Live.phase = "calculando el plan"
-        var plan = Builder.plan(sources, tracks.filter { !it.path.startsWith("$root/") }, root)
-        // People known only in Japanese: their Latin name looked up (MusicBrainz), then the plan made again with it.
-        val japaneseOnly = plan.copy.map { it.albumArtist.ifBlank { it.artist } }.filter { n -> n.isNotBlank() && n.none { it in 'A'..'Z' || it in 'a'..'z' } }
-        if (japaneseOnly.isNotEmpty()) {
-            Live.phase = "buscando nombres en romaji (${japaneseOnly.distinct().size})"; Live.write()
-            if (runCatching { Romaji.fill(japaneseOnly) }.getOrDefault(0) > 0) plan = Builder.plan(sources, tracks.filter { !it.path.startsWith("$root/") }, root)
-        }
+        Live.phase = "planeando"; Live.write()
+        val plan = Builder.planLookingUp(sources, tracks.filter { !it.path.startsWith("$root/") }, root)
+        runCatching { File(Live.dir, "plan-overview.txt").writeText(Builder.overview(plan, root)) }
         val manifest = Manifest(root)
         val covers = Covers(root)
         fun rel(p: String) = Words.nfc(p.removePrefix(root).trimStart('/'))
