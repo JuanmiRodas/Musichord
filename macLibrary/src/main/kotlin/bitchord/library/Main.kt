@@ -310,6 +310,27 @@ private fun Summary(state: LibraryState, scope: kotlinx.coroutines.CoroutineScop
             }
         }
         item {
+            Card("Información y escaneos de los álbumes") {
+                Text(
+                    "Para cada álbum con 5 canciones o más: portada, contraportada, libreto, discos… y sus datos (número de catálogo, fecha, créditos) de VGMdb, MusicBrainz y Cover Art Archive, " +
+                        "pocketmonsters.net (Pokémon) y canta-per-me.net (Yuki Kajiura). Solo cuando es seguro que es el mismo álbum (las duraciones coinciden); se guardan en «Imágenes» dentro de la carpeta del álbum.",
+                    color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp,
+                )
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = state.busy == null, onClick = {
+                        scope.launch {
+                            state.busy = "Buscando información y escaneos…"
+                            val ticker = launch { while (true) { state.busy = Live.summary() + " · " + Live.current; state.progress = Live.done.get().toFloat() / Live.total.coerceAtLeast(1); kotlinx.coroutines.delay(1000) } }
+                            val res = withContext(Dispatchers.IO) { runCatching { AlbumArt.run(state.settings.root) }.getOrDefault(emptyList()) }
+                            ticker.cancel()
+                            state.busy = null
+                            state.message = "${res.count { it.note.startsWith("seguro") }} álbumes con datos, ${res.sumOf { it.saved }} imágenes, ${res.count { it.note.startsWith("dudoso") }} dudosos (ver registro)"
+                        }
+                    }) { Text("Buscar escaneos") }
+                }
+            }
+        }
+        item {
             Card("Hablar con Claude") {
                 Text(
                     "Claude ve lo que hace la app (.bitchord-library/live.json y log.txt, dentro de la biblioteca) y le puede dar órdenes mientras está abierta " +

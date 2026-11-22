@@ -21,6 +21,8 @@ Uso: bitchord-library <orden> [opciones]
   build             Construye la biblioteca y la ordena con el plan (mueve lo ya copiado,
                     copia lo que falta, quita lo que sobra): --source "<nombre>",
                     --dry-run para ver el plan, --only <texto> para filtrar lo que se enseña
+  albums            Información y escaneos de los álbumes de 5+ canciones (VGMdb, MusicBrainz,
+                    pocketmonsters.net, canta-per-me.net) en <álbum>/Imágenes; --dry-run, --only
   quarantine        Lo que nunca entra en la biblioteca (quarantine.json)
   covers            Portadas alternativas propuestas pendientes de aprobar
   free              Carpetas de las fuentes ya cubiertas por la biblioteca (para liberar espacio)
@@ -136,6 +138,11 @@ fun cli(args: Array<String>, inApp: Boolean = false) = runBlocking {
                 return@runBlocking
             }
             println(Engine.build(chosen, known, root))
+        }
+        "albums" -> {
+            val res = AlbumArt.run(root, opt("only"), flag("dry-run"), deadline) { println("… $it") }
+            res.forEach { println("${it.album.rel}: ${it.note}${it.release?.let { r -> " — ${r.url}" } ?: ""}") }
+            println("— ${res.count { it.note.startsWith("seguro") }} seguros, ${res.sumOf { it.saved }} imágenes guardadas, ${res.count { it.note.startsWith("dudoso") }} dudosos, ${res.count { it.release == null }} sin resultados")
         }
         "quarantine" -> Builder.Quarantine.load(root).let { q ->
             println("Carpetas en cuarentena: ${q.folders.joinToString()}")
