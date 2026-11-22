@@ -664,6 +664,31 @@ private fun SettingsPane(state: LibraryState) {
                 }) { Text("Confirmar") }
             }
             status?.let { Text(it, color = Color(0xFFFFB4A9), fontSize = 12.sp) }
+            // Accounts pCloud won't sign in with email and password (signed up with Google or Apple…):
+            // pCloud's own page, as on the phone, with the same app registered in pCloud's "My Apps".
+            Spacer(Modifier.height(8.dp))
+            Text("¿Tu cuenta entra con Google o Apple, o pCloud no acepta la contraseña? Inicia sesión en la página de pCloud, con el mismo «Client ID» que usa BitChord en el móvil " +
+                "(pCloud → My Apps; dirección de retorno ${PCloudApi.REDIRECT}). Al terminar, el navegador acabará en una página que no carga: copia su dirección completa y pégala aquí.",
+                color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+            var clientId by remember { mutableStateOf(runCatching { File(Store.dir, "pcloud-client-id.txt").readText().trim() }.getOrDefault("")) }
+            var pasted by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(clientId, { clientId = it }, label = { Text("Client ID de pCloud") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedButton(enabled = clientId.isNotBlank(), onClick = {
+                    runCatching { File(Store.dir, "pcloud-client-id.txt").writeText(clientId.trim()) }
+                    runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(PCloudApi.authorizeUrl(clientId))) }.onFailure { status = "No se pudo abrir el navegador: ${it.message}" }
+                }) { Text("Abrir la página de pCloud") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(pasted, { pasted = it }, label = { Text("Dirección final del navegador (https://localhost/bitchord-pcloud#…)") }, singleLine = true, modifier = Modifier.weight(1f))
+                Button(enabled = pasted.contains("access_token"), onClick = {
+                    scope.launch {
+                        status = "Comprobando…"
+                        val r = withContext(Dispatchers.IO) { PCloudApi.fromRedirect(pasted) }
+                        r.onSuccess { pasted = ""; account = PCloudApi.account(); status = null }.onFailure { status = it.message }
+                    }
+                }) { Text("Conectar") }
+            }
         }
         Text("ffprobe: ${Tools.ffprobe}", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
         Text("ffmpeg: ${Tools.ffmpeg}", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)

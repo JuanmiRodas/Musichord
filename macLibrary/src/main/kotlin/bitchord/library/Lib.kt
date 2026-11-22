@@ -64,11 +64,13 @@ class LocalLib(private val root: String) : Lib {
  * password, which go only to pCloud; what is kept is the token pCloud gives back
  * (`<app data>/pcloud.json`), never the password.
  */
-class PCloudApi(val host: String, private val auth: String) {
+class PCloudApi(val host: String, private val auth: String, private val oauth: Boolean = false) {
+    /** A session token (`auth=`) or, signed in through pCloud's page, an OAuth token (`access_token=`). */
+    private val authParam get() = if (oauth) "access_token" else "auth"
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     fun call(method: String, params: Map<String, String> = emptyMap()): JSONObject {
-        val q = (params + ("auth" to auth)).entries.joinToString("&") { "${it.key}=${enc(it.value)}" }
+        val q = (params + (authParam to auth)).entries.joinToString("&") { "${it.key}=${enc(it.value)}" }
         val c = URL("https://$host/$method?$q").openConnection() as HttpURLConnection
         c.connectTimeout = 20000; c.readTimeout = 120000
         val o = JSONObject(c.inputStream.bufferedReader().readText())
@@ -79,7 +81,7 @@ class PCloudApi(val host: String, private val auth: String) {
     /** Uploads [file] as [name] into a folder (replacing a file of that name), in one go. */
     fun upload(folderId: Long, name: String, file: File): JSONObject {
         val boundary = "----bitchord" + System.nanoTime()
-        val c = URL("https://$host/uploadfile?auth=${enc(auth)}&folderid=$folderId&nopartial=1&renameifexists=0").openConnection() as HttpURLConnection
+        val c = URL("https://$host/uploadfile?$authParam=${enc(auth)}&folderid=$folderId&nopartial=1&renameifexists=0").openConnection() as HttpURLConnection
         c.doOutput = true; c.requestMethod = "POST"; c.connectTimeout = 20000; c.readTimeout = 600000
         c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         val head = "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"${name.replace("\"", "'")}\"\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray(Charsets.UTF_8)
@@ -94,7 +96,28 @@ class PCloudApi(val host: String, private val auth: String) {
     companion object {
         private val file get() = File(Store.dir, "pcloud.json")
 
-        fun saved(): PCloudApi? = runCatching { JSONObject(file.readText()).let { PCloudApi(it.getString("host"), it.getString("auth")) } }.getOrNull()
+        fun saved(): PCloudApi? = runCatching { JSONObject(file.readText()).let { PCloudApi(it.getString("host"), it.getString("auth"), it.optBoolean("oauth")) } }.getOrNull()
+
+        /** pCloud's sign-in page (OAuth, token flow) for the app registered in pCloud's "My Apps" — the same one as the phone. */
+        const val REDIRECT = "https://localhost/bitchord-pcloud"
+        fun authorizeUrl(clientId: String) = "https://my.pcloud.com/oauth2/authorize?client_id=" + URLEncoder.encode(clientId.trim(), "UTF-8") +
+            "&response_type=token&redirect_uri=" + URLEncoder.encode(REDIRECT, "UTF-8")
+
+        /**
+         * The address the browser ends at after signing in ("https://localhost/bitchord-pcloud#access_token=…"),
+         * pasted back: its token kept.
+         */
+        fun fromRedirect(url: String): Result<PCloudApi> = runCatching {
+            val fragment = url.trim().substringAfter('#', "").ifBlank { url.trim().substringAfter('?', "") }
+            val p = fragment.split('&').associate { it.substringBefore('=') to java.net.URLDecoder.decode(it.substringAfter('=', ""), "UTF-8") }
+            val token = p["access_token"]?.takeIf { it.isNotBlank() } ?: error("esa dirección no lleva el permiso de pCloud (access_token)")
+            val host = p["hostname"]?.takeIf { it.isNotBlank() } ?: if (p["locationid"] == "2") "eapi.pcloud.com" else "api.pcloud.com"
+            val api = PCloudApi(host, token, oauth = true)
+            val email = runCatching { api.call("userinfo").optString("email") }.getOrElse { error("pCloud no acepta ese permiso: ${it.message}") }
+            file.writeText(JSONObject().put("host", host).put("auth", token).put("oauth", true).put("email", email).toString())
+            file.setReadable(false, false); file.setReadable(true, true)
+            api
+        }
 
         fun account(): String? = runCatching { JSONObject(file.readText()).optString("email").ifBlank { null } }.getOrNull()
 
