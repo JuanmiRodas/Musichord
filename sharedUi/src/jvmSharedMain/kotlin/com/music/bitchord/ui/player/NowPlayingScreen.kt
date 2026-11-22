@@ -1,5 +1,6 @@
 package com.music.bitchord.ui.player
 
+import coil3.compose.AsyncImage
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.constrainWidth
