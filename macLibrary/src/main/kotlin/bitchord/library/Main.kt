@@ -164,6 +164,7 @@ private fun gui() = application {
 private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     SUMMARY("Resumen", Icons.Filled.Insights),
     TODO("To-do", Icons.Filled.Checklist),
+    COVERS("Portadas", Icons.Filled.Image),
     NAMES("Nombres", Icons.Filled.DriveFileRenameOutline),
     FREE("Liberar espacio", Icons.Filled.CleaningServices),
     SETTINGS("Ajustes", Icons.Filled.Settings),
@@ -223,6 +224,7 @@ private fun App(state: LibraryState) {
             when (tab) {
                 Tab.SUMMARY -> Summary(state, scope)
                 Tab.TODO -> TodoList(state)
+                Tab.COVERS -> CoversPane(state, scope)
                 Tab.NAMES -> Names(state)
                 Tab.FREE -> FreeSpacePane(state, scope)
                 Tab.SETTINGS -> SettingsPane(state)
@@ -463,6 +465,87 @@ private fun TodoList(state: LibraryState) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Covers to review: for each album (or loose song), the cover it has now and the one found.
+ * Sure ones (≥ 90 %: same album, artist and tracks) can be approved all at once; the rest one by
+ * one; with nothing found, a Google Images search and a field for an image's address.
+ */
+@Composable
+private fun CoversPane(state: LibraryState, scope: kotlinx.coroutines.CoroutineScope) {
+    var list by remember { mutableStateOf(CoverReview.load()) }
+    var filter by remember { mutableStateOf(0) } // 0 sure, 1 to review, 2 nothing found, 3 done
+    fun reload() { list = CoverReview.load() }
+    val shown = list.filter { p ->
+        val c = p.candidates.firstOrNull()?.confidence ?: 0
+        when (filter) {
+            0 -> p.status == "propuesta" && c >= 90
+            1 -> p.status == "propuesta" && c < 90
+            2 -> p.status == "sin propuesta"
+            else -> p.status in setOf("aprobada", "descartada", "igual")
+        }
+    }.sortedByDescending { it.songs }
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Seguras (≥90 %)", "Revisar (<90 %)", "Sin propuesta", "Hechas").forEachIndexed { k, label ->
+                val n = list.count { p -> val c = p.candidates.firstOrNull()?.confidence ?: 0
+                    when (k) { 0 -> p.status == "propuesta" && c >= 90; 1 -> p.status == "propuesta" && c < 90; 2 -> p.status == "sin propuesta"; else -> p.status in setOf("aprobada", "descartada", "igual") } }
+                if (filter == k) Button(onClick = { filter = k }) { Text("$label · $n") } else OutlinedButton(onClick = { filter = k }) { Text("$label · $n") }
+            }
+            Spacer(Modifier.weight(1f))
+            OutlinedButton(enabled = state.busy == null, onClick = {
+                scope.launch {
+                    state.busy = "Buscando portadas…"
+                    val ticker = launch { while (true) { state.busy = Live.summary() + " · " + Live.current; state.progress = Live.done.get().toFloat() / Live.total.coerceAtLeast(1); kotlinx.coroutines.delay(1000) } }
+                    withContext(Dispatchers.IO) { Inbox.runCli(listOf("covers-review")) }
+                    ticker.cancel(); state.busy = null; reload()
+                }
+            }) { Text("Buscar portadas") }
+            if (filter == 0 && shown.isNotEmpty()) Button(onClick = {
+                scope.launch { withContext(Dispatchers.IO) { shown.forEach { p -> p.candidates.firstOrNull()?.let { CoverReview.approve(p, it) } } }; reload() }
+            }) { Text("Aprobar las ${shown.size}") }
+        }
+        Text("Las aprobadas se escriben en las canciones en la próxima «Construir y ordenar».", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(shown, key = { it.key }) { p ->
+                var pick by remember(p.key) { mutableStateOf(0) }
+                var pasted by remember(p.key) { mutableStateOf("") }
+                val c = p.candidates.getOrNull(pick)
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.05f)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) { BigCover(p.current?.let(::File)); Text("Antes", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp) }
+                    Text("→", color = Color.White, fontSize = 22.sp, modifier = Modifier.padding(horizontal = 10.dp))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) { BigCover(c?.local?.let(::File)); Text(c?.let { "${it.source} · ${it.confidence} %" } ?: "—", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp) }
+                    Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                        Text(p.album.ifBlank { "(canción suelta)" }, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${p.artist} · ${p.songs} canciones · ${p.folder}", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        c?.let { Text(it.title, color = Color.White.copy(alpha = 0.45f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (c != null && p.status == "propuesta") Button(onClick = { scope.launch { withContext(Dispatchers.IO) { CoverReview.approve(p, c) }; reload() } }) { Text("Aprobar") }
+                            if (p.candidates.size > 1) OutlinedButton(onClick = { pick = (pick + 1) % p.candidates.size }) { Text("Otra (${pick + 1}/${p.candidates.size})") }
+                            if (p.status == "propuesta" || p.status == "sin propuesta") OutlinedButton(onClick = { CoverReview.setStatus(p.key, "descartada"); reload() }) { Text("Dejar la actual") }
+                            OutlinedButton(onClick = { runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(CoverReview.googleUrl(p))) } }) { Text("Buscar en Google") }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(pasted, { pasted = it }, label = { Text("Dirección de una imagen") }, singleLine = true, modifier = Modifier.weight(1f))
+                            OutlinedButton(enabled = pasted.startsWith("http"), onClick = {
+                                scope.launch { val ok = withContext(Dispatchers.IO) { CoverReview.addManual(p.key, pasted.trim()) }; if (ok) { pasted = ""; reload() } else state.message = "No se pudo descargar esa imagen" }
+                            }) { Text("Proponer") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BigCover(f: File?) {
+    val bmp = remember(f) { f?.takeIf { it.isFile }?.let { runCatching { org.jetbrains.skia.Image.makeFromEncoded(it.readBytes()).toComposeImageBitmap() }.getOrNull() } }
+    Box(Modifier.size(140.dp).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+        if (bmp != null) androidx.compose.foundation.Image(bmp, null, modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        else Text("sin portada", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp)
     }
 }
 

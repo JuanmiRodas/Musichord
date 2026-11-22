@@ -18,7 +18,14 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class Manifest(root: String) {
     data class Entry(val id: String, val source: String, val copies: List<String> = emptyList(), val seconds: Double? = null,
-                     val title: String? = null, val artist: String? = null, val album: String? = null)
+                     val title: String? = null, val artist: String? = null, val album: String? = null,
+                     /** The version of the tags the app wrote into the file (0: never written by it — moved only). */
+                     val written: Int = 0, val cover: String? = null)
+
+    companion object {
+        /** Raised when the tags the app writes change: every file written with an older one is written again. */
+        const val TAGS = 2
+    }
 
     private val local = File(Live.dir, "built-" + Integer.toHexString(Words.nfc(root).hashCode()) + ".json")
     private val inLibrary = File(root, ".bitchord-library/built.json")
@@ -37,8 +44,11 @@ class Manifest(root: String) {
                     v.optString("id").ifBlank { java.util.UUID.randomUUID().toString() }, Words.nfc(v.optString("source")),
                     v.optJSONArray("copies")?.let { a -> (0 until a.length()).map { Words.nfc(a.getString(it)) } }.orEmpty(),
                     v.optDouble("seconds").takeIf { !it.isNaN() }, v.optString("title").ifBlank { null }, v.optString("artist").ifBlank { null }, v.optString("album").ifBlank { null },
+                    v.optInt("written", 0), v.optString("cover").ifBlank { null },
                 ) else Entry(java.util.UUID.randomUUID().toString(), Words.nfc(v.toString()))
             }
+            // Sources the user moved: their files' paths follow.
+            entries.replaceAll { _, en -> en.copy(source = Words.nfc(Sources.moved(en.source)), copies = en.copies.map { Words.nfc(Sources.moved(it)) }) }
             o.optJSONArray("moves")?.let { a -> (0 until a.length()).forEach { moves += a.getJSONObject(it) } }
             o.optJSONArray("removed")?.let { a -> (0 until a.length()).forEach { removed += a.getJSONObject(it) } }
         }
@@ -49,17 +59,22 @@ class Manifest(root: String) {
     @Synchronized fun has(rel: String) = entries.containsKey(rel)
 
     /** [rel] now holds [item] (made from [source]); its id is kept when it had one ([keepId]). */
-    @Synchronized fun put(rel: String, item: Builder.Item, source: String = Words.nfc(item.track.path), keepId: String? = null): String {
-        val id = keepId ?: entries[rel]?.id ?: java.util.UUID.randomUUID().toString()
-        entries[rel] = Entry(id, source, item.copies.map { Words.nfc(it) }.filter { it != source }, item.track.seconds, item.title, item.artist, item.album)
+    @Synchronized fun put(rel: String, item: Builder.Item, source: String = Words.nfc(item.track.path), keepId: String? = null, written: Int? = null, cover: String? = null): String {
+        val old = entries[rel]
+        val id = keepId ?: old?.id ?: java.util.UUID.randomUUID().toString()
+        entries[rel] = Entry(id, source, item.copies.map { Words.nfc(it) }.filter { it != source }, item.track.seconds, item.title, item.artist, item.album,
+            written ?: old?.written ?: 0, cover ?: old?.cover)
         return id
     }
+
+    @Synchronized fun written(rel: String) = entries[rel]?.written ?: 0
+    @Synchronized fun cover(rel: String) = entries[rel]?.cover
 
     @Synchronized fun adopt(rel: String, source: String) { if (!entries.containsKey(rel)) entries[rel] = Entry(java.util.UUID.randomUUID().toString(), source) }
 
     @Synchronized fun move(from: String, to: String, item: Builder.Item) {
         val old = entries.remove(from)
-        val id = put(to, item, old?.source ?: Words.nfc(item.track.path), old?.id)
+        val id = put(to, item, old?.source ?: Words.nfc(item.track.path), old?.id, old?.written ?: 0, old?.cover)
         moves += JSONObject().put("id", id).put("from", from).put("to", to).put("at", System.currentTimeMillis())
         while (moves.size > 5000) moves.removeAt(0)
     }
@@ -74,7 +89,8 @@ class Manifest(root: String) {
         .put("files", JSONObject().apply {
             entries.forEach { (k, e) ->
                 put(k, JSONObject().put("id", e.id).put("source", e.source).put("copies", JSONArray(e.copies)).put("seconds", e.seconds ?: JSONObject.NULL)
-                    .put("title", e.title ?: JSONObject.NULL).put("artist", e.artist ?: JSONObject.NULL).put("album", e.album ?: JSONObject.NULL))
+                    .put("title", e.title ?: JSONObject.NULL).put("artist", e.artist ?: JSONObject.NULL).put("album", e.album ?: JSONObject.NULL)
+                    .put("written", e.written).put("cover", e.cover ?: JSONObject.NULL))
             }
         })
         .put("moves", JSONArray(moves)).put("removed", JSONArray(removed)).toString()
@@ -163,7 +179,13 @@ object Engine {
         val ops = Ops(root)
         Live.begin("Construir y ordenar", root)
         Live.phase = "calculando el plan"
-        val plan = Builder.plan(sources, tracks.filter { !it.path.startsWith("$root/") }, root)
+        var plan = Builder.plan(sources, tracks.filter { !it.path.startsWith("$root/") }, root)
+        // People known only in Japanese: their Latin name looked up (MusicBrainz), then the plan made again with it.
+        val japaneseOnly = plan.copy.map { it.albumArtist.ifBlank { it.artist } }.filter { n -> n.isNotBlank() && n.none { it in 'A'..'Z' || it in 'a'..'z' } }
+        if (japaneseOnly.isNotEmpty()) {
+            Live.phase = "buscando nombres en romaji (${japaneseOnly.distinct().size})"; Live.write()
+            if (runCatching { Romaji.fill(japaneseOnly) }.getOrDefault(0) > 0) plan = Builder.plan(sources, tracks.filter { !it.path.startsWith("$root/") }, root)
+        }
         val manifest = Manifest(root)
         val covers = Covers(root)
         fun rel(p: String) = Words.nfc(p.removePrefix(root).trimStart('/'))
@@ -241,12 +263,16 @@ object Engine {
             val curSource = manifest.source(cur.rel)
             val better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (known[curSource]?.let { Builder.rank(it) } ?: 9)
             if (cur.actual == target) {
-                manifest.put(target, i, curSource ?: Words.nfc(i.track.path), manifest.id(target))
+                manifest.put(target, i, curSource ?: Words.nfc(i.track.path), manifest.id(target), manifest.written(target))
                 if (better) replace += i else placed += i to cur; Live.done.incrementAndGet(); continue
             }
             if (lib.exists(target) && cur.rel.lowercase() != target.lowercase()) {
                 if (++stuck <= pending.size + 1) { pending.addLast(i); continue }
-                Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue
+                // Still taken by a file no song of the plan holds (a pCloud "(1)" copy, an old duplicate with the
+                // same name): that file goes, and this one takes its place.
+                val occupant = present.values.firstOrNull { it.rel.equals(target, ignoreCase = true) || Words.nfc(it.rel) == Words.nfc(target) }
+                if (occupant == null || held.values.any { it.rel == occupant.rel } || lib.delete(occupant) != null) { Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue }
+                manifest.remove(occupant.rel, cur.rel); Live.deleted.incrementAndGet(); ops.log("app", "removed ${occupant.rel} (its place is for ${cur.rel})")
             }
             stuck = 0
             val err = lib.move(cur, target)
@@ -272,7 +298,12 @@ object Engine {
                 (t["date"] ?: t["year"]).orEmpty().take(4) == i.year.orEmpty() && t["track"]?.substringBefore('/')?.trim()?.toIntOrNull() == i.trackNo)
         }
         val missing = plan.copy.filter { it.target !in held && !lib.exists(rel(it.target)) }
-        val rewrite = placed.map { it.first }.filter(::differs) + replace
+        // Every file whose tags (or cover) the app hasn't written with the current rules is written again:
+        // files only moved keep the tags they came with.
+        val rewrite = placed.map { it.first }.filter { i ->
+            val r = rel(i.target)
+            manifest.written(r) < Manifest.TAGS || differs(i) || CoverChoice.approvedFor(root, i)?.name.let { c -> c != null && manifest.cover(r) != c }
+        } + replace
         val work = rewrite.map { it to "rewrite" } + missing.map { it to "copy" }
         Live.total = Live.done.get() + work.size
         Live.phase = "escribiendo: ${missing.size} que faltan, ${rewrite.size} con etiquetas o copia mejor"
@@ -283,10 +314,11 @@ object Engine {
             Live.current = target
             val tmp = File(temp, System.nanoTime().toString() + ".mp3")
             val id = manifest.id(target) ?: java.util.UUID.randomUUID().toString()
-            Builder.copy(i.copy(target = tmp.path), covers, id = id).onSuccess {
+            val chosenCover = CoverChoice.approvedFor(root, i)
+            Builder.copy(i.copy(target = tmp.path), covers, id = id, coverFile = chosenCover).onSuccess {
                 val err = lib.put(tmp, target)
                 if (err == null) {
-                    manifest.put(target, i, keepId = id)
+                    manifest.put(target, i, keepId = id, written = Manifest.TAGS, cover = chosenCover?.name)
                     Scanner.put(libraryTrack(i, File(root, target), tmp.length().takeIf { it > 0 } ?: i.track.size))
                     if (why == "copy") { Live.copied.incrementAndGet(); synchronized(covers) { covers.propose(i.key, plan.alternatives[i.key].orEmpty()) } } else Live.moved.incrementAndGet()
                     ops.log("app", (if (why == "copy") "copied ${i.track.path} → " else "rewritten ") + "$target [${i.reason}]")

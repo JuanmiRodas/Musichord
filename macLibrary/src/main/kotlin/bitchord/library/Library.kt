@@ -39,7 +39,7 @@ object Store {
             extra = o.optJSONArray("extra")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: Settings().extra,
             phoneTodo = o.optString("phoneTodo").ifBlank { Settings().phoneTodo },
         )
-    }.getOrDefault(Settings()).let { s -> s.copy(root = Paths.resolve(s.root), extra = s.extra.map(Paths::resolve), phoneTodo = Paths.resolve(s.phoneTodo)) }
+    }.getOrDefault(Settings()).let { s -> s.copy(root = Paths.resolve(s.root), extra = s.extra.map { Paths.resolve(Sources.moved(it)) }, phoneTodo = Paths.resolve(s.phoneTodo)) }
 
     fun save(s: Settings) {
         settingsFile.writeText(JSONObject().put("v", 2).put("root", s.root).put("extra", JSONArray(s.extra)).put("phoneTodo", s.phoneTodo).toString(2))

@@ -29,7 +29,7 @@ object AlbumArt {
     private val lastCall = HashMap<String, Long>()
 
     /** One request per host per [gapMs] (MusicBrainz asks for 1 per second). */
-    private fun fetch(url: String, gapMs: Long = 1100, accept: String = "*/*"): ByteArray? {
+    internal fun fetch(url: String, gapMs: Long = 1100, accept: String = "*/*"): ByteArray? {
         val host = URL(url).host
         synchronized(lastCall) {
             val wait = (lastCall[host] ?: 0) + gapMs - System.currentTimeMillis()
@@ -52,8 +52,8 @@ object AlbumArt {
             null
         }.getOrNull()
     }
-    private fun text(url: String, gapMs: Long = 1100) = fetch(url, gapMs)?.toString(Charsets.UTF_8)
-    private fun json(url: String, gapMs: Long = 1100) = text(url, gapMs)?.let { runCatching { JSONObject(it) }.getOrNull() }
+    internal fun text(url: String, gapMs: Long = 1100) = fetch(url, gapMs)?.toString(Charsets.UTF_8)
+    internal fun json(url: String, gapMs: Long = 1100) = text(url, gapMs)?.let { runCatching { JSONObject(it) }.getOrNull() }
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     private fun mmss(s: String): Double? = Regex("^(?:(\\d+):)?(\\d{1,2}):(\\d{2})$").find(s.trim())?.let { m ->
@@ -96,7 +96,7 @@ object AlbumArt {
 
     /** pocketmonsters.net: its CD list read once (34 pages), then each candidate's page. */
     private var pokemonList: List<Pair<String, String>>? = null // id → the row's text
-    private fun pokemon(a: Album): List<Release> {
+    internal fun pokemon(a: Album): List<Release> {
         val list = pokemonList ?: run {
             val out = ArrayList<Pair<String, String>>()
             for (page in 1..60) {
@@ -122,7 +122,7 @@ object AlbumArt {
 
     /** canta-per-me.net: the discography's pages, found from its index by title. */
     private var kajiuraList: List<Pair<String, String>>? = null
-    private fun kajiura(a: Album): List<Release> {
+    internal fun kajiura(a: Album): List<Release> {
         val list = kajiuraList ?: run {
             val out = ArrayList<Pair<String, String>>()
             for (p in listOf("https://canta-per-me.net/discography/", "https://canta-per-me.net/discography/chronological/", "https://canta-per-me.net/discography/alphabetical/")) {
@@ -147,7 +147,7 @@ object AlbumArt {
     }
 
     /** VGMdb, through vgmdb.info (its public JSON mirror). */
-    private fun vgmdb(a: Album): List<Release> {
+    internal fun vgmdb(a: Album): List<Release> {
         val q = clean(a.title)
         if (q.length < 3) return emptyList()
         val found = json("https://vgmdb.info/search/albums/${enc(q)}?format=json", 1500)?.optJSONObject("results")?.optJSONArray("albums") ?: return emptyList()
@@ -163,7 +163,7 @@ object AlbumArt {
     }
 
     /** MusicBrainz releases with that title (and artist), their track lengths, and the Cover Art Archive's pictures. */
-    private fun musicbrainz(a: Album): List<Release> {
+    internal fun musicbrainz(a: Album): List<Release> {
         val q = "release:\"${clean(a.title).replace("\"", "")}\"" + (a.artist.takeIf { it.isNotBlank() }?.let { " AND artist:\"${it.replace(Regex("\\s*\\(.*\\)"), "").replace("\"", "")}\"" } ?: "")
         val rs = json("https://musicbrainz.org/ws/2/release/?query=${enc(q)}&fmt=json&limit=8")?.optJSONArray("releases") ?: return emptyList()
         return (0 until rs.length()).map { rs.getJSONObject(it) }
@@ -250,5 +250,40 @@ object AlbumArt {
         Scanner.saveIndex()
         Live.end("Escaneos: ${out.count { it.note.startsWith("seguro") }} álbumes seguros, ${out.sumOf { it.saved }} imágenes, ${out.count { it.note.startsWith("dudoso") }} dudosos, ${out.count { it.release == null }} sin resultados")
         return out
+    }
+}
+
+/**
+ * Latin names for people known only in Japanese (千葉紗子 → Saeko Chiba), from MusicBrainz:
+ * its Latin name, else its sort name turned round ("Chiba, Saeko"), else a Latin alias. Kept in
+ * `<app data>/romaji.json`; looked up once per name (one request a second).
+ */
+object Romaji {
+    private val file get() = File(Store.dir, "romaji.json")
+    @Volatile private var cache: JSONObject? = null
+    private fun db() = cache ?: runCatching { JSONObject(file.readText()) }.getOrDefault(JSONObject()).also { cache = it }
+
+    fun of(name: String): String? = db().optString(Words.nfc(name)).ifBlank { null }
+
+    private val CJK = Regex("[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}]")
+    private fun latin(s: String) = s.any { it.isLetter() } && !CJK.containsMatchIn(s)
+
+    /** Looks up the names not asked yet (at most [max]); returns how many were found. */
+    fun fill(names: Collection<String>, max: Int = 300): Int {
+        val o = db(); var found = 0
+        for (n in names.map { Words.nfc(it.trim()) }.distinct().filter { it.isNotBlank() && !o.has(it) }.take(max)) {
+            if (Live.stop) break
+            val r = AlbumArt.json("https://musicbrainz.org/ws/2/artist/?query=${java.net.URLEncoder.encode("artist:\"$n\" OR alias:\"$n\"", "UTF-8")}&fmt=json&limit=3")
+            val a = r?.optJSONArray("artists")?.let { x -> (0 until x.length()).map { x.getJSONObject(it) } }.orEmpty().firstOrNull { it.optInt("score") >= 90 }
+            val latinName = a?.let { art ->
+                art.optString("name").takeIf(::latin)
+                    ?: art.optString("sort-name").takeIf(::latin)?.let { s -> if (s.contains(", ")) s.substringAfter(", ") + " " + s.substringBefore(", ") else s }
+                    ?: art.optJSONArray("aliases")?.let { al -> (0 until al.length()).map { al.getJSONObject(it) } }?.firstOrNull { latin(it.optString("name")) }?.optString("name")
+            }
+            o.put(n, latinName ?: "")
+            if (latinName != null) found++
+        }
+        runCatching { file.writeText(o.toString(1)) }
+        return found
     }
 }

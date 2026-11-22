@@ -68,7 +68,7 @@ data class Source(
         fun defaults(): List<Source> {
             val home = System.getProperty("user.home")
             return listOf(
-                Source("Escritorio · Música", "$home/Desktop/Música"),
+                Source("Escritorio · Música", "$home/Documents/Backup desktop/Música"),
                 Source("Música(1)", "$home/Music/Música(1)"),
                 Source("Discografías", "$home/Downloads/Discografías"),
                 Source(
@@ -98,10 +98,27 @@ data class Source(
 object Sources {
     private val file get() = File(Store.dir, "sources-v2.json")
 
-    fun load(): List<Source> = runCatching {
-        val a = JSONArray(file.readText())
-        (0 until a.length()).map { Source.from(a.getJSONObject(it)) }
-    }.getOrElse { Source.defaults().also(::save) }.map { it.copy(path = Paths.resolve(it.path)) }
+    /** Sources the user moved (old → new): followed by the sources, the manifest and the quarantine. */
+    val MOVES = listOf(
+        "/Users/juanmi/Desktop/Música" to "/Users/juanmi/Documents/Backup desktop/Música",
+    )
+
+    /** [path] under a moved source, where it is now. */
+    fun moved(path: String): String {
+        val p = Words.nfc(path)
+        for ((old, new) in MOVES) if (p == Words.nfc(old) || p.startsWith(Words.nfc(old) + "/")) return Words.nfc(new) + p.removePrefix(Words.nfc(old))
+        return path
+    }
+
+    fun load(): List<Source> {
+        val list = runCatching {
+            val a = JSONArray(file.readText())
+            (0 until a.length()).map { Source.from(a.getJSONObject(it)) }
+        }.getOrElse { Source.defaults().also(::save) }
+        val fixed = list.map { s -> if (!File(Paths.resolve(s.path)).exists() && moved(s.path) != s.path) s.copy(path = moved(s.path)) else s }
+        if (fixed != list) runCatching { save(fixed) }
+        return fixed.map { it.copy(path = Paths.resolve(it.path)) }
+    }
 
     fun save(list: List<Source>) = file.writeText(JSONArray(list.map { it.toJson() }).toString(2))
 }
