@@ -206,10 +206,16 @@ object LyricsKeeper {
         if (!_embed.value || song.isVideo) return
         val lrc = SidecarLyrics.toLrc(lines, null, null, 0).trim()
         if (lrc.isBlank()) return
+        // BitChord Audio: files are written at night only (the night pass writes what is
+        // waiting) — writing into the playing file restarted its sound mid-song.
+        if (!com.music.bitchord.data.BackgroundHours.now()) return
         embedLock.withLock {
             val p = prefs ?: return
             val change = TagWriter.Change(lyrics = lrc)
-            val download = song.localUri ?: Downloads.verifiedSavedUri(song.videoId)
+            // A file on the phone only: a pCloud address in localUri is no download
+            // ("No content provider" — it was tried as one).
+            val download = (song.localUri ?: Downloads.verifiedSavedUri(song.videoId))
+                ?.takeIf { it.startsWith("content:") || it.startsWith("file:") }
             if (download != null && !p.contains(EMBEDDED + "d:" + song.videoId) &&
                 (!wifiOnlyAll || AppSettings.meteredConnection.value == false)
             ) {
@@ -236,7 +242,9 @@ object LyricsKeeper {
         for (s in songs) {
             if (AppSettings.meteredConnection.value != false || !_embed.value) break
             if (s.isVideo || !EditedLyrics.has(s.videoId)) continue
-            val hasDownload = (s.localUri ?: Downloads.verifiedSavedUri(s.videoId)) != null
+            if (!com.music.bitchord.data.BackgroundHours.now()) break
+            val hasDownload = (s.localUri ?: Downloads.verifiedSavedUri(s.videoId))
+                ?.let { it.startsWith("content:") || it.startsWith("file:") } == true
             val files = CoverSources.filesOf(s).take(1)
             val pending = (hasDownload && !p.contains(EMBEDDED + "d:" + s.videoId)) ||
                 files.any { !p.contains(EMBEDDED + "p:" + it.videoId) }

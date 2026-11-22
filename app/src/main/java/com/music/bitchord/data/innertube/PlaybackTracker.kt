@@ -244,14 +244,24 @@ object PlaybackTracker {
      * @return whether there is anything left to try. False means the attempt is
      *   worth repeating — the answer was a failure, not a verdict.
      */
+    private val missingTimestamp = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     private suspend fun open(videoId: String): Boolean = lock.withLock {
         // The one thing the tracking request cannot be answered without. Fetched
         // through [StreamResolver] so it is shared with — and usually already
         // warmed by — the resolve that is starting this very track.
         val signatureTimestamp = StreamResolver.signatureTimestamp(videoId)
+        // BitChord Audio: asked twice, then the history entry goes without it (the request
+        // takes none too) — it used to be asked again every 2 s for minutes.
         if (signatureTimestamp == null) {
-            TrackLog.w(TAG, "no signature timestamp yet; retrying history for $videoId")
-            return@withLock false
+            val tries = (missingTimestamp[videoId] ?: 0) + 1
+            if (missingTimestamp.size > 200) missingTimestamp.clear()
+            missingTimestamp[videoId] = tries
+            if (tries < 2) {
+                TrackLog.w(TAG, "no signature timestamp yet; asking once more for $videoId")
+                return@withLock false
+            }
+            TrackLog.d(TAG, "no signature timestamp for $videoId; history sent without it")
         }
         val tracking = Innertube.playbackTracking(videoId, signatureTimestamp)
         if (tracking == null) {
