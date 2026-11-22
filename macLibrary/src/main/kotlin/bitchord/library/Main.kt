@@ -108,10 +108,10 @@ class LibraryState {
         scope.launch {
             busy = "Actualizando a la versión ${r.version}…"
             val ok = withContext(Dispatchers.IO) {
-                if (then != null) runCatching { File(settings.root, ".bitchord-library/resume.json").writeText(org.json.JSONObject().put("then", then).toString()) }
+                if (then != null) runCatching { File(Live.dir, "resume.json").writeText(org.json.JSONObject().put("then", then).toString()) }
                 Updater.prepare(r, File(Live.dir, "update.log")) { busy = it }
             }
-            ok.onSuccess { Scanner.saveIndex(); quit() }.onFailure { busy = null; message = "No se pudo actualizar: ${it.message}" }
+            ok.onSuccess { Scanner.saveIndex(); quit() }.onFailure { Updater.note("failed: $it"); busy = null; message = "No se pudo actualizar: ${it.message}" }
         }
     }
 
@@ -178,7 +178,7 @@ private fun App(state: LibraryState) {
     LaunchedEffect(Unit) {
         Live.root = state.settings.root
         // After an update: what was asked to run next ("build").
-        val resume = File(state.settings.root, ".bitchord-library/resume.json")
+        val resume = File(Live.dir, "resume.json")
         val then = runCatching { org.json.JSONObject(resume.readText()).optString("then") }.getOrNull()
         resume.delete()
         state.scan { if (then == "build") state.build() }

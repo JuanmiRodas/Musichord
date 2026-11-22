@@ -397,10 +397,16 @@ object Updater {
         return (listed + probed).maxByOrNull { num(it.version) }
     }
 
-    fun newer(): Release? = latest()?.takeIf { num(it.version) > num(current) }
+    fun newer(): Release? = latest().also { note("check: running $current, newest ${it?.version ?: "not found"}") }?.takeIf { num(it.version) > num(current) }
 
     /** Downloads [r] and leaves a helper waiting for this app to close; the caller then quits. */
+    /** Each step of an update, in `~/Music/.bitchord-live/update.log` (so a failed one can be read). */
+    fun note(text: String) = runCatching {
+        File(Live.dir, "update.log").appendText(java.time.LocalDateTime.now().toString().take(19) + " " + text + "\n")
+    }
+
     fun prepare(r: Release, logTo: File? = null, progress: (String) -> Unit = {}): Result<Unit> = runCatching {
+        note("from $current to ${r.version}: downloading ${r.dmg}")
         val dir = File(System.getProperty("user.home"), "Library/Caches/BitChord Library").apply { mkdirs() }
         val dmg = File(dir, "BitChord-Library-${r.version}.dmg")
         progress("Descargando la versión ${r.version}…")
@@ -409,6 +415,7 @@ object Updater {
         var hops = 0
         while (c.responseCode in 300..399 && hops++ < 5) { val to = c.getHeaderField("Location"); c = URL(to).openConnection() as HttpURLConnection; c.setRequestProperty("User-Agent", "BitChord-Library") }
         c.inputStream.use { input -> dmg.outputStream().use { input.copyTo(it) } }
+        note("downloaded ${dmg.length()} bytes to ${dmg.path}")
         check(dmg.length() > 5_000_000) { "descarga incompleta" }
         val launcher = System.getProperty("jpackage.app-path")
         val app = launcher?.let { File(it).parentFile?.parentFile?.parentFile }?.takeIf { it.name.endsWith(".app") } ?: File("/Applications/BitChord Library.app")
@@ -434,9 +441,10 @@ object Updater {
         script.setExecutable(true)
         val log = logTo ?: File(dir, "update.log")
         // Detached twice over, so it outlives the app it is waiting for.
-        ProcessBuilder("/bin/bash", "-c", "( nohup /bin/bash '${script.path}' > '${log.path}' 2>&1 & ) ; exit 0")
+        ProcessBuilder("/bin/bash", "-c", "( nohup /bin/bash '${script.path}' >> '${log.path}' 2>&1 & ) ; exit 0")
             .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null"))).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD)
             .start().waitFor(10, TimeUnit.SECONDS)
+        note("helper started for ${app.path}; the app quits now")
         progress("Versión ${r.version} descargada: la app se cierra y se vuelve a abrir sola")
     }
 }
