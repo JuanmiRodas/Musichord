@@ -560,12 +560,15 @@ object Builder {
      * file already in the library (only its tags and place change). Tagged as planned, with
      * its album's cover. Written beside the target first, then renamed: never half a file.
      */
-    fun copy(i: Item, covers: Covers?, from: File? = null): Result<String> = runCatching {
+    fun copy(i: Item, covers: Covers?, from: File? = null, id: String? = null): Result<String> = runCatching {
         val out = File(i.target)
         require(!out.exists()) { "ya existe" }
         out.parentFile.mkdirs()
         val tmp = File(out.parentFile, ".part-" + out.name)
-        val input = from?.path ?: i.track.path
+        // The path as the disk spells it now (accents in one Unicode form or the other).
+        val input = (from?.path ?: i.track.path).let { p ->
+            listOf(p, java.text.Normalizer.normalize(p, java.text.Normalizer.Form.NFC), java.text.Normalizer.normalize(p, java.text.Normalizer.Form.NFD)).firstOrNull { File(it).exists() } ?: p
+        }
         val cover = i.cover?.let { covers?.forFolder(it) }
         val meta = buildList {
             fun m(k: String, v: String?) { add("-metadata"); add("$k=${v.orEmpty()}") }
@@ -577,6 +580,8 @@ object Builder {
             m("track", i.trackNo?.toString())
             m("disc", i.disc?.toString())
             m("grouping", i.grouping)
+            // The file's id for the phone (LIBRARY_LINK.md): TXXX:BITCHORD_ID.
+            if (id != null) m("BITCHORD_ID", id)
         }
         val inputs = listOf("-i", input) + (cover?.let { listOf("-i", it.path) } ?: emptyList())
         val maps = if (cover != null) listOf("-map", "0:a", "-map", "1:v") else listOf("-map", "0:a", "-map", "0:v?")

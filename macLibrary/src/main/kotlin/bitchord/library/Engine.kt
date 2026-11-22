@@ -10,24 +10,81 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Which library file came from which source file (`<library>/.bitchord-library/built.json`):
- * how the library is put in order again when the plan changes — files move, never copied twice.
+ * Which library file is which song (`<library>/.bitchord-library/built.json`, version 2 — the
+ * contract with the phone in LIBRARY_LINK.md): for each file, a stable `id` (also in the MP3, tag
+ * TXXX:BITCHORD_ID), its `source` and every other source `copies` merged into it, its length and
+ * names; plus the last 5000 `moves` and `removed` files. Kept on the Mac (`~/Music/.bitchord-live`)
+ * and put in the library after each step. Reads version 1 (file → source) too.
  */
 class Manifest(root: String) {
-    private val file = File(root, ".bitchord-library/built.json")
-    val files: MutableMap<String, String> = java.util.Collections.synchronizedMap(LinkedHashMap())
+    data class Entry(val id: String, val source: String, val copies: List<String> = emptyList(), val seconds: Double? = null,
+                     val title: String? = null, val artist: String? = null, val album: String? = null)
+
+    private val local = File(Live.dir, "built-" + Integer.toHexString(Words.nfc(root).hashCode()) + ".json")
+    private val inLibrary = File(root, ".bitchord-library/built.json")
+    private val entries = LinkedHashMap<String, Entry>()
+    private val moves = ArrayList<JSONObject>()
+    private val removed = ArrayList<JSONObject>()
 
     init {
+        val text = listOf(local, inLibrary).filter { it.isFile }.maxByOrNull { it.lastModified() }?.let { runCatching { it.readText() }.getOrNull() }
         runCatching {
-            val o = JSONObject(file.readText()).getJSONObject("files")
-            o.keys().forEach { files[Words.nfc(it)] = Words.nfc(o.getString(it)) }
+            val o = JSONObject(text!!)
+            val f = o.getJSONObject("files")
+            f.keys().forEach { k ->
+                val v = f.get(k)
+                entries[Words.nfc(k)] = if (v is JSONObject) Entry(
+                    v.optString("id").ifBlank { java.util.UUID.randomUUID().toString() }, Words.nfc(v.optString("source")),
+                    v.optJSONArray("copies")?.let { a -> (0 until a.length()).map { Words.nfc(a.getString(it)) } }.orEmpty(),
+                    v.optDouble("seconds").takeIf { !it.isNaN() }, v.optString("title").ifBlank { null }, v.optString("artist").ifBlank { null }, v.optString("album").ifBlank { null },
+                ) else Entry(java.util.UUID.randomUUID().toString(), Words.nfc(v.toString()))
+            }
+            o.optJSONArray("moves")?.let { a -> (0 until a.length()).forEach { moves += a.getJSONObject(it) } }
+            o.optJSONArray("removed")?.let { a -> (0 until a.length()).forEach { removed += a.getJSONObject(it) } }
         }
     }
 
-    fun save() = runCatching {
-        val tmp = File(file.parentFile, "built.json.tmp")
-        synchronized(files) { tmp.writeText(JSONObject().put("version", 1).put("files", JSONObject(files as Map<*, *>)).toString()) }
-        tmp.renameTo(file) || run { file.writeText(tmp.readText()); tmp.delete() }
+    @Synchronized fun source(rel: String): String? = entries[rel]?.source
+    @Synchronized fun id(rel: String): String? = entries[rel]?.id
+    @Synchronized fun has(rel: String) = entries.containsKey(rel)
+
+    /** [rel] now holds [item] (made from [source]); its id is kept when it had one ([keepId]). */
+    @Synchronized fun put(rel: String, item: Builder.Item, source: String = Words.nfc(item.track.path), keepId: String? = null): String {
+        val id = keepId ?: entries[rel]?.id ?: java.util.UUID.randomUUID().toString()
+        entries[rel] = Entry(id, source, item.copies.map { Words.nfc(it) }.filter { it != source }, item.track.seconds, item.title, item.artist, item.album)
+        return id
+    }
+
+    @Synchronized fun adopt(rel: String, source: String) { if (!entries.containsKey(rel)) entries[rel] = Entry(java.util.UUID.randomUUID().toString(), source) }
+
+    @Synchronized fun move(from: String, to: String, item: Builder.Item) {
+        val old = entries.remove(from)
+        val id = put(to, item, old?.source ?: Words.nfc(item.track.path), old?.id)
+        moves += JSONObject().put("id", id).put("from", from).put("to", to).put("at", System.currentTimeMillis())
+        while (moves.size > 5000) moves.removeAt(0)
+    }
+
+    @Synchronized fun remove(rel: String, keptAs: String? = null) {
+        val old = entries.remove(rel) ?: return
+        removed += JSONObject().put("id", old.id).put("path", rel).put("keptAs", keptAs ?: JSONObject.NULL).put("at", System.currentTimeMillis())
+        while (removed.size > 5000) removed.removeAt(0)
+    }
+
+    @Synchronized fun json(): String = JSONObject().put("version", 2).put("updated", System.currentTimeMillis())
+        .put("files", JSONObject().apply {
+            entries.forEach { (k, e) ->
+                put(k, JSONObject().put("id", e.id).put("source", e.source).put("copies", JSONArray(e.copies)).put("seconds", e.seconds ?: JSONObject.NULL)
+                    .put("title", e.title ?: JSONObject.NULL).put("artist", e.artist ?: JSONObject.NULL).put("album", e.album ?: JSONObject.NULL))
+            }
+        })
+        .put("moves", JSONArray(moves)).put("removed", JSONArray(removed)).toString()
+
+    /** Written on the Mac at once (a .tmp then renamed); [publish] puts it in the library too. */
+    fun save(publish: ((File) -> Unit)? = null) = runCatching {
+        val tmp = File(local.parentFile, local.name + ".tmp")
+        tmp.writeText(json())
+        tmp.renameTo(local)
+        if (publish != null) publish(local) else { inLibrary.parentFile.mkdirs(); inLibrary.writeText(local.readText()) }
     }
 }
 
@@ -120,6 +177,8 @@ object Engine {
         val skippedPaths = plan.skipped.mapTo(HashSet()) { Words.nfc(it.first.path) }
         val known = tracks.associateBy { Words.nfc(it.path) }
         val temp = File(System.getProperty("user.home"), "Music/.bitchord-staging").apply { mkdirs() }
+        // built.json goes into the library through the same way as the songs (pCloud's API there).
+        val publish: (File) -> Unit = { f -> val t = File(temp, "built-" + System.nanoTime() + ".json"); f.copyTo(t, true); lib.put(t, ".bitchord-library/built.json"); t.delete() }
 
         // What the library holds now.
         Live.phase = "mirando lo que ya hay (${lib.name})"
@@ -128,7 +187,7 @@ object Engine {
         val unwanted = ArrayList<LibFile>()
         val leftovers = ArrayList<LibFile>()
         for (f in present.values.sortedBy { it.rel }) {
-            val src = manifest.files[f.rel]
+            val src = manifest.source(f.rel)
             val item = src?.let { bySource[it] } ?: byTarget[f.rel.lowercase()]
             when {
                 item == null && src != null && src in skippedPaths -> unwanted += f // made by the app, now left out (karaoke, quarantine…)
@@ -147,7 +206,7 @@ object Engine {
             val match = if (s == null) null else (-1..1).flatMap { byLength[(s * 2).toInt() + it].orEmpty() }
                 .filter { it.target !in held && kotlin.math.abs((it.track.seconds ?: 0.0) - s) < 1.0 && Words.plain(it.title).let { w -> w.length >= 2 && name.contains(w) } }
                 .distinctBy { it.target }.singleOrNull()
-            if (match != null) { held[match.target] = f; manifest.files.putIfAbsent(f.rel, Words.nfc(match.track.path)) } else unknown += f.rel
+            if (match != null) { held[match.target] = f; manifest.adopt(f.rel, Words.nfc(match.track.path)) } else unknown += f.rel
         }
         Live.unmatched = unknown
         if (unknown.isNotEmpty()) ops.log("app", "library: ${unknown.size} files not made by the app and matching no song (left where they are): ${unknown.take(5)}")
@@ -160,7 +219,11 @@ object Engine {
             if (Live.stop) break
             Live.current = f.rel
             val err = lib.delete(f)
-            if (err == null) { Live.deleted.incrementAndGet(); manifest.files.remove(f.rel); ops.log("app", "removed ${f.rel}") }
+            if (err == null) {
+                Live.deleted.incrementAndGet()
+                val kept = manifest.source(f.rel)?.let { bySource[it] }?.let { held[it.target] }?.let { manifest.id(it.rel) }
+                manifest.remove(f.rel, kept); ops.log("app", "removed ${f.rel}")
+            }
             else Live.error("no se pudo quitar ${f.rel}: $err")
             Live.done.incrementAndGet(); Live.write()
         }
@@ -175,9 +238,12 @@ object Engine {
             val cur = held[i.target]!!
             val target = rel(i.target)
             Live.current = target
-            val curSource = manifest.files[cur.rel]
+            val curSource = manifest.source(cur.rel)
             val better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (known[curSource]?.let { Builder.rank(it) } ?: 9)
-            if (cur.actual == target) { if (better) replace += i else placed += i to cur; Live.done.incrementAndGet(); continue }
+            if (cur.actual == target) {
+                manifest.put(target, i, curSource ?: Words.nfc(i.track.path), manifest.id(target))
+                if (better) replace += i else placed += i to cur; Live.done.incrementAndGet(); continue
+            }
             if (lib.exists(target) && cur.rel.lowercase() != target.lowercase()) {
                 if (++stuck <= pending.size + 1) { pending.addLast(i); continue }
                 Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue
@@ -185,18 +251,17 @@ object Engine {
             stuck = 0
             val err = lib.move(cur, target)
             if (err == null) {
-                manifest.files.remove(cur.rel)
-                manifest.files[target] = curSource ?: Words.nfc(i.track.path)
+                manifest.move(cur.rel, target, i)
                 lib.local(cur)?.let { old -> Scanner.moved(old.path, File(root, target).path) }
                 Live.moved.incrementAndGet()
                 ops.log("app", "moved ${cur.rel} → $target")
                 if (better) replace += i else placed += i to cur.copy(rel = target, actual = target)
             } else { Live.error("no se pudo mover ${cur.rel}: $err"); ops.log("app", "error moving ${cur.rel} → $target: $err") }
             Live.done.incrementAndGet()
-            if (Live.done.get() % 50 == 0) manifest.save()
+            if (Live.done.get() % 200 == 0) manifest.save(publish)
             Live.write()
         }
-        manifest.save()
+        manifest.save(publish)
 
         // 3. Write what is missing, what has wrong tags and what has a better copy now — each made
         // on the Mac from its source, then put in the library (uploaded, on pCloud).
@@ -217,22 +282,23 @@ object Engine {
             val target = rel(i.target)
             Live.current = target
             val tmp = File(temp, System.nanoTime().toString() + ".mp3")
-            Builder.copy(i.copy(target = tmp.path), covers).onSuccess {
+            val id = manifest.id(target) ?: java.util.UUID.randomUUID().toString()
+            Builder.copy(i.copy(target = tmp.path), covers, id = id).onSuccess {
                 val err = lib.put(tmp, target)
                 if (err == null) {
-                    manifest.files[target] = Words.nfc(i.track.path)
+                    manifest.put(target, i, keepId = id)
                     Scanner.put(libraryTrack(i, File(root, target), tmp.length().takeIf { it > 0 } ?: i.track.size))
                     if (why == "copy") { Live.copied.incrementAndGet(); synchronized(covers) { covers.propose(i.key, plan.alternatives[i.key].orEmpty()) } } else Live.moved.incrementAndGet()
                     ops.log("app", (if (why == "copy") "copied ${i.track.path} → " else "rewritten ") + "$target [${i.reason}]")
                 } else { Live.error("no se pudo escribir $target: $err"); ops.log("app", "error writing $target: $err") }
             }.onFailure { Live.error("${i.track.path}: ${it.message}"); ops.log("app", "error converting ${i.track.path}: ${it.message}") }
             tmp.delete()
-            if (Live.done.incrementAndGet() % 25 == 0) { manifest.save(); synchronized(covers) { covers.save() } }
+            if (Live.done.incrementAndGet() % 100 == 0) { manifest.save(publish); synchronized(covers) { covers.save() } }
             Live.write()
         }
         pool.shutdown()
         while (!pool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
-        manifest.save(); covers.save(); Scanner.saveIndex()
+        manifest.save(publish); covers.save(); Scanner.saveIndex()
         // 4. Empty folders go.
         if (!Live.stop) { Live.phase = "quitando carpetas vacías"; Live.write(force = true); runCatching { lib.tidy() } }
         val summary = (if (Live.stop) "Parado" else "Terminado") +
