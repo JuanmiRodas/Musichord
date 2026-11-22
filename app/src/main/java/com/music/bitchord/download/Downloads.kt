@@ -553,6 +553,10 @@ object Downloads {
         // fork: what is still queued or running for it goes first: left alone, a "Download" half-way
         // through kept going after the delete and its tracks came back with nothing listing them.
         inFlightOnlyIn(id, _collections.value, _requested.value[id].orEmpty(), _active.value).forEach(::cancel)
+        // Deleting the liked songs while they are kept downloaded would have
+        // the next check fetch every one of them again. Taking them off the
+        // device says the listener no longer wants that, so it ends here.
+        if (id == com.music.bitchord.data.YtMusicRepository.LIKED_MUSIC) AppSettings.setDownloadLikedSongs(false)
         var any = false
         tracksOnlyIn(id, _collections.value, _saved.value)
             .forEach { videoId -> if (delete(context, videoId)) any = true }

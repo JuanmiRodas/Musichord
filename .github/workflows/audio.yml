@@ -80,6 +80,8 @@ jobs:
           }
 
       - name: Collect APKs
+        # BitChord Audio: a run started by hand on another branch only checks that it builds.
+        if: github.ref == 'refs/heads/main'
         run: |
           mkdir -p out
           v="1.9.${AUDIO_BUILD_NUMBER}"
@@ -115,6 +117,8 @@ jobs:
       # the one it is installed from and checks it against the hash, falling
       # back to the full APK when there is no patch from its version.
       - name: Make update patches
+        # BitChord Audio: a run started by hand on another branch only checks that it builds.
+        if: github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -137,6 +141,8 @@ jobs:
           ls -l out
 
       - name: Publish release
+        # BitChord Audio: a run started by hand on another branch only checks that it builds.
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.9.${{ github.run_number }}

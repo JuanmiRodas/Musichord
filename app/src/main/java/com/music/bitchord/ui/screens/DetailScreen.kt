@@ -145,6 +145,7 @@ import com.music.bitchord.data.canvas.keyColors
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import com.music.bitchord.data.canvas.CanvasArtwork
+import com.music.bitchord.data.canvas.CanvasSource
 import com.music.bitchord.data.canvas.CanvasRepository
 import com.music.bitchord.data.model.BrowseType
 import com.music.bitchord.data.model.DetailPage
@@ -308,6 +309,8 @@ fun DetailScreen(
     onSongLongPress: (Song) -> Unit,
     onSongSwipe: (Song) -> Unit,
     onShuffle: (List<Song>) -> Unit,
+    /** The Play button: the songs from the top, in order. */
+    onPlay: (List<Song>) -> Unit,
     onSectionItemClick: (ShelfItem) -> Unit,
     onArtistClick: (String, String) -> Unit,
     onAddSuggested: (Song) -> Unit,
@@ -512,13 +515,14 @@ fun DetailScreen(
     // photograph, and neither is something a label publishes a canvas for.
     val canvasEnabled by AppSettings.animatedCanvas.collectAsStateWithLifecycle()
     val fullBleedArtwork by AppSettings.fullBleedDetailArtwork.collectAsStateWithLifecycle()
-    val prioritizeSpotifyCanvas by AppSettings.prioritizeSpotifyCanvas.collectAsStateWithLifecycle()
+    val prioritizeSpotifyCanvas by AppSettings.effectivePrioritizeSpotifyCanvas.collectAsStateWithLifecycle()
+    val disableSpotifyCanvas by AppSettings.disableSpotifyCanvas.collectAsStateWithLifecycle()
     // The credit line the header shows is the artist as far as the catalogue
     // services are concerned. A browse card's subtitle sometimes omits it, in
     // which case the tracks themselves know who it is.
     val credit = page.headerLines(songs.size).first.ifBlank { songs.firstOrNull()?.artist.orEmpty() }
     var canvas by remember(page.browseId) { mutableStateOf<CanvasArtwork?>(null) }
-    LaunchedEffect(page.browseId, page.title, credit, canvasEnabled, prioritizeSpotifyCanvas) {
+    LaunchedEffect(page.browseId, page.title, credit, canvasEnabled, prioritizeSpotifyCanvas, disableSpotifyCanvas) {
         // An artist's clip is set below, by the lookup that finds it.
         if (isArtist) return@LaunchedEffect
         if (!canvasEnabled || page.type != BrowseType.ALBUM) {
@@ -528,6 +532,7 @@ fun DetailScreen(
         // As on the player: the credit fills in once the tracks load, so this
         // can run twice. Keep a clip that is already playing if the second
         // pass comes back empty.
+        if (disableSpotifyCanvas && canvas?.source == CanvasSource.SPOTIFY) canvas = null
         canvas = CanvasRepository.canvasForAlbum(page.title, credit) ?: canvas
     }
     // An artist's clip comes with the same Apple lookup as its photograph.
@@ -535,6 +540,7 @@ fun DetailScreen(
     LaunchedEffect(artistVideo, canvasEnabled) {
         if (isArtist) canvas = artistVideo?.takeIf { canvasEnabled }?.let { CanvasArtwork(url = it) }
     }
+    val visibleCanvas = canvas?.takeIf { !disableSpotifyCanvas || it.source != CanvasSource.SPOTIFY }
 
     // Opening the search carries the page up to it, so the field lands just
     // clear of the frosted bar with the tracks under it rather than at the foot
@@ -589,7 +595,7 @@ fun DetailScreen(
                     PageBackground(
                         page = page,
                         palette = palette,
-                        canvas = canvas,
+                        canvas = visibleCanvas,
                         artHeight = artHeight,
                         listState = listState,
                         heroUrl = appleArt?.heroUrl,
@@ -615,9 +621,9 @@ fun DetailScreen(
                         palette = palette,
                         sleeveSize = sleeveSize,
                         fullBleed = fullBleedSleeve,
-                        canvas = canvas,
+                        canvas = visibleCanvas,
                         songs = songs,
-                        onPlay = { onSongClick(songs, 0) },
+                        onPlay = { onPlay(songs) },
                         onShuffle = { onShuffle(songs) },
                         // A folder's credit says where its tracks live, not who made them.
                         onArtistClick = onArtistClick.takeIf { folder == null },
@@ -658,7 +664,7 @@ fun DetailScreen(
             if (songs.isNotEmpty() && isArtist) {
                 item(key = "actions") {
                     ActionRow(
-                        onPlay = { onSongClick(songs, 0) },
+                        onPlay = { onPlay(songs) },
                         onShuffle = { onShuffle(songs) },
                         subscription = page.subscription?.takeIf { onToggleSubscription != null },
                         onToggleSubscription = onToggleSubscription,
@@ -1098,6 +1104,7 @@ private fun ReleaseHeader(
                     }
                     .aspectRatio(1f),
             ) {
+                var canvasCover by remember(canvas) { mutableStateOf(0f) }
                 AsyncImage(
                     model = page.thumbnailUrl.artworkAt(HEADER_ART_PX),
                     contentDescription = null,
@@ -1107,7 +1114,12 @@ private fun ReleaseHeader(
                         .matchParentSize()
                         // The mask below erases part of what this layer drew,
                         // which it can only do in a buffer of its own.
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                            // Hand off to the clip so its dissolve reveals the
+                            // page colour, not the still sleeve underneath.
+                            alpha = 1f - canvasCover
+                        }
                         .drawWithContent {
                             drawContent()
                             // The player banner's dissolve, along smootherstep so
@@ -1133,6 +1145,7 @@ private fun ReleaseHeader(
                         canvas = clip,
                         isPlaying = true,
                         bottomFade = FULL_BLEED_FADE_FRACTION,
+                        onCoverChanged = { canvasCover = it },
                         modifier = Modifier.matchParentSize(),
                     )
                 }
@@ -1435,6 +1448,19 @@ private const val FAST_SCROLL_MIN = 40
 
 internal fun List<Song>.sortedForDetail(sort: SongSort): List<Song> = when (sort) {
     SongSort.DEFAULT -> this
+    // Untagged rows go after the tagged ones, in the order they already had,
+    // rather than interleaving at the head; a page with no tags at all is
+    // left exactly as it came.
+    SongSort.TRACK_NUMBER -> if (none { it.trackNumber != null }) {
+        this
+    } else {
+        withIndex()
+            .sortedWith(
+                compareBy<IndexedValue<Song>> { (_, song) -> song.trackNumber ?: Int.MAX_VALUE }
+                    .thenBy { (position, _) -> position },
+            )
+            .map { it.value }
+    }
     SongSort.TITLE_ASC -> sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
     SongSort.TITLE_DESC -> sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.title })
     // A catalogue row carries no added date, so its place in the running
