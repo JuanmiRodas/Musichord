@@ -456,6 +456,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private var lyricsShownFor: String? = null
     private val lyricsUpgradedThisRun = java.util.Collections.synchronizedSet(HashSet<String>())
+    /** BitChord Audio: songs given a full lyrics search this run — see the kept-lyrics shortcut. */
+    private val lyricsSearchedThisRun = java.util.Collections.synchronizedSet(HashSet<String>())
 
     fun loadLyrics(
         videoId: String,
@@ -555,6 +557,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 keptAuto = mine
+                // BitChord Audio: already searched in full this run and what was kept is timed —
+                // saving it brought the song back here; no second search. Untimed lyrics are
+                // still searched again, in case timed ones turn up.
+                if (videoId in lyricsSearchedThisRun && mine.any { it.timeMs > 0 }) {
+                    com.music.bitchord.data.TrackLog.d("BitChord", "lyrics for '$title': kept ones stay (searched already, timed)")
+                    return@launch
+                }
             }
             // BitChord Audio: kept and found lyrics are weighed on the same scale — the lines
             // alone. A search's own score carries bonuses (its source, the name it was found
@@ -733,6 +742,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     " · asked as ${nameQueries.take(4).joinToString { "'${it.title}' · '${it.artist}'" }}" +
                     com.music.bitchord.data.lyrics.LyricsHealth.failures().takeIf { it.isNotEmpty() }?.let { " · failing: ${it.joinToString()}" }.orEmpty(),
             )
+            lyricsSearchedThisRun += videoId
             if (keptAuto != null) {
                 // Only a strictly better version replaces what was kept.
                 // Anything not the app's own last choice (a pick, or kept before

@@ -1061,15 +1061,18 @@ internal fun CircleGlyph(
         // The disc carries the blend, dodged as the bottom row's glyphs are, and
         // the glyph sits on it in plain white. The ink is mixed in at a few times
         // the plain disc's strength: a dodge laid on this thinly is next to nothing.
-        Box(
-            Modifier
-                .matchParentSize()
-                .vibrantChrome(chrome)
-                .background(discFill(chrome, discAlpha)),
-        )
-        // Outside the blend: the rim is light catching the edge, not ink.
-        Box(Modifier.matchParentSize().glassRim(CircleShape))
-        if (LocalLastWave.current != null) Box(Modifier.matchParentSize().lastWaveGlass(true))
+        if (LocalLastWave.current != null) {
+            Box(Modifier.matchParentSize().lastWaveGlass(true, active = active))
+        } else {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .vibrantChrome(chrome)
+                    .background(discFill(chrome, discAlpha)),
+            )
+            // Outside the blend: the rim is light catching the edge, not ink.
+            Box(Modifier.matchParentSize().glassRim(CircleShape))
+        }
         Crossfade(
             targetState = icon,
             animationSpec = tween(durationMillis = 180),
@@ -1373,8 +1376,10 @@ private fun Pill(
         modifier = modifier
             .height(BOTTOM_ACTION_SIZE)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.12f))
-            .lastWaveGlass(LocalLastWave.current != null)
+            .then(
+                if (LocalLastWave.current != null) Modifier.lastWaveGlass(true)
+                else Modifier.background(Color.White.copy(alpha = 0.12f)),
+            )
             .animateContentSize(
                 animationSpec = spring(
                     dampingRatio = 0.82f,

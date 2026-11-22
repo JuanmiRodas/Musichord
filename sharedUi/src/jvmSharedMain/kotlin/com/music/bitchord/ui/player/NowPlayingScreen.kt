@@ -3102,21 +3102,6 @@ fun NowPlayingScreen(
                 if (videoDim > 0f) {
                     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = videoDim)))
                 }
-                // BitChord Audio: LastWave's moving colours along the bottom, one light per
-                // band, over the backdrop (and the framed video's dim), under the controls.
-                lastWaveLook?.let { look ->
-                    val glowAlpha by animateFloatAsState(
-                        targetValue = if (lyricsOpen || queueOpen || (videoEdge && !videoModeSquare)) 0f else 1f,
-                        animationSpec = tween(durationMillis = 600),
-                        label = "lastWaveGlow",
-                    )
-                    LastWaveBottomGlow(
-                        look = look,
-                        alpha = { glowAlpha },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-
                 // Mount once, behind the controls. A known portrait aspect changes the
                 // invisible view to full-player bounds before its first frame is shown.
                 if ((heroMode && heroHeight > 0.dp) || incomingFullWindow || clipFullscreen) {
@@ -3423,6 +3408,21 @@ fun NowPlayingScreen(
                         Modifier.matchParentSize()
                             .graphicsLayer { alpha = spotifyCanvasDim.value }
                             .background(Color.Black),
+                    )
+                }
+                // BitChord Audio: LastWave's backdrop for the lower half — the artwork's colours
+                // deepened and drifting under its dark scrim — over the artwork (and the framed
+                // video), under the controls.
+                lastWaveLook?.let { look ->
+                    val backdropAlpha by animateFloatAsState(
+                        targetValue = if (lyricsOpen || queueOpen || videoEdge || spotifyCanvasPresentation) 0f else 1f,
+                        animationSpec = tween(durationMillis = 600),
+                        label = "lastWaveBackdrop",
+                    )
+                    LastWaveBackdrop(
+                        look = look,
+                        alpha = { backdropAlpha },
+                        modifier = Modifier.matchParentSize(),
                     )
                 }
 

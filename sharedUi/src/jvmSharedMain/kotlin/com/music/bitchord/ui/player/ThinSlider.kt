@@ -110,6 +110,11 @@ fun ThinSlider(
     var dragging by remember { mutableStateOf(false) }
     val look = if (wave) LocalLastWave.current else null
     val wavePaths = remember { WavePaths() }
+    val waveFlatten by animateFloatAsState(
+        targetValue = if (dragging) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "waveFlatten",
+    )
     val height by animateDpAsState(
         targetValue = if (dragging) activeHeight else idleHeight,
         animationSpec = spring(
@@ -191,21 +196,17 @@ fun ThinSlider(
         contentAlignment = Alignment.Center,
     ) {
         if (look != null) Canvas(Modifier.fillMaxWidth().height(activeHeight + 22.dp)) {
-            val barH = height.toPx()
-            val top = size.height / 2f - barH / 2f
             val cover = if (dragging) 0f else mixPulse?.cover ?: 0f
             val base = value.coerceIn(0f, 1f)
             drawLastWaveTrack(
                 look = look,
                 paths = wavePaths,
                 fraction = (base + (1f - base) * cover) * fillFactor,
-                baseHeight = barH,
-                inactive = Color.White.copy(alpha = 0.22f),
-                maxAmplitude = (top - 2.dp.toPx()).coerceAtLeast(0f),
+                flatten = waveFlatten,
                 showThumb = fillFactor > 0.5f,
-                underFill = {
+                underFill = { top, thickness ->
                     shownWindow?.takeIf { windowAlpha > 0f }?.let { window ->
-                        drawTransitionWindow(window, windowAlpha, markerColor, Size(size.width, barH), top, CornerRadius(barH / 2f))
+                        drawTransitionWindow(window, windowAlpha, markerColor, Size(size.width, thickness), top, CornerRadius(thickness / 2f))
                     }
                 },
             )
