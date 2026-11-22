@@ -31,6 +31,23 @@ object CoverMatch {
         }
     }.getOrDefault(emptyList())
 
+    /**
+     * BitChord Audio: Apple's cover of exactly album [album] by [artist] — the album's name
+     * and the artist checked, so a live or special release never takes the studio album's.
+     */
+    fun itunesAlbum(album: String, artist: String): String? = runCatching {
+        val q = URLEncoder.encode("$album $artist", "UTF-8")
+        val req = Request.Builder().url("https://itunes.apple.com/search?entity=album&limit=8&term=$q").build()
+        Http.client.newCall(req).execute().use { r ->
+            val a = JSONObject(r.body?.string().orEmpty()).optJSONArray("results") ?: return@use null
+            (0 until a.length()).mapNotNull { a.optJSONObject(it) }.firstOrNull { o ->
+                com.music.bitchord.data.sources.OwnFileMatcher.sameAlbum(album, o.optString("collectionName")) &&
+                    com.music.bitchord.data.sources.OwnFileMatcher.sameArtist(artist, o.optString("artistName"))
+            }?.optString("artworkUrl100")?.takeIf { it.startsWith("http") }
+                ?.replace(Regex("""/\d+x\d+bb\."""), "/1200x1200bb.")
+        }
+    }.getOrNull()
+
     private fun bytes(url: String): ByteArray? = runCatching {
         when {
             url.startsWith("http") -> Http.client.newCall(Request.Builder().url(url).build()).execute().use { r ->

@@ -173,6 +173,7 @@ object LocalLikes {
      * and artist, any script). Kept with the like, so it is found once.
      */
     private const val NO_COVER = "nocover:"
+    private const val FORMER_COVER = "formercover:"
 
     suspend fun fillCovers() {
         if (filling) return
@@ -186,6 +187,25 @@ object LocalLikes {
                     val e = p.edit()
                     p.all.keys.filter { it.startsWith(NO_COVER) }.forEach { e.remove(it) }
                     e.putBoolean("nocover_v2", true).apply()
+                }
+            }
+            // Covers found before by song name alone (a studio song's on a live album's copy, the
+            // shop's first answer): looked for again once, now only from that very album.
+            prefs?.let { p ->
+                if (!p.getBoolean("covers_v3", false)) {
+                    var redone = 0
+                    for ((id, s) in _liked.value) {
+                        val url = s.thumbnailUrl ?: continue
+                        if (isYouTubeId(id) || s.albumName.isNullOrBlank()) continue
+                        if (!(url.contains("googleusercontent") || url.contains("ytimg") || url.contains("mzstatic"))) continue
+                        p.edit().putString(FORMER_COVER + id, url).apply()
+                        val cleared = s.copy(thumbnailUrl = null)
+                        _liked.value = _liked.value + (id to cleared)
+                        p.edit().putString(LIKED + id, songJson(cleared, anchors[id])).apply()
+                        redone++
+                    }
+                    p.edit().putBoolean("covers_v3", true).apply()
+                    TrackLog.d("BitChord", "likes: $redone covers found by name looked for again by album")
                 }
             }
             val library = WebDavRepository.library().associateBy { it.videoId }
@@ -207,6 +227,14 @@ object LocalLikes {
                 // Looked for in the last week and not found: not searched again on every start.
                 val tried = prefs?.getLong(NO_COVER + id, 0L) ?: 0L
                 if (cover == null && System.currentTimeMillis() - tried < 7 * 24 * 3_600_000L) continue
+                // The album named: the cover of that album among your own files, exactly that release.
+                if (cover == null && !s.albumName.isNullOrBlank()) {
+                    cover = runCatching {
+                        OwnLibrary.songsBy(s.artist).firstOrNull { f ->
+                            !f.thumbnailUrl.isNullOrBlank() && f.albumName?.let { OwnLibrary.sameAlbum(s.albumName!!, it) } == true
+                        }?.thumbnailUrl
+                    }.getOrNull()
+                }
                 if (cover == null) {
                     val hit = runCatching {
                         YtMusicRepository.search("${s.title} ${s.artist}", SearchFilter.SONGS).getOrNull().orEmpty()
@@ -216,14 +244,21 @@ object LocalLikes {
                                     s.artist.split(",", "&", "·").any { a -> OwnFileMatcher.sameArtist(a.trim(), c.artist) }
                             }
                     }.getOrNull()
-                    cover = hit?.thumbnailUrl
+                    // Its picture only when it is the same release: the studio song's cover on a
+                    // live or other album's copy was the wrong cover.
+                    cover = hit?.takeIf { h ->
+                        s.albumName.isNullOrBlank() || h.albumName?.let { OwnLibrary.sameAlbum(s.albumName!!, it) } == true
+                    }?.thumbnailUrl
                     length = length ?: hit?.durationText
                     // Not on YouTube Music: the shop's cover of the song (iTunes), when it is there.
-                    if (cover == null) cover = runCatching {
-                        com.music.bitchord.data.cleanup.CoverMatch.itunes("${s.albumName ?: s.title} ${s.artist.split(',', '·').first().trim()}").firstOrNull()
+                    if (cover == null && !s.albumName.isNullOrBlank()) cover = runCatching {
+                        com.music.bitchord.data.cleanup.CoverMatch.itunesAlbum(s.albumName!!, s.artist.split(',', '·').first().trim())
                     }.getOrNull()
                     kotlinx.coroutines.delay(1_500)
                 }
+                // Nothing from the album itself: the cover it had stays.
+                if (cover == null) cover = prefs?.getString(FORMER_COVER + id, null)
+                prefs?.edit()?.remove(FORMER_COVER + id)?.apply()
                 if (cover == null) prefs?.edit()?.putLong(NO_COVER + id, System.currentTimeMillis())?.apply()
                 if (cover == null && length == null) continue
                 found[id] = cover to length
