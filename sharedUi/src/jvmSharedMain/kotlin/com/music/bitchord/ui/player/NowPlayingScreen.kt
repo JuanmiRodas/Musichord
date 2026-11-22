@@ -2497,7 +2497,9 @@ fun NowPlayingScreen(
     // BitChord Audio: the LastWave-style player, when chosen in Settings.
     val lastWaveOn by PlayerSettings.lastWavePlayer.collectAsStateWithLifecycle()
     val lastWaveLook = rememberLastWaveLook(lastWaveOn, remoteArt ?: song.thumbnailUrl, isPlaying)
-    CompositionLocalProvider(LocalLastWave provides lastWaveLook) {
+    // LastWave's glass refracts the player's backdrop, recorded as it is drawn.
+    val lastWaveBackdrop = if (lastWaveLook != null) rememberLastWaveBackdrop() else null
+    CompositionLocalProvider(LocalLastWave provides lastWaveLook, LocalLastWaveBackdrop provides lastWaveBackdrop) {
     FrostedPlayerFrame(
         modifier = modifier,
         // Off where a music video is the backdrop: it can go bright under the
@@ -3027,6 +3029,7 @@ fun NowPlayingScreen(
                     Modifier
                         .fillMaxSize()
                         .recordBackdrop(backdropLayer)
+                        .lastWaveBackdropSource(lastWaveBackdrop)
                         .hazeSource(playerHaze, zIndex = -1f),
                 ) {
                     if (legacyMeshBackdrop) {
@@ -3086,6 +3089,21 @@ fun NowPlayingScreen(
                             .then(if (!frostOff) Modifier.hazeSource(queueHaze, zIndex = -1f) else Modifier)
                             .graphicsLayer { alpha = fullArtworkBackdropAlpha },
                     )
+                    // BitChord Audio: LastWave's backdrop for the lower half — the artwork's colours
+                    // deepened and drifting under its dark scrim — over the artwork (and the framed
+                    // video), under the controls.
+                    lastWaveLook?.let { look ->
+                        val backdropAlpha by animateFloatAsState(
+                            targetValue = if (lyricsOpen || queueOpen || videoEdge || spotifyCanvasPresentation) 0f else 1f,
+                            animationSpec = tween(durationMillis = 600),
+                            label = "lastWaveBackdrop",
+                        )
+                        LastWaveBackdrop(
+                            look = look,
+                            alpha = { backdropAlpha },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
                 // BitChord Audio: video mode dims the player around the picture —
                 // the song's own colours kept, only darker — easing in and out.
@@ -3410,22 +3428,6 @@ fun NowPlayingScreen(
                             .background(Color.Black),
                     )
                 }
-                // BitChord Audio: LastWave's backdrop for the lower half — the artwork's colours
-                // deepened and drifting under its dark scrim — over the artwork (and the framed
-                // video), under the controls.
-                lastWaveLook?.let { look ->
-                    val backdropAlpha by animateFloatAsState(
-                        targetValue = if (lyricsOpen || queueOpen || videoEdge || spotifyCanvasPresentation) 0f else 1f,
-                        animationSpec = tween(durationMillis = 600),
-                        label = "lastWaveBackdrop",
-                    )
-                    LastWaveBackdrop(
-                        look = look,
-                        alpha = { backdropAlpha },
-                        modifier = Modifier.matchParentSize(),
-                    )
-                }
-
                 Column(
                     modifier = Modifier
                         .fillMaxSize()

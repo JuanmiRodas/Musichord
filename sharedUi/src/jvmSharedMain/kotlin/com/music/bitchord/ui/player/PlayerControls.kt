@@ -1,5 +1,13 @@
 package com.music.bitchord.ui.player
 
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Size
@@ -662,6 +670,21 @@ internal fun TransportRow(
 ) {
     val playSize = if (compact) 58.dp else 74.dp
     val playTouch = if (compact) 76.dp else 92.dp
+    // BitChord Audio: LastWave's transport (glass circles either side of a wide Play pill),
+    // in the row our transport occupies, so nothing around it moves.
+    if (LocalLastWave.current != null) {
+        LastWaveTransport(
+            isPlaying = isPlaying,
+            isLoading = isLoading,
+            previousEnabled = previousEnabled,
+            nextEnabled = nextEnabled,
+            onPrevious = onPrevious,
+            onPlayPause = onPlayPause,
+            onNext = onNext,
+            rowHeight = playTouch,
+        )
+        return
+    }
     val skipSize = if (compact) 44.dp else PLAYER_SKIP_ICON_SIZE
     val reduceAnimation by PlayerSettings.reduceAnimation.collectAsStateWithLifecycle()
     val previousMotion = rememberPlayerSkipMotion(active = animationsActive, reduceMotion = reduceAnimation)
@@ -1062,7 +1085,7 @@ internal fun CircleGlyph(
         // the glyph sits on it in plain white. The ink is mixed in at a few times
         // the plain disc's strength: a dodge laid on this thinly is next to nothing.
         if (LocalLastWave.current != null) {
-            Box(Modifier.matchParentSize().lastWaveGlass(true, active = active))
+            Box(Modifier.matchParentSize().lastWaveButton(CircleShape, active = active))
         } else {
             Box(
                 Modifier
@@ -1377,7 +1400,7 @@ private fun Pill(
             .height(BOTTOM_ACTION_SIZE)
             .clip(CircleShape)
             .then(
-                if (LocalLastWave.current != null) Modifier.lastWaveGlass(true)
+                if (LocalLastWave.current != null) Modifier.lastWaveButton(CircleShape)
                 else Modifier.background(Color.White.copy(alpha = 0.12f)),
             )
             .animateContentSize(
@@ -1801,7 +1824,7 @@ private fun BottomGlyph(
     Box(
         modifier = Modifier
             .size(BOTTOM_ACTION_SIZE)
-            .lastWaveGlass(LocalLastWave.current != null && !highlighted, BOTTOM_ACTION_SIZE - 4.dp)
+            .then(if (LocalLastWave.current != null && !highlighted) Modifier.lastWaveButton(CircleShape) else Modifier)
             // Lit, Apple's way: a rounded tile with the glyph cut out of it, the
             // artwork showing through. The glyph is drawn first and the tile over
             // it with SrcOut, which keeps the tile only where the glyph is not.
@@ -2555,4 +2578,142 @@ private fun TrackAnalysisState.localizedLabel(): String = when (this) {
     TrackAnalysisState.ANALYSING -> stringResource(Res.string.analysis_in_progress)
     TrackAnalysisState.WAITING -> stringResource(Res.string.waiting)
     TrackAnalysisState.FAILED -> stringResource(Res.string.failed)
+}
+
+
+/**
+ * LastWave's MainControls, as it draws them over full-bleed artwork: previous and next as
+ * 54 dp glass circles, play as a glass pill (up to 180 dp wide, 56 tall) with the glyph and
+ * its word, each shrinking on a spring while held — centred in our transport's row.
+ */
+@Composable
+private fun LastWaveTransport(
+    isPlaying: Boolean,
+    isLoading: Boolean,
+    previousEnabled: Boolean,
+    nextEnabled: Boolean,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    rowHeight: Dp,
+) {
+    val haptics = rememberHaptics()
+    val spatial = spring<Float>(dampingRatio = 0.8f, stiffness = 650f)
+    val prevInteraction = remember { MutableInteractionSource() }
+    val prevPressed by prevInteraction.collectIsPressedAsState()
+    val prevScale by animateFloatAsState(if (prevPressed) 0.85f else 1f, spatial, label = "lwPrevScale")
+    val playInteraction = remember { MutableInteractionSource() }
+    val playPressed by playInteraction.collectIsPressedAsState()
+    val playScale by animateFloatAsState(
+        if (playPressed) 0.88f else 1f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "lwPlayScale",
+    )
+    val nextInteraction = remember { MutableInteractionSource() }
+    val nextPressed by nextInteraction.collectIsPressedAsState()
+    val nextScale by animateFloatAsState(if (nextPressed) 0.85f else 1f, spatial, label = "lwNextScale")
+    val sideSize = LastWaveSide
+    val gapSize = 18.dp
+    val content = Color.White.copy(alpha = 0.94f)
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth().height(rowHeight),
+        contentAlignment = Alignment.Center,
+    ) {
+        val pillWidth = (maxWidth - sideSize * 2 - gapSize * 2).coerceIn(112.dp, 180.dp)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(gapSize, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LastWaveGlassSurface(
+                onClick = { haptics.play(Haptic.SkipPrevious); onPrevious() },
+                shape = CircleShape,
+                color = LastWaveVeil,
+                contentColor = content,
+                interactionSource = prevInteraction,
+                enabled = previousEnabled,
+                modifier = Modifier.size(sideSize).graphicsLayer {
+                    scaleX = prevScale
+                    scaleY = prevScale
+                    alpha = if (previousEnabled) 1f else 0.4f
+                },
+            ) {
+                Icon(Icons.Filled.SkipPrevious, stringResource(Res.string.widget_previous), Modifier.size(28.dp))
+            }
+            LastWaveGlassSurface(
+                onClick = { haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume); onPlayPause() },
+                shape = RoundedCornerShape(100),
+                color = LastWaveVeil,
+                contentColor = Color.White,
+                interactionSource = playInteraction,
+                modifier = Modifier.width(pillWidth).height(56.dp).graphicsLayer {
+                    scaleX = playScale
+                    scaleY = playScale
+                },
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(28.dp))
+                    } else {
+                        AnimatedContent(
+                            targetState = isPlaying,
+                            transitionSpec = {
+                                (fadeIn(tween(160)) + scaleIn(spring(dampingRatio = 0.8f, stiffness = 650f), initialScale = 0.7f)) togetherWith
+                                    (fadeOut(tween(160)) + scaleOut(tween(160), targetScale = 0.7f))
+                            },
+                            label = "lwPlayPauseIcon",
+                            modifier = Modifier.size(28.dp),
+                        ) { playing ->
+                            Icon(
+                                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(if (isPlaying) Res.string.pause else Res.string.play),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            LastWaveGlassSurface(
+                onClick = { haptics.play(Haptic.SkipNext); onNext() },
+                shape = CircleShape,
+                color = LastWaveVeil,
+                contentColor = content,
+                interactionSource = nextInteraction,
+                enabled = nextEnabled,
+                modifier = Modifier.size(sideSize).graphicsLayer {
+                    scaleX = nextScale
+                    scaleY = nextScale
+                    alpha = if (nextEnabled) 1f else 0.4f
+                },
+            ) {
+                Icon(Icons.Filled.SkipNext, stringResource(Res.string.widget_next), Modifier.size(28.dp))
+            }
+        }
+    }
+}
+
+/**
+ * LastWave's press on a glass control: a spring down to [pressedScale] while held. Its own
+ * interaction source, handed to the control's clickable so the press is the control's.
+ */
+@Composable
+internal fun lastWavePressScale(interaction: MutableInteractionSource, pressedScale: Float = 0.88f): Float {
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) pressedScale else 1f,
+        spring(dampingRatio = 0.8f, stiffness = 650f),
+        label = "lwPress",
+    )
+    return scale
 }

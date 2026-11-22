@@ -388,7 +388,7 @@ internal suspend fun prefetchArtworkPalette(context: PlatformContext, imageUrl: 
     return palette
 }
 
-private suspend fun loadArtworkPaletteBitmap(context: PlatformContext, imageUrl: String): ImageBitmap? {
+internal suspend fun loadArtworkPaletteBitmap(context: PlatformContext, imageUrl: String): ImageBitmap? {
     val request = ImageRequest.Builder(context)
         .data(imageUrl)
         .size(128) // palette quality is fine at thumbnail size, and it's fast

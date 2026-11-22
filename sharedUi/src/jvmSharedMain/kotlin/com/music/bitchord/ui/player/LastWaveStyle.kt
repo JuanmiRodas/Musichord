@@ -172,26 +172,63 @@ internal fun rememberLastWaveLook(enabled: Boolean, artworkUrl: String?, playing
         }
     }
     val colors = rememberArtworkColors(artworkUrl).colors
-    return remember(colors) {
-        val c0 = colors.getOrElse(0) { Color(0xFF6A7FDB) }
-        val c1 = colors.getOrElse(1) { c0 }
-        val c2 = colors.getOrElse(2) { c1 }
+    // LastWave's own picks: Palette's vibrant, light vibrant and dark vibrant swatches.
+    val context = coil3.compose.LocalPlatformContext.current
+    var swatches by remember(artworkUrl) { androidx.compose.runtime.mutableStateOf<List<Color?>>(listOf(null, null, null)) }
+    LaunchedEffect(artworkUrl) {
+        val url = artworkUrl ?: return@LaunchedEffect
+        val bitmap = runCatching { loadArtworkPaletteBitmap(context, url) }.getOrNull() ?: return@LaunchedEffect
+        swatches = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { lastWaveSwatches(bitmap) }
+    }
+    return remember(colors, swatches) {
+        val c0 = swatches[0] ?: colors.getOrElse(0) { Color(0xFF6A7FDB) }
+        val c1 = swatches[1] ?: lerp(colors.getOrElse(2) { c0 }, c0, 0.42f)
+        val c2 = swatches[2] ?: lerp(colors.getOrElse(1) { c0 }, c0, 0.25f)
         LastWaveLook(
-            primary = luminous(c0, 0.38f),
-            secondary = luminous(c1, 0.32f),
-            tertiary = luminous(c2, 0.28f),
+            primary = c0.ensureLuminous(0.38f),
+            secondary = c1.ensureLuminous(0.32f),
+            tertiary = c2.ensureLuminous(0.28f),
             deep = listOf(c0, c1, c2).map { deepen(it) },
             motion = motion,
         )
     }
 }
 
-/** LastWave's ensureLuminousForDarkBackground: lifted toward white until it reads on dark. */
-private fun luminous(c: Color, min: Float): Color {
-    val l = c.luminance()
-    if (l >= min) return c
-    return lerp(c, Color.White, ((min - l) / (1f - l)).coerceIn(0f, 1f))
+/** LastWave's ensureLuminousForDarkBackground, step for step (HSL lightness raised until it reads). */
+private fun Color.ensureLuminous(minLuminance: Float): Color {
+    if (luminance() >= minLuminance) return this
+    val hsl = toHsl()
+    if (hsl[1] < 0.12f) {
+        hsl[2] = hsl[2].coerceAtLeast(0.82f)
+        return hslColor(hsl)
+    }
+    var step = 0
+    while (step < 20) {
+        hsl[2] = (hsl[2] + 0.04f).coerceAtMost(0.92f)
+        if (hsl[1] > 0.85f && hsl[2] < 0.65f) hsl[1] = (hsl[1] * 0.96f).coerceAtLeast(0.60f)
+        val candidate = hslColor(hsl)
+        if (candidate.luminance() >= minLuminance) return candidate
+        step++
+    }
+    return hslColor(hsl)
 }
+
+private fun Color.toHsl(): FloatArray {
+    val max = maxOf(red, green, blue)
+    val min = minOf(red, green, blue)
+    val d = max - min
+    val l = (max + min) / 2f
+    val s = if (d == 0f) 0f else d / (1f - kotlin.math.abs(2f * l - 1f))
+    val h = when {
+        d == 0f -> 0f
+        max == red -> 60f * (((green - blue) / d) % 6f)
+        max == green -> 60f * (((blue - red) / d) + 2f)
+        else -> 60f * (((red - green) / d) + 4f)
+    }.let { if (it < 0f) it + 360f else it }
+    return floatArrayOf(h, s.coerceIn(0f, 1f), l)
+}
+
+private fun hslColor(hsl: FloatArray): Color = Color.hsl(hsl[0].coerceIn(0f, 359.99f), hsl[1].coerceIn(0f, 1f), hsl[2].coerceIn(0f, 1f))
 
 /** LastWave's fluid grade: saturation ×1.9, brightness ×0.52. */
 private fun deepen(c: Color): Color {
@@ -298,6 +335,15 @@ internal fun DrawScope.drawLastWaveTrack(
             listOf(baseline[0].copy(alpha = 0.95f), baseline[1].copy(alpha = 0.88f)),
         )
         val strokes = floatArrayOf(1.0f, 1.2f, 1.6f)
+        clipRect(left = -half - 4.dp.toPx(), right = thumbX + half + 4.dp.toPx()) {
+            // A soft glow under the front wave and the played track, in the artwork's colour.
+            drawPath(
+                paths.waves[2],
+                primary.copy(alpha = 0.20f),
+                style = Stroke(5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+            drawLine(primary.copy(alpha = 0.22f), Offset(0f, centerY), Offset(thumbX, centerY), trackPx + 5.dp.toPx(), StrokeCap.Round)
+        }
         clipRect(left = -half, right = thumbX + half) {
             for (i in 0..2) {
                 drawPath(
