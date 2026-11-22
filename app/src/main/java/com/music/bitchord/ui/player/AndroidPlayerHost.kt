@@ -346,8 +346,23 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         com.music.bitchord.data.webdav.PcloudAlbums.pageIdOf(song)
 
     override fun openAlbumOf(song: com.music.bitchord.data.model.Song) {
-        if (!com.music.bitchord.ui.components.PcloudBrowser.openFolderOf(song)) {
-            showMessage(app.getString(com.music.bitchord.R.string.no_album_metadata))
+        if (com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(song.videoId) &&
+            com.music.bitchord.ui.components.PcloudBrowser.openFolderOf(song)
+        ) return
+        // BitChord Audio: an album name with no page of ours — YouTube Music's album of it.
+        if (song.albumName.isNullOrBlank()) {
+            if (!com.music.bitchord.ui.components.PcloudBrowser.openFolderOf(song)) {
+                showMessage(app.getString(com.music.bitchord.R.string.no_album_metadata))
+            }
+            return
+        }
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val id = runCatching { com.music.bitchord.data.webdav.PcloudAlbums.youTubeAlbumId(song) }.getOrNull()
+            when {
+                id != null -> com.music.bitchord.data.webdav.PcloudAlbums.open(id, song)
+                com.music.bitchord.ui.components.PcloudBrowser.openFolderOf(song) -> Unit
+                else -> showMessage(app.getString(com.music.bitchord.R.string.no_album_metadata))
+            }
         }
     }
 

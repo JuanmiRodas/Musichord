@@ -145,6 +145,16 @@ object OwnLibrary {
         return OWN_ALBUM + songs.first().artist + SEP + name
     }
 
+    /**
+     * BitChord Audio: the page of your album [album] by [artist] — pCloud and uploads — found
+     * by name in any script, or null when no song of yours is on it.
+     */
+    fun albumPageFor(artist: String, album: String): String? {
+        val songs = songsBy(artist).filter { s -> s.albumName?.let { sameAlbum(album, it) } == true }
+        if (songs.isEmpty()) return null
+        return pageOf(songs.first().albumName ?: album, songs)
+    }
+
     fun isOwnAlbum(browseId: String) = browseId.startsWith(OWN_ALBUM)
 
     /** The songs of your album page [browseId]: pCloud and uploads joined, the best copy of each. */

@@ -2754,6 +2754,13 @@ private fun BitChordApp(
                         it.memberId == playback.startedBy
                     }?.displayName?.takeIf(String::isNotBlank)
             }
+        // BitChord Audio: an album found for the playing song after a look-up.
+        LaunchedEffect(Unit) {
+            com.music.bitchord.data.webdav.PcloudAlbums.opens.collect { (id, s) ->
+                dismissPlayer()
+                viewModel.openDetail(id, s.albumName ?: s.title, s.artist, s.thumbnailUrl, BrowseType.ALBUM)
+            }
+        }
         NowPlayingScreen(
             song = displayedSong,
             playedBy = playedBy,
