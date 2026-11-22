@@ -101,3 +101,8 @@ Objetivo: toda la música que te gusta acaba en `pCloud Drive/pCloud Backup/MacB
 - pCloud Drive no deja mover ni borrar archivos que aún está subiendo, y lo escrito ocupa su caché en el disco del Mac. Ahora: antes de ordenar se espera a que pCloud lo haya subido todo; lo que falta se copia en lotes de ~10 GB hechos en `~/Music/.bitchord-staging`, se pasan a pCloud Drive y el siguiente lote espera a que pCloud termine de subir y haya sitio en el disco.
 - Cómo sabe la app lo que le queda a pCloud: cuenta las operaciones pendientes en su base de datos (`~/.pcloud/data.db`, tabla `fstask`, solo lectura); si no puede leerla, prueba a renombrar un archivo de control en la biblioteca.
 - Estado, registro y buzón en `~/Music/.bitchord-live` (disco del Mac).
+
+## 22 nov (tarde): la biblioteca en pCloud se maneja con la API de pCloud (1.0.19)
+- Con pCloud Drive (sistema de archivos) mover y borrar daba «Input/output error» y aparecían carpetas «(1)» (pCloud trata «é» compuesta y descompuesta como el mismo nombre). Ahora `Lib`/`PCloudLib`: listar la biblioteca (`listfolder` recursivo), mover (`renamefile`, al instante en el servidor), borrar, crear carpetas y subir (`uploadfile`), todo con la API. Cada canción que falta o que hay que re-etiquetar se hace en el Mac desde su fuente y se sube; nada pasa por la caché de pCloud Drive.
+- Inicio de sesión una vez en Ajustes (correo y contraseña van solo a pCloud; se guarda el token en `pcloud.json` de la app). Las cuentas con verificación en dos pasos no pueden usar este inicio de sesión.
+- Las fuentes con acentos en otra forma Unicode ya se reconocen (`Scanner.known`, `Builder.plan`).

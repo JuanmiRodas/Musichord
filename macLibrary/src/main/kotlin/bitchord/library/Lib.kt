@@ -1,0 +1,200 @@
+package bitchord.library
+
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+
+/** A file of the library: its path inside it (one Unicode form, for comparing) and as stored. */
+data class LibFile(val rel: String, val actual: String, val size: Long, val id: Long? = null)
+
+/**
+ * Where the library lives, and the few things done to it. On the Mac's disk: plain files. On
+ * pCloud Drive: pCloud's own API — moves happen on pCloud's side at once (nothing uploaded
+ * again), uploads are made and confirmed by the app itself, and nothing goes through pCloud
+ * Drive's cache (which held renames, refused deletes and made "(1)" copies of folders whose
+ * names differed only in accents' form).
+ */
+interface Lib {
+    fun list(): Map<String, LibFile>
+    /** null when done, else why not. */
+    fun move(from: LibFile, toRel: String): String?
+    fun delete(f: LibFile): String?
+    fun put(local: File, toRel: String): String?
+    /** A readable copy on this Mac (to read its tags), if there is one. */
+    fun local(f: LibFile): File?
+    fun exists(rel: String): Boolean
+    /** Removes folders left empty. */
+    fun tidy()
+    val name: String
+}
+
+private fun nfc(s: String) = Words.nfc(s)
+
+class LocalLib(private val root: String) : Lib {
+    override val name = "disco"
+    private val rootFile = File(root)
+    override fun list(): Map<String, LibFile> = rootFile.walkTopDown().onEnter { !it.name.startsWith(".") }
+        .filter { it.isFile && it.extension.lowercase() == "mp3" && !it.name.startsWith(".") }
+        .associate { f -> val r = f.path.removePrefix(root).trimStart('/'); nfc(r) to LibFile(nfc(r), r, f.length()) }
+    override fun move(from: LibFile, toRel: String): String? = runCatching {
+        val to = File(rootFile, toRel); to.parentFile.mkdirs()
+        Files.move(File(rootFile, from.actual).toPath(), to.toPath()); null
+    }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+    override fun delete(f: LibFile): String? = runCatching { Files.delete(File(rootFile, f.actual).toPath()); null }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+    override fun put(local: File, toRel: String): String? = runCatching {
+        val to = File(rootFile, toRel); to.parentFile.mkdirs()
+        Files.move(local.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING); null
+    }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+    override fun local(f: LibFile) = File(rootFile, f.actual)
+    override fun exists(rel: String) = File(rootFile, rel).exists()
+    override fun tidy() {
+        rootFile.walkBottomUp().filter { it.isDirectory && it != rootFile && !it.path.contains("/.") }.forEach { d ->
+            val left = d.listFiles().orEmpty()
+            if (left.all { it.name == ".DS_Store" }) { left.forEach { it.delete() }; d.delete() }
+        }
+    }
+}
+
+/**
+ * pCloud's API (https://docs.pcloud.com): signed in once from Ajustes with the account's email and
+ * password, which go only to pCloud; what is kept is the token pCloud gives back
+ * (`<app data>/pcloud.json`), never the password.
+ */
+class PCloudApi(val host: String, private val auth: String) {
+    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+
+    fun call(method: String, params: Map<String, String> = emptyMap()): JSONObject {
+        val q = (params + ("auth" to auth)).entries.joinToString("&") { "${it.key}=${enc(it.value)}" }
+        val c = URL("https://$host/$method?$q").openConnection() as HttpURLConnection
+        c.connectTimeout = 20000; c.readTimeout = 120000
+        val o = JSONObject(c.inputStream.bufferedReader().readText())
+        if (o.optInt("result") != 0) error("pCloud $method: ${o.optInt("result")} ${o.optString("error")}")
+        return o
+    }
+
+    /** Uploads [file] as [name] into a folder (replacing a file of that name), in one go. */
+    fun upload(folderId: Long, name: String, file: File): JSONObject {
+        val boundary = "----bitchord" + System.nanoTime()
+        val c = URL("https://$host/uploadfile?auth=${enc(auth)}&folderid=$folderId&nopartial=1&renameifexists=0").openConnection() as HttpURLConnection
+        c.doOutput = true; c.requestMethod = "POST"; c.connectTimeout = 20000; c.readTimeout = 600000
+        c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+        val head = "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"${name.replace("\"", "'")}\"\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray(Charsets.UTF_8)
+        val tail = "\r\n--$boundary--\r\n".toByteArray()
+        c.setFixedLengthStreamingMode(head.size + file.length() + tail.size)
+        c.outputStream.use { out -> out.write(head); file.inputStream().use { it.copyTo(out, 1 shl 16) }; out.write(tail) }
+        val o = JSONObject(c.inputStream.bufferedReader().readText())
+        if (o.optInt("result") != 0) error("pCloud uploadfile: ${o.optInt("result")} ${o.optString("error")}")
+        return o
+    }
+
+    companion object {
+        private val file get() = File(Store.dir, "pcloud.json")
+
+        fun saved(): PCloudApi? = runCatching { JSONObject(file.readText()).let { PCloudApi(it.getString("host"), it.getString("auth")) } }.getOrNull()
+
+        fun account(): String? = runCatching { JSONObject(file.readText()).optString("email").ifBlank { null } }.getOrNull()
+
+        /** Signs in (Europe's servers first, then the US'), keeping only the token. */
+        fun login(email: String, password: String): Result<PCloudApi> = runCatching {
+            var last = "sin respuesta"
+            for (host in listOf("eapi.pcloud.com", "api.pcloud.com")) {
+                val body = "getauth=1&logout=1&username=${URLEncoder.encode(email, "UTF-8")}&password=${URLEncoder.encode(password, "UTF-8")}"
+                val c = URL("https://$host/userinfo").openConnection() as HttpURLConnection
+                c.doOutput = true; c.requestMethod = "POST"; c.connectTimeout = 20000; c.readTimeout = 30000
+                c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                c.outputStream.use { it.write(body.toByteArray()) }
+                val o = JSONObject(c.inputStream.bufferedReader().readText())
+                if (o.optInt("result") == 0) {
+                    file.writeText(JSONObject().put("host", host).put("auth", o.getString("auth")).put("email", email).toString())
+                    file.setReadable(false, false); file.setReadable(true, true)
+                    return@runCatching PCloudApi(host, o.getString("auth"))
+                }
+                last = o.optString("error")
+            }
+            error(last)
+        }
+
+        fun logout() { file.delete() }
+    }
+}
+
+class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib {
+    override val name = "pCloud"
+    /** "/Users/juanmi/pCloud Drive/Biblioteca" → "/Biblioteca". */
+    private val remoteRoot = "/" + mountRoot.substringAfter("/pCloud Drive").trim('/')
+    private val folders = java.util.concurrent.ConcurrentHashMap<String, Long>() // rel (one form, lower case) → folder id
+    private val files = java.util.concurrent.ConcurrentHashMap<String, LibFile>()
+
+    override fun list(): Map<String, LibFile> {
+        files.clear(); folders.clear()
+        val o = api.call("listfolder", mapOf("path" to remoteRoot, "recursive" to "1")).getJSONObject("metadata")
+        folders[""] = o.getLong("folderid")
+        fun walk(m: JSONObject, rel: String) {
+            val list = m.optJSONArray("contents") ?: return
+            for (k in 0 until list.length()) {
+                val x = list.getJSONObject(k)
+                val n = x.getString("name")
+                if (n.startsWith(".")) continue
+                val r = if (rel.isEmpty()) n else "$rel/$n"
+                if (x.optBoolean("isfolder")) { folders.putIfAbsent(nfc(r).lowercase(), x.getLong("folderid")); walk(x, r) }
+                else if (n.lowercase().endsWith(".mp3")) files[nfc(r)] = LibFile(nfc(r), r, x.optLong("size"), x.getLong("fileid"))
+            }
+        }
+        walk(o, "")
+        return HashMap(files)
+    }
+
+    @Synchronized private fun folder(rel: String): Long {
+        if (rel.isEmpty()) return folders[""]!!
+        folders[nfc(rel).lowercase()]?.let { return it }
+        val parent = folder(rel.substringBeforeLast('/', ""))
+        val id = api.call("createfolderifnotexists", mapOf("folderid" to parent.toString(), "name" to nfc(rel.substringAfterLast('/')))).getJSONObject("metadata").getLong("folderid")
+        folders[nfc(rel).lowercase()] = id
+        return id
+    }
+
+    override fun move(from: LibFile, toRel: String): String? = runCatching {
+        val to = folder(toRel.substringBeforeLast('/', ""))
+        api.call("renamefile", mapOf("fileid" to from.id.toString(), "tofolderid" to to.toString(), "toname" to nfc(toRel.substringAfterLast('/'))))
+        files.remove(from.rel); files[nfc(toRel)] = from.copy(rel = nfc(toRel), actual = toRel); null
+    }.getOrElse { it.message ?: it.javaClass.simpleName }
+
+    override fun delete(f: LibFile): String? = runCatching { api.call("deletefile", mapOf("fileid" to f.id.toString())); files.remove(f.rel); null }.getOrElse { it.message }
+
+    override fun put(local: File, toRel: String): String? = runCatching {
+        val dir = folder(toRel.substringBeforeLast('/', ""))
+        val m = api.upload(dir, nfc(toRel.substringAfterLast('/')), local).getJSONArray("metadata").getJSONObject(0)
+        files[nfc(toRel)] = LibFile(nfc(toRel), toRel, m.optLong("size"), m.getLong("fileid"))
+        local.delete(); null
+    }.getOrElse { it.message ?: it.javaClass.simpleName }
+
+    override fun local(f: LibFile): File? = File(mountRoot, f.actual).takeIf { Scanner.get(it.path) != null }
+
+    override fun exists(rel: String) = files.containsKey(nfc(rel)) || files.keys.any { it.equals(nfc(rel), ignoreCase = true) }
+
+    override fun tidy() {
+        val o = runCatching { api.call("listfolder", mapOf("path" to remoteRoot, "recursive" to "1")).getJSONObject("metadata") }.getOrNull() ?: return
+        fun walk(m: JSONObject): Boolean { // true when it holds nothing worth keeping
+            val list = m.optJSONArray("contents") ?: return true
+            var empty = true
+            for (k in 0 until list.length()) {
+                val x = list.getJSONObject(k)
+                val n = x.getString("name")
+                if (x.optBoolean("isfolder")) {
+                    if (n.startsWith(".")) { empty = false; continue }
+                    if (walk(x)) runCatching { api.call("deletefolderrecursive", mapOf("folderid" to x.getLong("folderid").toString())) } else empty = false
+                } else if (n != ".DS_Store") empty = false
+            }
+            return empty
+        }
+        walk(o)
+    }
+
+    companion object {
+        fun open(root: String): PCloudLib? = PCloudApi.saved()?.let { PCloudLib(it, root) }
+    }
+}

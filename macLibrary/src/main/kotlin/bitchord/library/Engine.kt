@@ -110,213 +110,133 @@ object Engine {
         val manifest = Manifest(root)
         val covers = Covers(root)
         fun rel(p: String) = Words.nfc(p.removePrefix(root).trimStart('/'))
+        val lib: Lib = if (PCloud.isDrive(root)) PCloudLib.open(root) ?: run {
+            val msg = "La biblioteca está en pCloud Drive: inicia sesión en pCloud en Ajustes para construirla (la app trabaja con pCloud directamente)"
+            Live.end(msg); return msg
+        } else LocalLib(root)
         val bySource = HashMap<String, Builder.Item>()
         plan.copy.forEach { i -> i.copies.forEach { bySource[Words.nfc(it)] = i } }
         val byTarget = plan.copy.associateBy { rel(it.target).lowercase() }
         val skippedPaths = plan.skipped.mapTo(HashSet()) { Words.nfc(it.first.path) }
-
-        // What the library holds now (names as the disk spells them; compared in one form).
-        Live.phase = "mirando lo que ya hay"
-        val rootFile = File(root)
-        // On pCloud Drive, files still uploading can't be moved: wait until it has uploaded everything.
-        if (PCloud.isDrive(root)) PCloud.waitReady(rootFile, "antes de ordenar")
-        // Folders whose name differs only in case ("NARUTO" → "Naruto"): renamed first, so songs land in the right one.
-        fixCase(rootFile, plan.copy.map { rel(File(it.target).parent) }.toSet())
-        val onDisk = HashMap<String, File>()
-        rootFile.walkTopDown().onEnter { !it.name.startsWith(".") }
-            .filter { it.isFile && it.extension.lowercase() == "mp3" && !it.name.startsWith(".") }.forEach { onDisk[rel(it.path)] = it }
         val known = tracks.associateBy { Words.nfc(it.path) }
-        val held = HashMap<String, String>() // item's target → library file holding it
-        val unwanted = ArrayList<String>()
-        val leftovers = ArrayList<String>()
-        for (r in onDisk.keys.sorted()) {
-            val src = manifest.files[r]
-            val item = src?.let { bySource[it] } ?: byTarget[r.lowercase()]
+        val temp = File(System.getProperty("user.home"), "Music/.bitchord-staging").apply { mkdirs() }
+
+        // What the library holds now.
+        Live.phase = "mirando lo que ya hay (${lib.name})"
+        val present = runCatching { lib.list() }.getOrElse { val msg = "No se pudo leer la biblioteca: ${it.message}"; Live.end(msg); return msg }
+        val held = HashMap<String, LibFile>() // item's target → file holding it
+        val unwanted = ArrayList<LibFile>()
+        val leftovers = ArrayList<LibFile>()
+        for (f in present.values.sortedBy { it.rel }) {
+            val src = manifest.files[f.rel]
+            val item = src?.let { bySource[it] } ?: byTarget[f.rel.lowercase()]
             when {
-                item == null && src != null && src in skippedPaths -> unwanted += r // made by the app, now left out (karaoke…)
-                item == null -> leftovers += r
-                held.containsKey(item.target) -> unwanted += r // a second copy of one song
-                else -> held[item.target] = r
+                item == null && src != null && src in skippedPaths -> unwanted += f // made by the app, now left out (karaoke, quarantine…)
+                item == null -> leftovers += f
+                held.containsKey(item.target) -> unwanted += f // a second copy of one song (or a pCloud "(1)" copy)
+                else -> held[item.target] = f
             }
         }
-        // Files the app made before it kept a manifest, or from sources not read now: told by length and title.
+        // Files the app made before it kept a manifest: told by length and title (from what the app read of them).
         val byLength = plan.copy.filter { it.target !in held }.groupBy { ((it.track.seconds ?: 0.0) * 2).toInt() }
         val unknown = ArrayList<String>()
-        for (r in leftovers) {
-            if (Live.stop) break
-            Live.current = r
-            val f = onDisk[r]!!
-            val t = Scanner.get(f.path) ?: runCatching { Scanner.probe(f) }.getOrNull()
+        for (f in leftovers) {
+            val t = lib.local(f)?.let { Scanner.get(it.path) }
             val s = t?.seconds
-            val name = Words.plain(f.nameWithoutExtension)
+            val name = Words.plain(File(f.rel).nameWithoutExtension)
             val match = if (s == null) null else (-1..1).flatMap { byLength[(s * 2).toInt() + it].orEmpty() }
                 .filter { it.target !in held && kotlin.math.abs((it.track.seconds ?: 0.0) - s) < 1.0 && Words.plain(it.title).let { w -> w.length >= 2 && name.contains(w) } }
                 .distinctBy { it.target }.singleOrNull()
-            if (match != null) { held[match.target] = r; manifest.files.putIfAbsent(r, Words.nfc(match.track.path)) } else unknown += r
+            if (match != null) { held[match.target] = f; manifest.files.putIfAbsent(f.rel, Words.nfc(match.track.path)) } else unknown += f.rel
         }
         Live.unmatched = unknown
         if (unknown.isNotEmpty()) ops.log("app", "library: ${unknown.size} files not made by the app and matching no song (left where they are): ${unknown.take(5)}")
-        // A plan far smaller than the library means the sources weren't read: nothing is removed then.
-        if (unwanted.size > 50 && plan.copy.size < onDisk.size) { ops.log("app", "build: plan smaller than the library (sources not read?) — nothing removed"); unwanted.clear() }
+        if (unwanted.size > 50 && plan.copy.size < present.size) { ops.log("app", "build: plan smaller than the library (sources not read?) — nothing removed"); unwanted.clear() }
 
         Live.total = plan.copy.size + unwanted.size
         // 1. Remove what the plan no longer wants (only files the app made, or second copies).
         Live.phase = "quitando lo que sobra"
-        for (r in unwanted) {
+        for (f in unwanted) {
             if (Live.stop) break
-            Live.current = r
-            val f = onDisk[r]!!
-            val gone = io(60) { runCatching { java.nio.file.Files.delete(f.toPath()); true }.getOrElse { e ->
-                // pCloud Drive may refuse to delete a file it is still uploading: out of sight instead.
-                val bin = File(rootFile, ".papelera").apply { mkdirs() }
-                f.renameTo(File(bin, System.nanoTime().toString() + "-" + f.name)).also { if (!it) Live.error("no se pudo quitar $r: ${e.javaClass.simpleName} ${e.message.orEmpty()}") }
-            } } ?: false
-            if (gone) { Live.deleted.incrementAndGet(); manifest.files.remove(r); Scanner.forget(f.path); ops.log("app", "removed $r (no song of the plan)") }
+            Live.current = f.rel
+            val err = lib.delete(f)
+            if (err == null) { Live.deleted.incrementAndGet(); manifest.files.remove(f.rel); ops.log("app", "removed ${f.rel}") }
+            else Live.error("no se pudo quitar ${f.rel}: $err")
             Live.done.incrementAndGet(); Live.write()
         }
-        // 2. Put each song held at its place: renamed (on pCloud Drive a rename is not uploaded
-        // again); a better copy found since replaces it.
+        // 2. Put each song held at its place (a move: nothing is copied or uploaded again).
         Live.phase = "ordenando lo ya copiado"
         val pending = ArrayDeque(plan.copy.filter { it.target in held })
-        val placed = ArrayList<Pair<Builder.Item, File>>()
-        val replace = ArrayList<Pair<Builder.Item, File>>()
+        val placed = ArrayList<Pair<Builder.Item, LibFile>>()
+        val replace = ArrayList<Builder.Item>()
         var stuck = 0
         while (pending.isNotEmpty() && !Live.stop) {
             val i = pending.removeFirst()
             val cur = held[i.target]!!
             val target = rel(i.target)
             Live.current = target
-            val curFile = onDisk[cur]!!
-            val curSource = manifest.files[cur]
+            val curSource = manifest.files[cur.rel]
             val better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (known[curSource]?.let { Builder.rank(it) } ?: 9)
-            val targetFile = File(i.target)
-            if (curFile.path == i.target) { if (better) replace += i to curFile else placed += i to curFile; Live.done.incrementAndGet(); continue }
-            if (targetFile.exists() && Words.nfc(curFile.path).lowercase() != Words.nfc(i.target).lowercase()) {
-                // Its place is still taken by a song that has to move first.
+            if (cur.actual == target) { if (better) replace += i else placed += i to cur; Live.done.incrementAndGet(); continue }
+            if (lib.exists(target) && cur.rel.lowercase() != target.lowercase()) {
                 if (++stuck <= pending.size + 1) { pending.addLast(i); continue }
                 Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue
             }
             stuck = 0
-            val moved = io(60) {
-                targetFile.parentFile.mkdirs()
-                runCatching { java.nio.file.Files.move(curFile.toPath(), targetFile.toPath()); true }.getOrElse { ex -> lastIoError = "${ex.javaClass.simpleName}: ${ex.message}"; false } || run {
-                    // Same name in another form (accents, case): through a temporary name.
-                    val tmp = File(targetFile.parentFile, ".mv-" + System.nanoTime() + ".mp3")
-                    curFile.renameTo(tmp) && tmp.renameTo(targetFile)
-                }
-            }
-            if (moved == null) { Live.error("pCloud no responde al mover $cur (se deja para la próxima vez)"); Live.done.incrementAndGet(); continue }
-            if (moved == true) {
-                manifest.files.remove(cur)
+            val err = lib.move(cur, target)
+            if (err == null) {
+                manifest.files.remove(cur.rel)
                 manifest.files[target] = curSource ?: Words.nfc(i.track.path)
-                Scanner.moved(curFile.path, targetFile.path)
+                lib.local(cur)?.let { old -> Scanner.moved(old.path, File(root, target).path) }
                 Live.moved.incrementAndGet()
-                ops.log("app", "moved $cur → $target")
-                if (better) replace += i to targetFile else placed += i to targetFile
-            } else { Live.error("no se pudo mover $cur ($lastIoError)"); ops.log("app", "error moving $cur → $target: $lastIoError") }
+                ops.log("app", "moved ${cur.rel} → $target")
+                if (better) replace += i else placed += i to cur.copy(rel = target, actual = target)
+            } else { Live.error("no se pudo mover ${cur.rel}: $err"); ops.log("app", "error moving ${cur.rel} → $target: $err") }
             Live.done.incrementAndGet()
             if (Live.done.get() % 50 == 0) manifest.save()
             Live.write()
         }
         manifest.save()
-        // 2b. Tags: only files whose tags differ from the plan are rewritten (a few at a time);
-        // better copies replace the old ones.
-        Live.phase = "corrigiendo etiquetas y cambiando por mejores copias"
-        fun differs(i: Builder.Item, f: File): Boolean {
-            val t = Scanner.get(f.path)?.tags ?: return true
+
+        // 3. Write what is missing, what has wrong tags and what has a better copy now — each made
+        // on the Mac from its source, then put in the library (uploaded, on pCloud).
+        fun differs(i: Builder.Item): Boolean {
+            val t = Scanner.get(File(root, rel(i.target)).path)?.tags ?: return false // unknown tags: left as they are
             fun same(k: String, v: String?) = Words.nfc(t[k].orEmpty()).trim() == Words.nfc(v.orEmpty()).trim()
             return !(same("title", i.title) && same("artist", i.artist) && same("album", i.album) && same("album_artist", i.albumArtist) &&
                 (t["date"] ?: t["year"]).orEmpty().take(4) == i.year.orEmpty() && t["track"]?.substringBefore('/')?.trim()?.toIntOrNull() == i.trackNo)
         }
-        val retag = placed.filter { (i, f) -> differs(i, f) }.map { it to false } + replace.map { it to true }
-        Live.total += retag.size
-        val tagPool = Executors.newFixedThreadPool(workers)
-        for ((pair, better) in retag) tagPool.submit {
+        val missing = plan.copy.filter { it.target !in held && !lib.exists(rel(it.target)) }
+        val rewrite = placed.map { it.first }.filter(::differs) + replace
+        val work = rewrite.map { it to "rewrite" } + missing.map { it to "copy" }
+        Live.total = Live.done.get() + work.size
+        Live.phase = "escribiendo: ${missing.size} que faltan, ${rewrite.size} con etiquetas o copia mejor"
+        val pool = Executors.newFixedThreadPool(workers)
+        for ((i, why) in work) pool.submit {
             if (Live.stop) return@submit
-            val (i, f) = pair
-            Live.current = rel(f.path)
-            val tmp = i.copy(target = File(f.parentFile, ".new-" + f.name).path)
-            File(tmp.target).delete()
-            val result = if (better) Builder.copy(tmp, covers) else Builder.copy(tmp, covers, from = f)
-            result.onSuccess {
-                val path = f.path
-                val del = runCatching { java.nio.file.Files.delete(f.toPath()); null }.getOrElse { ex -> "${ex.javaClass.simpleName}: ${ex.message}" }
-                if (del == null && File(tmp.target).renameTo(File(path))) {
-                    if (better) manifest.files[rel(path)] = Words.nfc(i.track.path)
-                    Scanner.put(libraryTrack(i, File(path)))
-                    if (better) Live.copied.incrementAndGet()
-                    ops.log("app", (if (better) "replaced with a better copy " else "tags fixed ") + rel(path))
-                } else { File(tmp.target).delete(); Live.error("no se pudo cambiar ${rel(path)} (${del ?: "no se pudo renombrar"})") }
-            }.onFailure { Live.error("${rel(f.path)}: ${it.message}"); ops.log("app", "error fixing ${rel(f.path)}: ${it.message}") }
-            if (Live.done.incrementAndGet() % 25 == 0) { manifest.save(); covers.save() }
+            val target = rel(i.target)
+            Live.current = target
+            val tmp = File(temp, System.nanoTime().toString() + ".mp3")
+            Builder.copy(i.copy(target = tmp.path), covers).onSuccess {
+                val err = lib.put(tmp, target)
+                if (err == null) {
+                    manifest.files[target] = Words.nfc(i.track.path)
+                    Scanner.put(libraryTrack(i, File(root, target), tmp.length().takeIf { it > 0 } ?: i.track.size))
+                    if (why == "copy") { Live.copied.incrementAndGet(); synchronized(covers) { covers.propose(i.key, plan.alternatives[i.key].orEmpty()) } } else Live.moved.incrementAndGet()
+                    ops.log("app", (if (why == "copy") "copied ${i.track.path} → " else "rewritten ") + "$target [${i.reason}]")
+                } else { Live.error("no se pudo escribir $target: $err"); ops.log("app", "error writing $target: $err") }
+            }.onFailure { Live.error("${i.track.path}: ${it.message}"); ops.log("app", "error converting ${i.track.path}: ${it.message}") }
+            tmp.delete()
+            if (Live.done.incrementAndGet() % 25 == 0) { manifest.save(); synchronized(covers) { covers.save() } }
             Live.write()
         }
-        tagPool.shutdown()
-        while (!tagPool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
-        manifest.save(); covers.save()
-        // 3. Copy what the library still lacks. Into pCloud Drive, in batches of about 10 GB: each
-        // made on the Mac's own disk, then moved into pCloud, and the next one only once pCloud has
-        // uploaded it (pCloud holds files it is still uploading, and its cache fills the disk).
-        Live.phase = "copiando lo que falta"
-        val missing = plan.copy.filter { it.target !in held && !File(it.target).exists() }
-        val onPCloud = PCloud.isDrive(root)
-        fun estimate(i: Builder.Item) = if (i.track.lossless) ((i.track.seconds ?: 240.0) * 40_000).toLong() else i.track.size
-        val batches = if (!onPCloud) listOf(missing) else missing.fold(ArrayList<ArrayList<Builder.Item>>()) { acc, i ->
-            if (acc.isEmpty() || acc.last().sumOf(::estimate) + estimate(i) > PCloud.BATCH) acc.add(ArrayList())
-            acc.last().add(i); acc
-        }
-        val staging = File(System.getProperty("user.home"), "Music/.bitchord-staging")
-        for ((n, batch) in batches.withIndex()) {
-            if (Live.stop) break
-            if (onPCloud) PCloud.waitReady(rootFile, "antes del lote ${n + 1} de ${batches.size}")
-            Live.phase = if (onPCloud) "lote ${n + 1} de ${batches.size}: preparando en el Mac" else "copiando lo que falta"
-            val pool = Executors.newFixedThreadPool(workers)
-            val made = java.util.Collections.synchronizedList(ArrayList<Pair<Builder.Item, File>>())
-            for (i in batch) pool.submit {
-                if (Live.stop) return@submit
-                Live.current = rel(i.target)
-                val local = if (onPCloud) i.copy(target = File(staging, rel(i.target)).path) else i
-                File(local.target).delete()
-                Builder.copy(local, covers).onSuccess {
-                    made += i to File(local.target)
-                    synchronized(covers) { covers.propose(i.key, plan.alternatives[i.key].orEmpty()) }
-                }.onFailure { Live.error("${i.track.path}: ${it.message}"); ops.log("app", "error copying ${i.track.path}: ${it.message}") }
-                if (!onPCloud) Live.done.incrementAndGet()
-                Live.write()
-            }
-            pool.shutdown()
-            while (!pool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
-            // Into the library (on pCloud: a move from the Mac's disk into pCloud Drive).
-            if (onPCloud) Live.phase = "lote ${n + 1} de ${batches.size}: pasando a pCloud"
-            for ((i, f) in made) {
-                val target = File(i.target)
-                val ok = if (!onPCloud) true else io(300) {
-                    target.parentFile.mkdirs()
-                    runCatching { java.nio.file.Files.move(f.toPath(), target.toPath()); true }.getOrElse { ex -> lastIoError = "${ex.javaClass.simpleName}: ${ex.message}"; false }
-                } == true
-                if (ok) {
-                    manifest.files[rel(i.target)] = Words.nfc(i.track.path)
-                    Scanner.put(libraryTrack(i, target))
-                    Live.copied.incrementAndGet()
-                    ops.log("app", "copied ${i.track.path} → ${rel(i.target)} [${i.reason}]")
-                } else Live.error("no se pudo pasar a pCloud ${rel(i.target)} ($lastIoError)")
-                if (onPCloud) Live.done.incrementAndGet()
-                Live.write()
-            }
-            manifest.save(); covers.save(); Scanner.saveIndex()
-        }
-        if (onPCloud) staging.walkBottomUp().filter { it.isDirectory }.forEach { it.delete() }
-        Live.done.addAndGet(plan.copy.size - missing.size - held.size)
+        pool.shutdown()
+        while (!pool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
         manifest.save(); covers.save(); Scanner.saveIndex()
-        // What pCloud wouldn't delete before: deleted now if it lets.
-        File(rootFile, ".papelera").listFiles()?.forEach { runCatching { java.nio.file.Files.delete(it.toPath()) } }
         // 4. Empty folders go.
-        rootFile.walkBottomUp().filter { it.isDirectory && it != rootFile && !it.path.contains("/.bitchord-library") }.forEach { d ->
-            val left = d.listFiles().orEmpty()
-            if (left.all { it.name == ".DS_Store" }) { left.forEach { it.delete() }; d.delete() }
-        }
+        if (!Live.stop) { Live.phase = "quitando carpetas vacías"; Live.write(force = true); runCatching { lib.tidy() } }
         val summary = (if (Live.stop) "Parado" else "Terminado") +
-            ": ${Live.copied.get()} copiadas, ${Live.moved.get()} movidas a su sitio, ${Live.deleted.get()} quitadas, ${Live.failed.get()} con error" +
+            ": ${Live.copied.get()} copiadas, ${Live.moved.get()} movidas o corregidas, ${Live.deleted.get()} quitadas, ${Live.failed.get()} con error" +
             (if (unknown.isNotEmpty()) ", ${unknown.size} archivos sin identificar (en live.json)" else "")
         ops.log("app", "build: $summary")
         ops.flush()
@@ -324,28 +244,9 @@ object Engine {
         return summary
     }
 
-    private fun fixCase(root: File, dirs: Set<String>) {
-        val wanted = dirs.flatMap { d -> d.split('/').indices.map { n -> d.split('/').take(n + 1).joinToString("/") } }.toSortedSet(compareBy({ it.count { c -> c == '/' } }, { it }))
-        for (d in wanted) {
-            val parent = File(root, d.substringBeforeLast('/', ""))
-            val name = d.substringAfterLast('/')
-            val children = parent.listFiles().orEmpty()
-            if (children.any { it.name == name }) continue
-            val actual = children.firstOrNull { it.isDirectory && it.name.equals(name, ignoreCase = true) } ?: continue
-            val tmp = File(parent, ".case-" + System.nanoTime())
-            if (actual.renameTo(tmp) && tmp.renameTo(File(parent, name))) Ops(root.path).log("app", "renamed folder ${actual.name} → $name") 
-        }
-    }
-
-    @Volatile private var lastIoError = ""
-    private val ioPool = Executors.newCachedThreadPool { r -> Thread(r).apply { isDaemon = true } }
-
-    /** A file operation that pCloud Drive may hold: given up on after [seconds] (null). */
-    private fun <T> io(seconds: Long, block: () -> T): T? = runCatching { ioPool.submit(java.util.concurrent.Callable { block() }).get(seconds, TimeUnit.SECONDS) }.getOrNull()
-
     /** A file the app just wrote, as the index will know it. */
-    private fun libraryTrack(i: Builder.Item, f: File) = i.track.copy(
-        path = f.path, size = f.length(), modified = f.lastModified(), codec = "mp3",
+    private fun libraryTrack(i: Builder.Item, f: File, size: Long) = i.track.copy(
+        path = f.path, size = size, modified = System.currentTimeMillis(), codec = "mp3",
         kbps = if (i.track.lossless) 320 else i.track.kbps, hasCover = true,
         tags = mapOf("title" to i.title, "artist" to i.artist, "album" to i.album, "album_artist" to i.albumArtist) +
             listOfNotNull(i.year?.let { "date" to it }, i.trackNo?.let { "track" to it.toString() }),

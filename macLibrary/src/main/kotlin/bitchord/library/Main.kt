@@ -619,6 +619,37 @@ private fun SettingsPane(state: LibraryState) {
             state.recompute()
             state.message = "Ajustes guardados. Pulsa ↻ para volver a leer."
         }) { Text("Guardar") }
+        // pCloud: the library on pCloud Drive is handled through pCloud's API, signed in once here.
+        Spacer(Modifier.height(8.dp))
+        Text("pCloud", color = Color.White, fontSize = 16.sp)
+        var account by remember { mutableStateOf(PCloudApi.account()) }
+        if (account != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Conectada como $account. Las operaciones en la biblioteca se hacen directamente en pCloud.", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = { PCloudApi.logout(); account = null }) { Text("Cerrar sesión") }
+            }
+        } else {
+            var email by remember { mutableStateOf("") }
+            var password by remember { mutableStateOf("") }
+            var status by remember { mutableStateOf<String?>(null) }
+            val scope = rememberCoroutineScope()
+            Text("Para construir la biblioteca en pCloud Drive la app usa pCloud directamente (mover al instante, subir y comprobar sin pasar por la caché de pCloud Drive). " +
+                "La contraseña solo se envía a pCloud y no se guarda; se guarda el permiso que pCloud devuelve.", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(email, { email = it }, label = { Text("Correo de pCloud") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(password, { password = it }, label = { Text("Contraseña") }, singleLine = true, modifier = Modifier.weight(1f),
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                Button(enabled = email.isNotBlank() && password.isNotBlank(), onClick = {
+                    scope.launch {
+                        status = "Conectando…"
+                        val r = withContext(Dispatchers.IO) { PCloudApi.login(email.trim(), password) }
+                        password = ""
+                        r.onSuccess { account = PCloudApi.account(); status = null }.onFailure { status = "No se pudo: ${it.message}" }
+                    }
+                }) { Text("Iniciar sesión") }
+            }
+            status?.let { Text(it, color = Color(0xFFFFB4A9), fontSize = 12.sp) }
+        }
         Text("ffprobe: ${Tools.ffprobe}", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
         Text("ffmpeg: ${Tools.ffmpeg}", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
     }

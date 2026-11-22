@@ -147,7 +147,11 @@ object Scanner {
     fun moved(from: String, to: String) { index.remove(from)?.let { index[to] = it.copy(path = to) } }
 
     /** What the index already knows under [folders] (no reading). */
-    fun known(folders: List<String>): List<Track> = index.values.filter { t -> folders.any { t.path.startsWith(it) } }
+    /** Files under [folders] (accents in either Unicode form: pCloud and macOS disagree). */
+    fun known(folders: List<String>): List<Track> {
+        val fs = folders.map { Words.nfc(it).trimEnd('/') + "/" }
+        return index.values.filter { t -> val p = Words.nfc(t.path); fs.any { p.startsWith(it) } }
+    }
 
     /**
      * Like [scan], but stops at [deadline] (ms since epoch), saving what it read: run it

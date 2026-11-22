@@ -191,7 +191,14 @@ object Builder {
         }
     }
 
-    fun plan(sources: List<Source>, allTracks: List<Track>, targetRoot: String): Plan {
+    fun plan(sources0: List<Source>, allTracks: List<Track>, targetRoot: String): Plan {
+        // Each source's path spelt as its files are (accents in one Unicode form or the other).
+        val sources = sources0.map { s ->
+            val depth = s.path.trimEnd('/').count { it == '/' }
+            val want = Words.nfc(s.path).trimEnd('/') + "/"
+            val t = allTracks.firstOrNull { Words.nfc(it.path).startsWith(want) } ?: return@map s
+            s.copy(path = t.path.split('/').take(depth + 1).joinToString("/"))
+        }
         loadAliases(targetRoot)
         val skipped = ArrayList<Pair<Track, String>>()
         val quarantine = Quarantine.load(targetRoot)
