@@ -1933,7 +1933,7 @@
     <string name="song_dna_versions">Otras versiones</string>
     <string name="song_dna_other_artists">De otros artistas</string>
     <string name="song_dna_appears_on">Aparece en</string>
-    <string name="song_dna_anime">Temas de anime</string>
+    <string name="song_dna_anime">Usado en (anime, juegos, series)</string>
     <string name="song_dna_covers">Portadas alternativas</string>
     <string name="song_dna_change_cover">Cambiar la portada…</string>
     <string name="song_dna_details">Detalles</string>
@@ -1964,6 +1964,7 @@
     <string name="song_dna_d_album">Álbum</string>
     <string name="song_dna_d_released">Publicada</string>
     <string name="song_dna_d_label">Sello</string>
+    <string name="song_dna_d_catalog">N.º de catálogo</string>
     <string name="song_dna_d_genres">Géneros</string>
     <string name="song_dna_d_duration">Duración</string>
     <string name="song_dna_d_bpm">Tempo</string>

@@ -54,7 +54,9 @@ import java.util.concurrent.TimeUnit
  *  - Genius (writers, producers, every credit, the story, samples and covers),
  *  - Last.fm (its wiki, tags, listeners), iTunes and Deezer (genre, date, BPM, covers),
  *  - Discogs, with your own free token (detailed credits, label, catalogue number),
- *  - AnimeThemes (the anime openings and endings it is).
+ *  - AnimeThemes (the anime openings and endings it is),
+ *  - for Japanese music, anime and games ([DnaJapan]): VGMdb, pocketmonsters.net,
+ *    canta-per-me.net, niconico 大百科, Generasia and the series' own wikis.
  *
  * Kept on the phone in [FILE] (copied to pCloud by CloudBackup) and filled in for your
  * whole library at night ([fillAll]); a song not yet looked up is looked up when its page
@@ -64,7 +66,7 @@ object SongDna {
 
     private const val TAG = "BitChord"
     const val FILE = "song_dna.json"
-    private const val VERSION = 2
+    private const val VERSION = 3
     private const val FRESH_MS = 120L * 24 * 60 * 60 * 1000
     private const val FRESH_EMPTY_MS = 21L * 24 * 60 * 60 * 1000
     private const val FRESH_FAILED_MS = 2L * 24 * 60 * 60 * 1000
@@ -80,6 +82,8 @@ object SongDna {
         val discogsId: Long? = null,
         val ytId: String? = null,
         val image: String? = null,
+        /** VGMdb's artist page ("artist/77"). */
+        val vgmdbId: String? = null,
     )
     data class Fact(val text: String, val source: String, val url: String?)
     data class Cover(val url: String, val label: String)
@@ -103,6 +107,8 @@ object SongDna {
         val album: String? = null,
         val releaseDate: String? = null,
         val label: String? = null,
+        /** Catalogue number of the release it is on ("VVCL-2985"). */
+        val catalog: String? = null,
         val isrc: String? = null,
         val bpm: String? = null,
         val language: String? = null,
@@ -192,6 +198,7 @@ object SongDna {
         file = File(context.filesDir, FILE)
         DnaKeys.init(context)
         DnaPeople.init(context)
+        DnaJapan.init(context)
         scope.launch { load() }
     }
 
@@ -227,7 +234,9 @@ object SongDna {
     fun cached(song: Song): Dna? = cache[keyOf(song)]
 
     private fun fresh(d: Dna): Boolean =
-        d.version == VERSION && System.currentTimeMillis() - d.fetchedAt < when {
+        d.version == VERSION && timeFresh(d)
+
+    private fun timeFresh(d: Dna): Boolean = System.currentTimeMillis() - d.fetchedAt < when {
             d.failed.isNotEmpty() -> FRESH_FAILED_MS
             d.empty -> FRESH_EMPTY_MS
             else -> FRESH_MS
@@ -239,7 +248,12 @@ object SongDna {
         if (!force) cache[key]?.takeIf(::fresh)?.let { return it }
         val running = inFlight[key]
         if (running != null && !force) return running.await()
-        val job = scope.async { lookUp(song, key).let { new -> cache[key]?.let { old -> merged(old, new) } ?: new } }
+        // Looked up before the Japanese / anime / game sources existed: only they are asked now.
+        val older = cache[key]?.takeIf { !force && it.version == 2 && timeFresh(it) }
+        val job = scope.async {
+            if (older != null) withJapan(song, older)
+            else lookUp(song, key).let { new -> cache[key]?.let { old -> merged(old, new) } ?: new }
+        }
         inFlight[key] = job
         return try {
             job.await().also { d ->
@@ -292,7 +306,7 @@ object SongDna {
                         if (!BackgroundHours.now()) break
                     }
                     if (!BackgroundHours.now()) break
-                    runCatching { withTimeoutOrNull(90_000) { get(s) } }
+                    runCatching { withTimeoutOrNull(180_000) { get(s) } }
                     done++
                     _progress.value = done to todo.size
                     delay(1_500)
@@ -311,7 +325,7 @@ object SongDna {
 
     // ── Looking a song up ──────────────────────────────────────────────────
 
-    private class Found {
+    internal class Found {
         val credits = ArrayList<Credit>()
         val facts = ArrayList<Fact>()
         val covers = ArrayList<Cover>()
@@ -328,6 +342,7 @@ object SongDna {
         var bpm: String? = null
         var language: String? = null
         var wikidata: String? = null
+        var catalog: String? = null
     }
 
     private suspend fun lookUp(song: Song, key: String): Dna = coroutineScope {
@@ -367,7 +382,20 @@ object SongDna {
             val wd = mb?.wikidata ?: isrc?.let { wikidataByIsrc(it) }
             wikipedia(wd, titles, artist)
         }
-        val all = found + listOfNotNull(wiki)
+        val general = found + listOfNotNull(wiki)
+        // 4. The Japanese, anime and game sources (VGMdb, the fan sites, the series' wikis).
+        val japan = runCatching {
+            val ctx = DnaJapan.contextOf(
+                song, general.firstNotNullOfOrNull { it.album }, general.flatMap { it.uses },
+                general.flatMap { it.genres } + listOfNotNull(general.firstNotNullOfOrNull { it.language }?.let { "lang $it" }),
+            )
+            val credits = general.flatMap { it.credits }
+            val noWriters = credits.none { DnaRoles.group(it.role) == DnaRoles.Group.WRITING }
+            if (DnaJapan.relevant(song, ctx, general.flatMap { it.uses }, credits)) {
+                DnaJapan.lookUp(song, ctx, general.firstNotNullOfOrNull { it.album }, credits, noWriters) { n, l, b -> ask(n, l, b) }
+            } else emptyList()
+        }.getOrDefault(emptyList())
+        val all = general + japan
         fun <T> firstOf(f: (Found) -> T?): T? = all.firstNotNullOfOrNull(f)
         val dna = Dna(
             key = key,
@@ -377,19 +405,20 @@ object SongDna {
             album = firstOf { it.album },
             releaseDate = earliestDate(all.mapNotNull { it.releaseDate }),
             label = firstOf { it.label },
+            catalog = firstOf { it.catalog },
             isrc = firstOf { it.isrc },
             bpm = firstOf { it.bpm },
             language = firstOf { it.language },
             genres = all.flatMap { it.genres }.map { it.trim().replaceFirstChar { c -> c.uppercase() } }
                 .filter { it.isNotBlank() && it.length < 40 }.distinctBy { it.lowercase() }.take(8),
             credits = mergeCredits(all.flatMap { it.credits }),
-            facts = all.flatMap { it.facts }.filter { it.text.length > 20 }.distinctBy { it.text.take(60) }.take(6),
-            covers = all.flatMap { it.covers }.distinctBy { it.url }.take(14),
+            facts = all.flatMap { it.facts }.filter { it.text.length > 20 }.distinctBy { it.text.take(60) }.take(9),
+            covers = all.flatMap { it.covers }.distinctBy { it.url }.take(24),
             relations = all.flatMap { it.relations }
                 .distinctBy { it.kind + "|" + OwnFileMatcher.key(it.title) + "|" + OwnFileMatcher.key(firstArtist(it.artist)) }.take(60),
-            uses = all.flatMap { it.uses }.distinct().take(12),
+            uses = all.flatMap { it.uses }.map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(16),
             stats = LinkedHashMap<String, String>().also { m -> all.forEach { f -> f.stats.forEach { (k, v) -> m.putIfAbsent(k, v) } } },
-            links = all.flatMap { it.links }.distinctBy { it.url }.take(12),
+            links = all.flatMap { it.links }.distinctBy { it.url }.take(20),
             sources = all.flatMap { it.sources }.distinct(),
             failed = failed.toList(),
         )
@@ -409,6 +438,44 @@ object SongDna {
     }
 
     /**
+     * A song looked up before the Japanese / anime / game sources: they alone are asked,
+     * and what they find is added to what was known.
+     */
+    private suspend fun withJapan(song: Song, old: Dna): Dna {
+        val failed = java.util.Collections.synchronizedList(ArrayList<String>())
+        val ctx = DnaJapan.contextOf(song, old.album, old.uses, old.genres + listOfNotNull(old.language?.let { "lang $it" }))
+        val noWriters = old.credits.none { DnaRoles.group(it.role) == DnaRoles.Group.WRITING }
+        val japan = if (DnaJapan.relevant(song, ctx, old.uses, old.credits)) {
+            DnaJapan.lookUp(song, ctx, old.album, old.credits, noWriters) { name, limit, block ->
+                var answered = false
+                val r = withTimeoutOrNull(limit) {
+                    runCatching { block() }.onSuccess { answered = true }
+                        .onFailure { TrackLog.d(TAG, "song dna: $name failed: ${it.message}") }.getOrNull()
+                }
+                if (!answered) failed += name
+                r
+            }
+        } else emptyList()
+        val d = old.copy(
+            version = VERSION,
+            album = old.album ?: japan.firstNotNullOfOrNull { it.album },
+            releaseDate = earliestDate(listOfNotNull(old.releaseDate) + japan.mapNotNull { it.releaseDate }),
+            label = old.label ?: japan.firstNotNullOfOrNull { it.label },
+            catalog = old.catalog ?: japan.firstNotNullOfOrNull { it.catalog },
+            genres = (old.genres + japan.flatMap { it.genres }).filter { it.isNotBlank() && it.length < 40 }.distinctBy { it.lowercase() }.take(10),
+            credits = mergeCredits(old.credits + japan.flatMap { it.credits }),
+            facts = (old.facts + japan.flatMap { it.facts }).filter { it.text.length > 20 }.distinctBy { it.text.take(60) }.take(9),
+            covers = (old.covers + japan.flatMap { it.covers }).distinctBy { it.url }.take(24),
+            uses = (old.uses + japan.flatMap { it.uses }).map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(16),
+            links = (old.links + japan.flatMap { it.links }).distinctBy { it.url }.take(20),
+            sources = (old.sources + japan.flatMap { it.sources }).distinct(),
+            failed = (old.failed + failed).distinct(),
+        )
+        if (japan.isNotEmpty()) TrackLog.d(TAG, "song dna: '${song.title}' — added from ${japan.flatMap { it.sources }.joinToString()}")
+        return d
+    }
+
+    /**
      * A new look-up on top of the last one: what a source said before is kept when it
      * didn't answer this time, so a bad night never makes a song's page poorer.
      */
@@ -421,13 +488,14 @@ object SongDna {
             album = new.album ?: old.album,
             releaseDate = new.releaseDate ?: old.releaseDate,
             label = new.label ?: old.label,
+            catalog = new.catalog ?: old.catalog,
             isrc = new.isrc ?: old.isrc,
             bpm = new.bpm ?: old.bpm,
             language = new.language ?: old.language,
             genres = keep(new.genres, old.genres, 8) { it.lowercase() },
             credits = mergeCredits(new.credits + old.credits.filter { it.source in lost }),
             facts = keep(new.facts, old.facts.filter { it.source in lost }, 6) { it.text.take(60) },
-            covers = keep(new.covers, old.covers, 14) { it.url },
+            covers = keep(new.covers, old.covers, 24) { it.url },
             relations = keep(new.relations, old.relations, 60) { it.kind + it.title + it.artist },
             uses = keep(new.uses, old.uses, 12) { it },
             stats = old.stats + new.stats,
@@ -453,12 +521,12 @@ object SongDna {
             val o = ids[pk] ?: c
             ids[pk] = o.copy(
                 mbid = o.mbid ?: c.mbid, geniusId = o.geniusId ?: c.geniusId, discogsId = o.discogsId ?: c.discogsId,
-                ytId = o.ytId ?: c.ytId, image = o.image ?: c.image,
+                ytId = o.ytId ?: c.ytId, image = o.image ?: c.image, vgmdbId = o.vgmdbId ?: c.vgmdbId,
             )
         }
         return seen.values.map { c ->
             val i = ids[personKey(c.name)] ?: return@map c
-            c.copy(mbid = c.mbid ?: i.mbid, geniusId = c.geniusId ?: i.geniusId, discogsId = c.discogsId ?: i.discogsId, ytId = c.ytId ?: i.ytId, image = c.image ?: i.image)
+            c.copy(mbid = c.mbid ?: i.mbid, geniusId = c.geniusId ?: i.geniusId, discogsId = c.discogsId ?: i.discogsId, ytId = c.ytId ?: i.ytId, image = c.image ?: i.image, vgmdbId = c.vgmdbId ?: i.vgmdbId)
         }.sortedBy { DnaRoles.group(it.role).ordinal }.take(80)
     }
 
@@ -484,7 +552,7 @@ object SongDna {
     }
 
     /** "4:59" → 299. */
-    private fun secondsOf(t: String?): Int? = t?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
+    internal fun secondsOf(t: String?): Int? = t?.split(':')?.mapNotNull { it.trim().toIntOrNull() }
         ?.takeIf { it.isNotEmpty() }?.fold(0) { acc, p -> acc * 60 + p }?.takeIf { it > 0 }
 
     /** Lengths that can be the same recording (both known and within 8 s, or one unknown). */
@@ -497,17 +565,20 @@ object SongDna {
 
     private fun norm(s: String) = s.lowercase().replace(BRACKETS, " ").filter { it.isLetterOrDigit() }
 
-    private fun sameTitle(want: List<String>, got: String): Boolean {
+    internal fun sameTitle(want: List<String>, got: String): Boolean {
         val g = norm(got)
         if (g.isEmpty()) return false
-        return want.any { w -> val n = norm(w); n.isNotEmpty() && (n == g || (n.length > 3 && (g.startsWith(n) || n.startsWith(g)))) }
+        return want.any { w -> val n = norm(w); n.isNotEmpty() && (n == g || (n.length > 3 && (g.startsWith(n) || n.startsWith(g)))) } ||
+            // Romaji against Japanese ("Wasure Saki" · 忘れ咲き).
+            want.any { w -> runCatching { com.music.bitchord.data.lyrics.CrossScript.sameTitle(w, got) }.getOrDefault(false) }
     }
 
-    private fun sameArtist(want: String, got: String): Boolean =
+    internal fun sameArtist(want: String, got: String): Boolean =
         runCatching { OwnFileMatcher.sameArtist(want, got) }.getOrDefault(false) ||
-            norm(got).let { g -> val w = norm(want); w.isNotEmpty() && g.isNotEmpty() && (g.contains(w) || w.contains(g)) }
+            norm(got).let { g -> val w = norm(want); w.isNotEmpty() && g.isNotEmpty() && (g.contains(w) || w.contains(g)) } ||
+            runCatching { com.music.bitchord.data.lyrics.CrossScript.sameArtist(want, got) }.getOrDefault(false)
 
-    private fun clip(s: String, max: Int = 1600): String {
+    internal fun clip(s: String, max: Int = 1600): String {
         val t = s.replace(Regex("\\s+\\n"), "\n").replace(Regex("\\n{3,}"), "\n\n").trim()
         if (t.length <= max) return t
         val cut = t.take(max)
@@ -1013,13 +1084,13 @@ object SongDna {
 
     private fun toJson(d: Dna): JSONObject = JSONObject().apply {
         put("k", d.key); put("t", d.title); put("a", d.artist); put("at", d.fetchedAt); put("v", d.version)
-        d.album?.let { put("al", it) }; d.releaseDate?.let { put("rd", it) }; d.label?.let { put("lb", it) }
+        d.album?.let { put("al", it) }; d.releaseDate?.let { put("rd", it) }; d.label?.let { put("lb", it) }; d.catalog?.let { put("cat", it) }
         d.isrc?.let { put("isrc", it) }; d.bpm?.let { put("bpm", it) }; d.language?.let { put("lang", it) }
         put("g", JSONArray(d.genres))
         put("c", JSONArray(d.credits.map { c ->
             JSONObject().put("r", c.role).put("n", c.name).put("s", c.source).apply {
                 c.mbid?.let { put("mb", it) }; c.geniusId?.let { put("gn", it) }; c.discogsId?.let { put("dc", it) }
-                c.ytId?.let { put("yt", it) }; c.image?.let { put("im", it) }
+                c.ytId?.let { put("yt", it) }; c.image?.let { put("im", it) }; c.vgmdbId?.let { put("vg", it) }
             }
         }))
         put("f", JSONArray(d.facts.map { JSONObject().put("x", it.text).put("s", it.source).put("u", it.url ?: "") }))
@@ -1045,6 +1116,7 @@ object SongDna {
         album = o.optString("al").ifBlank { null },
         releaseDate = o.optString("rd").ifBlank { null },
         label = o.optString("lb").ifBlank { null },
+        catalog = o.optString("cat").ifBlank { null },
         isrc = o.optString("isrc").ifBlank { null },
         bpm = o.optString("bpm").ifBlank { null },
         language = o.optString("lang").ifBlank { null },
@@ -1057,6 +1129,7 @@ object SongDna {
                 discogsId = it.optLong("dc").takeIf { v -> v > 0 },
                 ytId = it.optString("yt").ifBlank { null },
                 image = it.optString("im").ifBlank { null },
+                vgmdbId = it.optString("vg").ifBlank { null },
             )
         },
         facts = o.optJSONArray("f").objects().map { Fact(it.optString("x"), it.optString("s"), it.optString("u").ifBlank { null }) },

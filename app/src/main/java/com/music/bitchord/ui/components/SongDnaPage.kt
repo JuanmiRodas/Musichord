@@ -338,6 +338,7 @@ fun SongDnaPage(
             (d?.album ?: y?.album ?: song.albumName)?.let { add(R.string.song_dna_d_album to it) }
             (d?.releaseDate ?: y?.releaseDate ?: y?.releaseYear)?.let { add(R.string.song_dna_d_released to it) }
             d?.label?.let { add(R.string.song_dna_d_label to it) }
+            d?.catalog?.let { add(R.string.song_dna_d_catalog to it) }
             d?.genres?.takeIf { it.isNotEmpty() }?.let { add(R.string.song_dna_d_genres to it.joinToString(", ")) }
             song.durationText?.let { add(R.string.song_dna_d_duration to it) }
             d?.bpm?.let { add(R.string.song_dna_d_bpm to "$it BPM") }

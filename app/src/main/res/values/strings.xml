@@ -1845,7 +1845,7 @@
     <string name="song_dna_versions">Other versions</string>
     <string name="song_dna_other_artists">By other artists</string>
     <string name="song_dna_appears_on">Appears on</string>
-    <string name="song_dna_anime">Anime themes</string>
+    <string name="song_dna_anime">Used in (anime, games, series)</string>
     <string name="song_dna_covers">Alternative covers</string>
     <string name="song_dna_change_cover">Change the cover…</string>
     <string name="song_dna_details">Details</string>
@@ -1876,6 +1876,7 @@
     <string name="song_dna_d_album">Album</string>
     <string name="song_dna_d_released">Released</string>
     <string name="song_dna_d_label">Label</string>
+    <string name="song_dna_d_catalog">Catalogue no.</string>
     <string name="song_dna_d_genres">Genres</string>
     <string name="song_dna_d_duration">Length</string>
     <string name="song_dna_d_bpm">Tempo</string>
