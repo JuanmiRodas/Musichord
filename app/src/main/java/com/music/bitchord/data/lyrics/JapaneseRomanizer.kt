@@ -201,7 +201,11 @@ object JapaneseRomanizer {
         "一人きり" to "ヒトリキリ", "二人きり" to "フタリキリ", "誰か" to "ダレカ", "何度" to "ナンド",
         "何時" to "イツ", "何もかも" to "ナニモカモ", "今夜" to "コンヤ", "今宵" to "コヨイ", "故郷" to "フルサト",
     )
-    private val USUAL_SINGLE = mapOf("空" to "ソラ", "時" to "トキ", "心" to "ココロ", "瞳" to "ヒトミ", "涙" to "ナミダ", "誰" to "ダレ")
+    private val USUAL_SINGLE = mapOf(
+        "空" to "ソラ", "時" to "トキ", "心" to "ココロ", "瞳" to "ヒトミ", "涙" to "ナミダ", "誰" to "ダレ",
+        // 人 on its own is "hito" ("nin" only counting: 三人), 君 "kimi", 私 "watashi", 僕 "boku".
+        "人" to "ヒト", "君" to "キミ", "私" to "ワタシ", "僕" to "ボク", "夢" to "ユメ", "星" to "ホシ",
+    )
 
     private fun readings(tokens: List<com.atilika.kuromoji.ipadic.Token>): List<Tok> {
         val out = ArrayList<Tok>(tokens.size)
@@ -219,7 +223,11 @@ object JapaneseRomanizer {
                 i += joined.first
                 continue
             }
-            val reading = USUAL[t.surface] ?: USUAL_SINGLE[t.surface]?.takeIf { t.partOfSpeechLevel1 == "名詞" } ?: t.reading
+            val previous = tokens.getOrNull(i - 1)
+            val counted = previous != null && (previous.partOfSpeechLevel2 == "数" || previous.surface.all { it.isDigit() })
+            val reading = USUAL[t.surface]
+                ?: USUAL_SINGLE[t.surface]?.takeIf { t.partOfSpeechLevel1 == "名詞" && !(t.surface == "人" && counted) }
+                ?: t.reading
             out += Tok(t.surface, reading, t.partOfSpeechLevel1, t.partOfSpeechLevel2, t.partOfSpeechLevel3, t.position)
             i++
         }
@@ -271,6 +279,17 @@ object JapaneseRomanizer {
                 return@forEachIndexed
             }
             val (from, to) = spanOf(tok)
+            // BitChord Audio: numbers as they are sung ("2" → "ni", "100" → "hyaku").
+            if (surface.isNotEmpty() && surface.all { it.isDigit() } && surface.length <= 8) {
+                val n = surface.map { Character.getNumericValue(it) }.joinToString("").toLongOrNull()
+                val spoken = n?.let(::numberRomaji)
+                if (spoken != null) {
+                    out += Piece(spoken, spaced = true, from = from, to = to)
+                    gap = false
+                    previousPos = "名詞"
+                    return@forEachIndexed
+                }
+            }
             if (!JapaneseReading.isJapanese(surface)) {
                 // Latin, digits, punctuation: as written.
                 val punct = surface.all { !it.isLetterOrDigit() }
@@ -327,5 +346,28 @@ object JapaneseRomanizer {
             previousPos = pos1
         }
         return out
+    }
+
+    private val DIGIT = arrayOf("", "ichi", "ni", "san", "yon", "go", "roku", "nana", "hachi", "kyuu")
+
+    /** [n] read in Japanese, as romaji ("hyaku", "sanbyaku", "nisen nijuu yon"), up to 99,999,999. */
+    internal fun numberRomaji(n: Long): String? {
+        if (n < 0 || n > 99_999_999) return null
+        if (n == 0L) return "zero"
+        fun under10k(v: Int): String {
+            val parts = ArrayList<String>()
+            val th = v / 1000; val hu = v / 100 % 10; val te = v / 10 % 10; val on = v % 10
+            when (th) { 0 -> {}; 1 -> parts += "sen"; 3 -> parts += "sanzen"; 8 -> parts += "hassen"; else -> parts += DIGIT[th] + "sen" }
+            when (hu) { 0 -> {}; 1 -> parts += "hyaku"; 3 -> parts += "sanbyaku"; 6 -> parts += "roppyaku"; 8 -> parts += "happyaku"; else -> parts += DIGIT[hu] + "hyaku" }
+            when (te) { 0 -> {}; 1 -> parts += "juu"; else -> parts += DIGIT[te] + "juu" }
+            if (on > 0) parts += DIGIT[on]
+            return parts.joinToString(" ")
+        }
+        val man = (n / 10_000).toInt()
+        val rest = (n % 10_000).toInt()
+        return listOfNotNull(
+            if (man > 0) under10k(man) + "man" else null,
+            if (rest > 0) under10k(rest) else null,
+        ).joinToString(" ")
     }
 }

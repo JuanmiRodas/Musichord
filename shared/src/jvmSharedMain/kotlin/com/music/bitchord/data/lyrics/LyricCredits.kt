@@ -12,8 +12,9 @@ object LyricCredits {
         RegexOption.IGNORE_CASE,
     )
 
-    fun strip(lines: List<LyricLine>?): List<LyricLine>? {
-        if (lines.isNullOrEmpty()) return lines
+    fun strip(raw: List<LyricLine>?): List<LyricLine>? {
+        if (raw.isNullOrEmpty()) return raw
+        val lines = raw.map(::tidy)
         var drop = 0
         for ((i, line) in lines.withIndex()) {
             if (i >= 16) break
@@ -39,5 +40,57 @@ object LyricCredits {
         // A label and a name: "Key：Value" kept short.
         if (t.length <= 40 && Regex("""^[^:：]{1,14}[:：]\s*\S""").containsMatchIn(t) && t.count { it == ' ' } <= 5) return true
         return false
+    }
+
+    // ---- BitChord Audio: accents kept whole ----
+
+    private val ACCENTED = Regex("^[áíóúÁÍÓÚñÑüÜ]$")
+    private val SANDWICH = Regex("(\\p{L}) ([áíóúñüÁÍÓÚÑÜ]) (\\p{L})")
+    private val WORD_END = Regex("(\\p{L}) ([áíóú])(?=[\\s,.!?;:)]|$)")
+    private val LONE_MARK = Regex("\\s+(\\p{M})")
+
+    /**
+     * A line with its letters as one: composed (NFC — "o" and its accent as one "ó", which
+     * some lyrics send apart, so the accent was drawn as a letter of its own or not at all),
+     * and a word a source cut at an accented letter ("coraz ó n") joined again — a lone
+     * accented letter between two pieces of a word is never a word of its own.
+     */
+    private fun tidy(line: LyricLine): LyricLine {
+        val nfc = java.text.Normalizer.normalize(line.text, java.text.Normalizer.Form.NFC).replace(LONE_MARK, "$1")
+        var words = line.words.map { w ->
+            val t = java.text.Normalizer.normalize(w.text, java.text.Normalizer.Form.NFC)
+            if (t == w.text) w else w.copy(text = t, syllables = if (t.length == w.text.length) w.syllables else emptyList())
+        }
+        // Words: an accented letter alone glued to its neighbours, timing spanning them.
+        if (words.size >= 2 && words.any { ACCENTED.matches(it.text) }) {
+            val out = mutableListOf<LyricWord>()
+            var i = 0
+            while (i < words.size) {
+                val w = words[i]
+                if (ACCENTED.matches(w.text) && out.isNotEmpty() && out.last().text.last().isLetter()) {
+                    val prev = out.removeAt(out.lastIndex)
+                    var merged = prev.copy(text = prev.text + w.text, endMs = w.endMs, syllables = emptyList())
+                    val next = words.getOrNull(i + 1)
+                    if (next != null && next.text.first().isLetter() && next.text.length <= 3) {
+                        merged = merged.copy(text = merged.text + next.text, endMs = next.endMs)
+                        i++
+                    }
+                    out += merged
+                } else out += w
+                i++
+            }
+            words = out
+        }
+        var text = nfc
+        // "coraz ó n", "aqu í": a lone á í ó ú ñ ü inside or at the end of a word is part of it
+        // (é and à left alone: words of their own in Portuguese, Italian, French).
+        repeat(2) { text = SANDWICH.replace(text) { m -> m.groupValues[1] + m.groupValues[2] + m.groupValues[3] } }
+        text = WORD_END.replace(text) { m -> m.groupValues[1] + m.groupValues[2] }
+        if (words.isNotEmpty() && words.size != line.words.size) {
+            text = words.joinToString(" ") { it.text }
+        }
+        val background = line.background?.let { tidy(it) }
+        return if (text == line.text && words == line.words && background == line.background) line
+        else line.copy(text = text, words = words, background = background)
     }
 }

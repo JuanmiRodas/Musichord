@@ -70,11 +70,12 @@ object LyricsTranslation {
     // Version 3 invalidates answers cached before the Latin-script retry existed;
     // otherwise a song that once came back untranslated would never take the
     // repaired path after the app is updated.
-    private const val CACHE_VERSION = 3
+    private const val CACHE_VERSION = 4
     private const val CACHE_DIRECTORY = "lyrics_translation_v3"
     private const val MAX_CACHE_BYTES = 2L * 1024L * 1024L
     private const val MAX_BATCH_CHARS = 3_500
     private const val MAX_PARALLEL_REQUESTS = 2
+    private val NON_LATIN_TEXT = Regex("[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsHangul}\\p{IsCyrillic}\\p{IsArabic}\\p{IsThai}]")
     // Input Tools changes ASCII digits to the destination script, so match the
     // private-use wrapper rather than assuming the counter remains ASCII.
     // Either private-use character closes it: a Chinese answer (zh-CN, zh-TW)
@@ -211,6 +212,25 @@ object LyricsTranslation {
                 translated = retried
             }
         }
+        // BitChord Audio: lines that came back as they went (Japanese left in Japanese — a
+        // batch Google read as mixed, a marker it skipped) are asked again on their own,
+        // through the translators that take a list of lines.
+        if (!sameLanguage(source, target)) {
+            val left = slots.indices.filter { i ->
+                translated[i].trim() == slots[i].text.trim() && NON_LATIN_TEXT.containsMatchIn(slots[i].text)
+            }
+            if (left.isNotEmpty()) {
+                val texts = left.map { slots[it].text }
+                val again = MicrosoftTranslator.translate(texts, target, source)?.first
+                    ?: FallbackTranslators.translate(texts, target)?.first
+                if (again != null && again.size == left.size) {
+                    val fixed = translated.toMutableList()
+                    left.forEachIndexed { k, i -> if (again[k].isNotBlank()) fixed[i] = again[k] }
+                    translated = fixed
+                }
+                com.music.bitchord.data.TrackLog.d("LyricsTranslation", "translation: ${left.size} line(s) came back untranslated; asked again (${if (again != null) "done" else "failed"})")
+            }
+        }
         val entry = CachedTranslation(
             sourceLanguage = source,
             targetLanguage = target,
@@ -259,8 +279,10 @@ object LyricsTranslation {
         ProvidedRomaji.partial(slots.map { it.text })?.let { some ->
             val local = localRomanizer
             val missingAt = some.indices.filter { some[it] == null }
+            // Read with the whole song, so lines of kanji alone are still taken for Japanese.
             val filled = if (missingAt.isEmpty()) emptyList() else local?.let { f ->
-                withContext(Dispatchers.Default) { runCatching { f(missingAt.map { slots[it].text }) }.getOrNull() }
+                withContext(Dispatchers.Default) { runCatching { f(slots.map { it.text }) }.getOrNull() }
+                    ?.takeIf { it.size == slots.size }?.let { all -> missingAt.map { all[it] } }
             }
             if (missingAt.isEmpty() || (filled != null && filled.size == missingAt.size)) {
                 val texts = some.toMutableList()

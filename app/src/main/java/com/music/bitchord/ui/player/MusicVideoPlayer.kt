@@ -510,46 +510,43 @@ object MusicVideoEngine {
         looksJob?.cancel()
         val known = com.music.bitchord.data.video.VideoMode.looksOf(key)
         com.music.bitchord.data.video.VideoMode.showLooks(known)
-        if (known != null) return
+        // BitChord Audio: read all through the video, not only its first seconds — subtitles
+        // and credits come and go, and a reading taken in an intro without any (the log: most
+        // videos "level 0.00", kept for good) left the lyrics without their shade. The bars
+        // settle from the first samples; the text is followed over the last ~12 seconds, the
+        // shade deepening while there is text and easing when it's gone.
         looksJob = scope.launch {
             val tops = ArrayList<Float>()
             val bottoms = ArrayList<Float>()
-            var busy = 0
-            var dense = 0f
+            val recent = ArrayDeque<FrameRead>()
             var seen = 0
-            var tries = 0
-            var held = false
-            while (seen < 14 && tries < 60 && loadedId == key) {
-                delay(1_500)
-                tries++
+            var savedLevel = known?.textLevel ?: -1f
+            while (loadedId == key) {
+                delay(2_000)
                 if (player?.isPlaying != true) continue
                 val bitmap = runCatching { top()?.getBitmap(192, 108) }.getOrNull() ?: continue
                 val sample = withContext(Dispatchers.Default) { runCatching { readFrame(bitmap) }.getOrNull() }
                 bitmap.recycle()
                 sample ?: continue
                 seen++
-                tops += sample.barTop
-                bottoms += sample.barBottom
-                if (sample.text) busy++
-                dense += sample.density
-                if (seen >= 6) {
-                    val looks = com.music.bitchord.data.video.VideoMode.Looks(
-                        barTop = tops.sorted()[tops.size / 2],
-                        barBottom = bottoms.sorted()[bottoms.size / 2],
-                        busyBottom = busy * 4 >= seen,
-                        // How much: share of frames with text times how thick it is
-                        // (0.04 of edge pixels is a lot), to 1.
-                        textLevel = ((busy.toFloat() / seen) * ((dense / seen) / 0.04f)).coerceIn(0f, 1f),
-                    )
-                    com.music.bitchord.data.video.VideoMode.showLooks(looks)
-                    // BitChord Audio: kept from the first reading (bars and shade), and again once
-                    // settled — never measured again, on this phone or after a reinstall.
-                    if (seen == 6 || seen >= 14) com.music.bitchord.data.video.VideoMode.saveLooks(key, looks)
-                    // A shade found needed holds: not looked at again for 30 s.
-                    if (seen < 14 && (looks.busyBottom || looks.textLevel >= 0.3f) && !held) {
-                        held = true
-                        delay(30_000)
-                    }
+                if (tops.size < 14) { tops += sample.barTop; bottoms += sample.barBottom }
+                recent.addLast(sample)
+                if (recent.size > 6) recent.removeFirst()
+                if (seen < 3) continue
+                val busy = recent.count { it.text }
+                val dense = recent.sumOf { it.density.toDouble() }.toFloat() / recent.size
+                val looks = com.music.bitchord.data.video.VideoMode.Looks(
+                    barTop = known?.barTop?.takeIf { tops.size < 6 } ?: tops.sorted()[tops.size / 2],
+                    barBottom = known?.barBottom?.takeIf { bottoms.size < 6 } ?: bottoms.sorted()[bottoms.size / 2],
+                    busyBottom = busy * 3 >= recent.size,
+                    textLevel = ((busy.toFloat() / recent.size) * (dense / 0.04f)).coerceIn(0f, 1f),
+                )
+                com.music.bitchord.data.video.VideoMode.showLooks(looks)
+                // Kept: the bars once settled, and the most text the video has shown, so it
+                // starts shaded next time.
+                if ((seen == 14 && savedLevel < 0f) || looks.textLevel > savedLevel + 0.1f) {
+                    savedLevel = maxOf(savedLevel, looks.textLevel)
+                    com.music.bitchord.data.video.VideoMode.saveLooks(key, looks.copy(textLevel = savedLevel, busyBottom = looks.busyBottom || savedLevel >= 0.3f))
                 }
             }
         }

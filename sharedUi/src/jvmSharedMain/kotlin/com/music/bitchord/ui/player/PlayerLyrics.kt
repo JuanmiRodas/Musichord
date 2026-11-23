@@ -3617,7 +3617,16 @@ private fun VideoLyricWithTranslation(
         textAlign = TextAlign.Start,
         shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 8f),
     )
-    val line = lines.getOrNull(index.coerceAtLeast(0))?.takeIf { index >= 0 }
+    val shownLine = lines.getOrNull(index.coerceAtLeast(0))?.takeIf { index >= 0 }
+    // BitChord Audio: a line timed only as a whole gets its words timed through it (by
+    // length, up to the next line), so it too goes word by word through the lyrics view's
+    // own sweep rather than lighting all at once.
+    val line = remember(shownLine, lines) {
+        shownLine?.let { l ->
+            if (l.isWordSynced || l.text.isBlank()) l
+            else projectedWords(l, lines.firstOrNull { it.timeMs > l.timeMs }?.timeMs)
+        }
+    }
     // By time, not by position: word-timed and romaji lines needn't number
     // the same as the lines the translation was made from.
     val translated = remember(line, translation) {
@@ -3664,6 +3673,37 @@ private fun VideoLyricWithTranslation(
             )
         }
     }
+}
+
+/**
+ * BitChord Audio: [line]'s words timed through it — each by its length, from the line's
+ * stamp to the next line's (at most ~0.45 s a character), so a line-timed lyric sweeps
+ * word by word. Unspaced Japanese or Chinese goes a character at a time.
+ */
+internal fun projectedWords(line: LyricLine, nextMs: Long?): LyricLine {
+    val text = line.text
+    val pieces = Regex("\\S+").findAll(text).map { it.value }.toList()
+        .flatMap { piece ->
+            val cjk = piece.any {
+                val sc = Character.UnicodeScript.of(it.code)
+                sc == Character.UnicodeScript.HAN || sc == Character.UnicodeScript.HIRAGANA || sc == Character.UnicodeScript.KATAKANA
+            }
+            if (cjk) piece.map { it.toString() } else listOf(piece)
+        }
+    if (pieces.isEmpty()) return line
+    val chars = pieces.sumOf { it.length }
+    val end = line.sungUntilMs
+        ?: nextMs?.let { minOf(it - 150L, line.timeMs + chars * 450L) }
+        ?: (line.timeMs + chars * 300L)
+    val span = (end - line.timeMs).coerceAtLeast(400L)
+    var at = line.timeMs
+    var done = 0
+    val words = pieces.map { piece ->
+        done += piece.length
+        val until = line.timeMs + span * done / chars
+        com.music.bitchord.data.lyrics.LyricWord(startMs = at, endMs = until, text = piece).also { at = until }
+    }
+    return line.copy(words = words)
 }
 
 /**

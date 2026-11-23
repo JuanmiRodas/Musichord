@@ -35,6 +35,10 @@ object ProvidedRomaji {
         if (o.isEmpty() || r.isEmpty() || o == r || !NON_LATIN.containsMatchIn(o)) return
         // Romaji that still has kanji or kana in it is a partial reading, not romaji.
         if (NON_LATIN.containsMatchIn(r)) return
+        // BitChord Audio: romaji spelled a syllable at a time ("a ru no na ra") is left out:
+        // the dictionary's, read as words, reads better.
+        val tokens = r.split(Regex("\\s+")).filter { t -> t.any { it.isLetter() } }
+        if (tokens.size >= 4 && tokens.sumOf { it.length }.toDouble() / tokens.size < 2.8) return
         if (byLine.size > 20_000) { byLine.clear(); byKey.clear() }
         byLine[o] = r
         byKey[key(o)] = r
