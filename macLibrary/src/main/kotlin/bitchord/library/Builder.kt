@@ -62,8 +62,10 @@ object Builder {
         t.mp3_320 && t.fake320 != true -> 3
         t.codec == "mp3" -> 1 + (if (t.kbps >= 256) 1 else 0)
         // AAC (YouTube Music's .m4a) and Opus (.webm) kept as they are: as good as a 256 kbps MP3 when not starved.
-        Formats.native && t.codec == "aac" -> if (t.kbps >= 190) 2 else 1
-        Formats.native && t.codec == "opus" -> if (t.kbps >= 110 || t.kbps == 0) 2 else 1
+        // AAC 320 (.m4a) is as good as MP3 320; an AAC 256 is kept until something better turns up (low priority on the to-do).
+        Formats.native && t.codec == "aac" -> if (t.kbps >= 290) 3 else if (t.kbps >= 190) 2 else 1
+        // Opus (YouTube's .webm) is not kept as it is: it becomes AAC 320, and is replaced by any MP3 or AAC copy.
+        Formats.native && t.codec == "opus" -> 1
         else -> 0
     }
     private fun richness(t: Track) = t.tags.keys.count { it in setOf("title", "artist", "album", "date", "track", "album_artist", "genre", "composer", "lyrics", "disc") } + if (t.hasCover) 3 else 0
@@ -237,22 +239,25 @@ object Builder {
     }
 
     /**
-     * What a song is kept as. Never compressed again: MP3 stays MP3, YouTube Music's AAC (.m4a) and
-     * Opus (.webm → .opus) stay as they are when [native]; lossless becomes MP3 320. With [native]
-     * off (Ajustes), only MP3 and lossless are copied, as before 1.0.28.
+     * What a song is kept as. The aim is AAC 320 (.m4a): MP3 320 stays MP3, AAC stays as it is
+     * (an AAC 256 is flagged to replace, low priority), lossless becomes AAC 320, and Opus (YouTube's
+     * .webm, not wanted as it is) becomes AAC 320 too, flagged. With [native] off (Ajustes): only
+     * MP3, and lossless → MP3 320, as before 1.0.28.
      */
     object Formats {
         private val file get() = File(Store.dir, "formats.json")
         @Volatile var native: Boolean = runCatching { org.json.JSONObject(file.readText()).optBoolean("native", true) }.getOrDefault(true)
             set(v) { field = v; runCatching { file.writeText(org.json.JSONObject().put("native", v).toString()) } }
-        val LIBRARY = setOf("mp3", "m4a", "opus")
+        val LIBRARY = setOf("mp3", "m4a")
         fun extOf(t: Track): String? = when {
-            t.lossless -> "mp3"
+            t.lossless -> if (native) "m4a" else "mp3"
             t.codec == "mp3" -> "mp3"
             native && t.codec == "aac" -> "m4a"
-            native && t.codec == "opus" -> "opus"
+            native && t.codec == "opus" -> "m4a"
             else -> null
         }
+        /** Made anew (not copied as it is): lossless, and Opus (into AAC 320). */
+        fun encodes(t: Track) = t.lossless || t.codec == "opus"
     }
 
     /** How songs found on several albums are kept (Ajustes): see [plan]. */
@@ -263,6 +268,46 @@ object Builder {
     }
 
     private val VERSION = Regex("(?iu)\\b(ver(sion)?|remix|mix|live|acoustic|instrumental|inst|edit|tv size|tv-size|off vocal|karaoke|demo|remaster(ed)?)\\b|-[a-z]-version|バージョン|ヴァージョン|リミックス|ライブ")
+
+    const val OUTSIDE = "instrumental de banda sonora de serie"
+    /** Beside the library (in its parent folder): the series' soundtrack instrumentals taken out of it. */
+    const val OUTSIDE_FOLDER = "Bandas sonoras instrumentales"
+    private val INST = Regex("(?iu)\\b(inst(rumental)?|bgm|off ?vocal|karaoke|orgel|music box version|piano version)\\b|インスト|オルゴール")
+    private val SUNG = Regex("(?iu)\\b(vocal|song|tv size|tv-size|movie size|full size|ver\\.? ?vocal)\\b|歌|ソング|サイズ")
+
+    /**
+     * The kind of music of an artist with few songs, for "Otros artistas/<kind>/<artist>": from its
+     * genre tags, its words and where it was found. As few kinds as will do.
+     */
+    fun kindOf(tracks: List<Track>, titles: List<String>, years: List<Int>): String {
+        val genres = tracks.joinToString(" ") { it.tags["genre"].orEmpty() }.lowercase()
+        val text = (titles + tracks.map { it.path.substringAfterLast("/Música").substringAfterLast("/Discografías") }).joinToString(" ")
+        val japanese = CJK.containsMatchIn(text) || Regex("(?i)j-?pop|j-?rock|anime|japan|vocaloid|enka|city ?pop").containsMatchIn(genres + " " + text)
+        // Which language its names are in: function words and endings typical of each.
+        // Song titles only (an album's name can be a Spanish compilation of English songs), without credits in brackets ("(con Jorja Smith)").
+        val words = Regex("[\\p{L}']+").findAll(titles.joinToString(" ") { it.replace(Regex("[(\\[（【][^)\\]）】]*[)\\]）】]"), " ") }.lowercase()).map { it.value }.toList()
+        fun score(stop: Set<String>, ends: Regex, marks: Regex) = words.count { it in stop || ends.containsMatchIn(it) || marks.containsMatchIn(it) }
+        val es = score(setOf("el", "la", "los", "las", "de", "del", "que", "y", "en", "mi", "tu", "te", "amor", "por", "para", "con", "un", "una", "como", "quiero", "eres", "soy", "lo", "corazón", "vida", "noche", "nada", "todo", "más", "sin"),
+            Regex("(ción|dad|mente|ado|ada|ento|enta|ito|ita|oso|osa|ía|ío)$"), Regex("[ñáéíóú¿¡]"))
+        val en = score(setOf("the", "you", "your", "my", "i", "i'm", "it", "is", "of", "and", "love", "don't", "we", "be", "baby", "night", "heart", "what", "with", "all", "on", "in", "to", "for", "this", "that", "me", "girl", "boy", "feel", "like"),
+            Regex("(ing|ght|ness|'s|'re|'ll|n't)$"), Regex("^$"))
+        val fr = score(setOf("le", "les", "du", "des", "je", "et", "pas", "mon", "ma", "toi", "moi", "est", "une", "qui", "dans", "sur", "avec", "ne", "vous", "nous", "mais", "oui", "rien", "c'est", "j'ai", "l'amour"),
+            Regex("(eux|euse|ette|oir|aux)$"), Regex("[èêëàâçœù]"))
+        val spanishPlace = Regex("(?iu)/(español|espanol|españa|movida|80 en españa|fiesta española)/").containsMatchIn(text)
+        val french = Regex("(?i)french|chanson|fran[cç]ais").containsMatchIn(genres) || fr >= 2 && fr > es && fr > en
+        val spanish = Regex("(?i)latin|español|espanol|spanish|flamenco|rumba|movida").containsMatchIn(genres) || (es + (if (spanishPlace) 2 else 0)) > en && es + (if (spanishPlace) 2 else 0) >= 2
+        val eighties = Regex("(?iu)movida|80 en españa|ochenta").containsMatchIn(text) || years.isNotEmpty() && years.average() in 1977.0..1992.0
+        val classical = Regex("(?i)classical|clásica|clasica|soundtrack|score|bso|banda sonora").containsMatchIn(genres)
+        return when {
+            japanese -> "JPOP"
+            Regex("(?iu)movida|80 en españa").containsMatchIn(text) -> "80s en España"
+            spanish && eighties -> "80s en España"
+            spanish -> "Español"
+            french -> "Francés"
+            classical -> "Clásica y bandas sonoras"
+            else -> "Inglés"
+        }
+    }
 
     private val COMPILATION = Regex("(?iu)\\b(best|greatest|hits|singles?|collection|anthology|complete|the very)\\b|ベスト|コレクション|シングルズ")
 
@@ -769,6 +814,10 @@ object Builder {
         val japaneseAlbums = HashSet<String>()
         val yearless = HashSet<Pair<String, String>>()
         val colAlbumSize = regrouped.filter { it.homeKind == 2 }.groupingBy { it.home.lowercase() to albumKey(it.chosen.id.album) }.eachCount()
+        // "Otros artistas/<kind>/<artist>": each artist with few songs under its kind of music (JPOP, Español, Inglés…).
+        val kindOfOwner = regrouped.filter { it.homeKind < 2 }.groupBy { p -> val g0 = gid(ownerOf(p.best.id).ifBlank { ownerOf(p.chosen.id) }); ownerArtist[g0] ?: g0 }
+            .filterKeys { (artistSongs[it] ?: 0) < 5 }
+            .mapValues { (_, l) -> kindOf(l.map { it.best.track }, l.map { it.best.id.title }, l.mapNotNull { it.best.id.year?.toIntOrNull() }) }
         val draftsAll = regrouped.map { p ->
             val id = p.chosen.id
             val g0 = gid(ownerOf(p.best.id).ifBlank { ownerOf(id) })
@@ -784,7 +833,7 @@ object Builder {
                 else -> when {
                     owner.isBlank() -> Triple("Sin identificar", "", null)
                     (artistSongs[g] ?: 0) >= 5 -> Triple(clean(shown(owner)), shown(owner), null)
-                    else -> Triple("Otros artistas/" + clean(shown(owner)), shown(owner), null)
+                    else -> Triple("Otros artistas/" + (kindOfOwner[g] ?: "Inglés") + "/" + clean(shown(owner)), shown(owner), null)
                 }
             }
             val series = if (p.homeKind == 2) folder.substringBefore('/') else null
@@ -839,7 +888,20 @@ object Builder {
         val themeDupes = draftsAll.filter { it.theme }.groupBy { Triple(it.folder.lowercase(), it.album, it.no) }.values
             .flatMap { l -> l.sortedByDescending { rank(it.p.best.track) * 1000 + richness(it.p.best.track) }.drop(1) }.toSet()
         themeDupes.forEach { d -> d.p.copies.forEach { skipped += it.track to "repetida (el mismo opening o ending)" } }
-        val drafts = draftsAll.filter { it !in themeDupes }
+        // A series' soundtrack albums keep their songs only (as Yuki Kajiura's): its composer's pieces (the artist of most
+        // of the album, or none) go out of the library, to a folder beside it, until it is decided what to do with them.
+        val instrumental = draftsAll.filter { it.p.homeKind == 2 && it.folder.endsWith("/Bandas sonoras") }.groupBy { it.folder.lowercase() + "|" + albumKey(it.p.chosen.id.album) }
+            .values.flatMap { l ->
+                val composer = l.map { pkey(firstArtist(it.p.best.id.artist)) }.filter { it.isNotEmpty() }.groupingBy { it }.eachCount().maxByOrNull { it.value }
+                    ?.takeIf { it.value * 2 >= l.size }?.key
+                l.filter { d ->
+                    val a = pkey(firstArtist(d.p.best.id.artist))
+                    val t = d.p.best.id.title
+                    INST.containsMatchIn(t) || !SUNG.containsMatchIn(t) && (a.isEmpty() || a == composer)
+                }
+            }.toSet()
+        instrumental.forEach { d -> d.p.copies.forEach { skipped += it.track to "$OUTSIDE (fuera de la Biblioteca)" } }
+        val drafts = draftsAll.filter { it !in themeDupes && it !in instrumental }
         // Collections of fewer than 10 songs from anime go together in "Anime".
         val seriesSize = drafts.filter { it.series != null }.groupingBy { it.series!! }.eachCount()
         val animeSeries = drafts.filter { it.series != null && (seriesSize[it.series] ?: 0) < 10 }.groupBy { it.series!! }
@@ -881,8 +943,10 @@ object Builder {
             Item(
                 source = p.best.source, track = t, target = listOf(targetRoot, d.folder, albumDir, "$name.${Formats.extOf(t)}").filter { it.isNotEmpty() }.joinToString("/"),
                 reason = when {
-                    rank(t) == 4 -> "sin pérdida → MP3 320"; rank(t) == 3 -> "MP3 320"
-                    t.codec == "aac" -> "AAC ${t.kbps} kbps (tal cual, sin recomprimir)"; t.codec == "opus" -> "Opus ${t.kbps} kbps (tal cual, sin recomprimir)"
+                    t.lossless -> if (Formats.native) "sin pérdida → AAC 320" else "sin pérdida → MP3 320"
+                    t.codec == "aac" -> if (t.kbps >= 290) "AAC ${t.kbps} kbps" else "AAC ${t.kbps} kbps (a la to-do, poca prioridad)"
+                    t.codec == "opus" -> "Opus → AAC 320 (a la to-do: buscar mejor copia)"
+                    rank(t) == 3 -> "MP3 320"
                     else -> "MP3 ${t.kbps} kbps (mientras tanto; a la to-do)"
                 },
                 title = title, artist = artist, album = album, year = year, trackNo = d.no, disc = id.disc,
@@ -977,14 +1041,12 @@ object Builder {
         }
         val inputs = listOf("-i", input) + (cover?.let { listOf("-i", it.path) } ?: emptyList())
         val maps = if (cover != null) listOf("-map", "0:a", "-map", "1:v") else listOf("-map", "0:a", "-map", "0:v?")
-        val reencode = from == null && i.track.lossless
-        val codec = if (reencode) listOf("-c:a", "libmp3lame", "-b:a", "320k") else listOf("-c:a", "copy")
+        val reencode = from == null && Formats.encodes(i.track)
+        val codec = if (!reencode) listOf("-c:a", "copy") else if (out.extension.lowercase() == "m4a") listOf("-c:a", Tools.aacEncoder, "-b:a", "320k") else listOf("-c:a", "libmp3lame", "-b:a", "320k")
         val args = when (out.extension.lowercase()) {
             // AAC as it came, in an .m4a with its tags and cover (no new compression).
             "m4a" -> listOf(Tools.ffmpeg, "-nostdin", "-v", "error", "-y") + inputs + maps + listOf("-c:v", "copy", "-disposition:v", "attached_pic") +
-                listOf("-c:a", "copy", "-map_metadata", "0", "-movflags", "+use_metadata_tags+faststart") + meta + listOf("-f", "mp4", tmp.path)
-            // Opus as it came, out of YouTube's .webm into an .opus file that keeps tags (its cover goes beside it, not in it).
-            "opus" -> listOf(Tools.ffmpeg, "-nostdin", "-v", "error", "-y", "-i", input, "-map", "0:a", "-c:a", "copy", "-map_metadata", "0") + meta + listOf("-f", "ogg", tmp.path)
+                codec + listOf("-map_metadata", "0", "-movflags", "+use_metadata_tags+faststart") + meta + listOf("-f", "mp4", tmp.path)
             else -> listOf(Tools.ffmpeg, "-nostdin", "-v", "error", "-y") + inputs + maps + listOf("-c:v", "copy", "-disposition:v", "attached_pic") +
                 codec + listOf("-map_metadata", "0", "-id3v2_version", "3") + meta + listOf("-f", "mp3", tmp.path)
         }

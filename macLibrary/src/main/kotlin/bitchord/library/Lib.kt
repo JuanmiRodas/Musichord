@@ -22,6 +22,8 @@ interface Lib {
     fun list(): Map<String, LibFile>
     /** null when done, else why not. */
     fun move(from: LibFile, toRel: String): String?
+    /** Moves a file out of the library, to [outRel] beside it (relative to the library's parent folder). */
+    fun moveOut(from: LibFile, outRel: String): String?
     fun delete(f: LibFile): String?
     fun put(local: File, toRel: String): String?
     /** A readable copy on this Mac (to read its tags), if there is one. */
@@ -45,6 +47,10 @@ class LocalLib(private val root: String) : Lib {
         Files.move(File(rootFile, from.actual).toPath(), to.toPath()); null
     }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
     override fun delete(f: LibFile): String? = runCatching { Files.delete(File(rootFile, f.actual).toPath()); null }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+    override fun moveOut(from: LibFile, outRel: String): String? = runCatching {
+        val to = File(rootFile.parentFile, outRel); to.parentFile.mkdirs()
+        Files.move(File(rootFile, from.actual).toPath(), to.toPath()); null
+    }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
     override fun put(local: File, toRel: String): String? = runCatching {
         val to = File(rootFile, toRel); to.parentFile.mkdirs()
         Files.move(local.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING); null
@@ -219,6 +225,16 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
     }.getOrElse { it.message ?: it.javaClass.simpleName }
 
     override fun delete(f: LibFile): String? = runCatching { api.call("deletefile", mapOf("fileid" to f.id.toString())); files.remove(f.rel); null }.getOrElse { it.message }
+
+    override fun moveOut(from: LibFile, outRel: String): String? = runCatching {
+        var parent = remoteRoot.substringBeforeLast('/').ifEmpty { "" }
+        var id = if (parent.isEmpty()) 0L else api.call("listfolder", mapOf("path" to parent, "nofiles" to "1")).getJSONObject("metadata").getLong("folderid")
+        for (seg in outRel.substringBeforeLast('/').split('/').filter { it.isNotEmpty() }) {
+            id = api.call("createfolderifnotexists", mapOf("folderid" to id.toString(), "name" to nfc(seg))).getJSONObject("metadata").getLong("folderid")
+        }
+        api.call("renamefile", mapOf("fileid" to from.id.toString(), "tofolderid" to id.toString(), "toname" to nfc(outRel.substringAfterLast('/'))))
+        files.remove(from.rel); null
+    }.getOrElse { it.message ?: it.javaClass.simpleName }
 
     override fun put(local: File, toRel: String): String? = runCatching {
         val dir = folder(toRel.substringBeforeLast('/', ""))

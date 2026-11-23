@@ -212,6 +212,8 @@ object Engine {
         plan.copy.forEach { i -> i.copies.forEach { bySource[Words.nfc(it)] = i } }
         val byTarget = plan.copy.associateBy { rel(it.target).lowercase() }
         val skippedPaths = plan.skipped.mapTo(HashSet()) { Words.nfc(it.first.path) }
+        // Instrumentals of series' soundtracks: out of the library, into a folder beside it (to decide on later).
+        val outside = plan.skipped.filter { it.second.startsWith(Builder.OUTSIDE) }.mapTo(HashSet()) { Words.nfc(it.first.path) }
         val known = tracks.associateBy { Words.nfc(it.path) }
         val temp = File(System.getProperty("user.home"), "Music/.bitchord-staging").apply { mkdirs() }
         // built.json goes into the library through the same way as the songs (pCloud's API there).
@@ -255,6 +257,12 @@ object Engine {
         for (f in unwanted) {
             if (Live.stop) break
             Live.current = f.rel
+            if (manifest.source(f.rel) in outside) {
+                val out = Builder.OUTSIDE_FOLDER + "/" + f.rel.replace("/Bandas sonoras/", "/")
+                val e = lib.moveOut(f, out)
+                if (e == null) { manifest.remove(f.rel); Live.moved.incrementAndGet(); ops.log("app", "moved out ${f.rel} → $out") } else Live.error("no se pudo apartar ${f.rel}: $e")
+                Live.done.incrementAndGet(); Live.write(); continue
+            }
             val err = lib.delete(f)
             if (err == null) {
                 Live.deleted.incrementAndGet()
@@ -270,11 +278,14 @@ object Engine {
         val placed = ArrayList<Pair<Builder.Item, LibFile>>()
         val replace = ArrayList<Builder.Item>()
         var stuck = 0
+        val reformat = HashMap<String, LibFile>() // item's target → the file in another format it replaces
         while (pending.isNotEmpty() && !Live.stop) {
             val i = pending.removeFirst()
             val cur = held[i.target]!!
             val target = rel(i.target)
             Live.current = target
+            // Kept now in another format (an MP3 320 whose FLAC is here: AAC 320): written anew, the old file goes after.
+            if (cur.rel.substringAfterLast('.').lowercase() != target.substringAfterLast('.').lowercase()) { reformat[i.target] = cur; Live.done.incrementAndGet(); continue }
             val curSource = manifest.source(cur.rel)
             val better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (known[curSource]?.let { Builder.rank(it) } ?: 9)
             if (cur.actual == target) {
@@ -330,7 +341,7 @@ object Engine {
             val r = rel(i.target)
             manifest.written(r) < Manifest.TAGS || differs(i) || CoverChoice.approvedFor(root, i)?.name.let { c -> c != null && manifest.cover(r) != c }
         } + replace
-        val work = rewrite.map { it to "rewrite" } + missing.map { it to "copy" }
+        val work = rewrite.map { it to "rewrite" } + missing.map { it to "copy" } + plan.copy.filter { it.target in reformat }.map { it to "reformat" }
         Live.total = Live.done.get() + work.size
         Live.phase = "escribiendo: ${missing.size} que faltan, ${rewrite.size} con etiquetas o copia mejor"
         val pool = Executors.newFixedThreadPool(workers)
@@ -344,6 +355,7 @@ object Engine {
             Builder.copy(i.copy(target = tmp.path), covers, id = id, coverFile = chosenCover).onSuccess {
                 val err = lib.put(tmp, target)
                 if (err == null) {
+                    if (why == "reformat") reformat[i.target]?.let { old -> if (lib.delete(old) == null) { manifest.remove(old.rel, target); ops.log("app", "removed ${old.rel} (now $target)") } }
                     manifest.put(target, i, keepId = id, written = Manifest.TAGS, cover = chosenCover?.name)
                     Scanner.put(libraryTrack(i, File(root, target), tmp.length().takeIf { it > 0 } ?: i.track.size))
                     if (why == "copy") { Live.copied.incrementAndGet(); synchronized(covers) { covers.propose(i.key, plan.alternatives[i.key].orEmpty()) } } else Live.moved.incrementAndGet()
@@ -370,11 +382,11 @@ object Engine {
 
     /** A file the app just wrote, as the index will know it. */
     private fun libraryTrack(i: Builder.Item, f: File, size: Long) = i.track.copy(
-        path = f.path, size = size, modified = System.currentTimeMillis(), codec = if (i.track.lossless) "mp3" else i.track.codec,
-        kbps = if (i.track.lossless) 320 else i.track.kbps, hasCover = true,
+        path = f.path, size = size, modified = System.currentTimeMillis(), codec = if (f.extension.lowercase() == "m4a") "aac" else "mp3",
+        kbps = if (Builder.Formats.encodes(i.track)) 320 else i.track.kbps, hasCover = true,
         tags = mapOf("title" to i.title, "artist" to i.artist, "album" to i.album, "album_artist" to i.albumArtist) +
             listOfNotNull(i.year?.let { "date" to it }, i.trackNo?.let { "track" to it.toString() }),
-        fake320 = if (i.track.lossless) false else i.track.fake320,
+        fake320 = if (Builder.Formats.encodes(i.track)) false else i.track.fake320,
     )
 }
 

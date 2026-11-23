@@ -54,6 +54,10 @@ object Store {
 object Tools {
     val ffprobe: String by lazy { bundled("ffprobe") ?: system("ffprobe") ?: "ffprobe" }
     val ffmpeg: String by lazy { bundled("ffmpeg") ?: system("ffmpeg") ?: "ffmpeg" }
+    /** The best AAC encoder this ffmpeg has: Apple's (AudioToolbox) on a Mac, else FFmpeg's own. */
+    val aacEncoder: String by lazy {
+        runCatching { val (_, out) = run(ffmpeg, "-hide_banner", "-encoders", timeoutSec = 30); if (Regex("\\baac_at\\b").containsMatchIn(out)) "aac_at" else "aac" }.getOrDefault("aac")
+    }
 
     private fun bundled(name: String): String? = runCatching {
         val cls = Class.forName("org.bytedeco.ffmpeg.$name")
@@ -258,8 +262,9 @@ object Audit {
     fun issues(t: Track, duplicates: Set<String>): List<Issue> = buildList {
         when {
             t.lossless -> add(Issue.LOSSLESS)
-            t.codec != "mp3" && !(Builder.Formats.native && t.codec in setOf("aac", "opus")) -> add(Issue.FORBIDDEN_FORMAT)
+            t.codec != "mp3" && !(Builder.Formats.native && t.codec == "aac") -> add(Issue.FORBIDDEN_FORMAT)
             t.codec == "mp3" && t.kbps < 315 -> add(Issue.LOW_BITRATE)
+            t.codec == "aac" && t.kbps < 290 -> add(Issue.LOW_BITRATE)
             t.fake320 == true -> add(Issue.FAKE_320)
         }
         if (!t.hasCover) add(Issue.NO_COVER)

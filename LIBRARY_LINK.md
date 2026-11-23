@@ -103,9 +103,16 @@ Para archivos que desaparecen y aparecen sin que el Mac lo diga (otra herramient
      `disc`/`track` de ese álbum, con la portada de ese álbum; las que falten, de YouTube Music.
   3. Al reproducir desde ese álbum, usar su portada; en aleatorio, una portada al azar entre
      las de `releases` de la canción.
-- **Formatos**: además de `.mp3`, la biblioteca puede tener `.m4a` (AAC de YouTube Music, tal
-  cual) y `.opus` (Opus de `.webm`, tal cual). Nunca se recomprime nada con pérdida.
-  Los `.m4a` llevan el id como etiqueta libre `BITCHORD_ID` (átomo `----`), los `.opus` como
-  comentario Vorbis `BITCHORD_ID`; en todo caso el id está en `built.json`.
+- **Formatos** (1.0.29): el objetivo es **AAC 320 (`.m4a`)**. Los MP3 320 se quedan como
+  están; los AAC se guardan tal cual (los de menos de ~290 kbps van a la to-do con poca
+  prioridad); lo sin pérdida (FLAC) se convierte a AAC 320 y sustituye al MP3 320 que hubiera;
+  los Opus (`.webm`) no se guardan como tales: se convierten a AAC 320 y van a la to-do. Así
+  que en la biblioteca solo hay `.mp3` y `.m4a`. Los `.m4a` llevan el id como etiqueta libre
+  `BITCHORD_ID` (átomo `----`); en todo caso el id está en `built.json`.
+- **Fuera de la biblioteca**: las pistas instrumentales de las bandas sonoras de las series
+  (Sailor Moon, Pokémon…) ya no están en `Biblioteca`; se apartan a
+  `pCloud Drive/Bandas sonoras instrumentales/<serie>/…` (aparecen en `moves`? no: en
+  `removed`), pendientes de decidir.
+- **«Otros artistas»** se divide por tipo: `Otros artistas/<JPOP|Español|Inglés|Francés|80s en España|Clásica y bandas sonoras>/<Artista>/…`.
 - **Nueva fuente**: `pCloud Drive/Music/BitChord` (las descargas del móvil). Sus archivos son
   `source`/`copies` en `built.json` como los demás.
