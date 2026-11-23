@@ -6853,6 +6853,11 @@ private fun BitChordAudioDialogs(viewModel: MainViewModel, controller: MediaCont
             onDismiss = { com.music.bitchord.ui.components.CoverPicker.close() },
         )
     }
+    // BitChord Audio: the player's buttons, chosen from a long press on its ⋯.
+    val quickEditorOpen by com.music.bitchord.ui.player.QuickActionBridge.editorOpen.collectAsStateWithLifecycle()
+    if (quickEditorOpen) {
+        com.music.bitchord.ui.components.QuickActionsEditor(onDismiss = { com.music.bitchord.ui.player.QuickActionBridge.editorOpen.value = false })
+    }
     // BitChord Audio: pCloud by folder — to play, or to pick a song's file.
     val browserRequest by com.music.bitchord.ui.components.PcloudBrowser.request.collectAsStateWithLifecycle()
     browserRequest?.let { req ->

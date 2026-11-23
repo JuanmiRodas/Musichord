@@ -342,6 +342,10 @@ internal fun VideoLoadingBackdrop(
         ),
         label = "videoWaitGlow",
     )
+    // BitChord Audio: in the colours of the timeline's waves, with LastWave.
+    val beamLook = LocalLastWave.current
+    val beamColor = beamLook?.primary ?: Color.White
+    val hazeColor = beamLook?.secondary ?: Color.White
     Box(
         modifier
             .background(Color.Black)
@@ -353,7 +357,7 @@ internal fun VideoLoadingBackdrop(
                     val x = i / n.toFloat()
                     val d = kotlin.math.abs(x - phase).let { minOf(it, 1f - it) }
                     val a = (1f - d / 0.16f).coerceIn(0f, 1f)
-                    x to Color.White.copy(alpha = a * a * glow)
+                    x to beamColor.copy(alpha = (a * a * glow * if (beamLook != null) 1.6f else 1f).coerceIn(0f, 1f))
                 }
                 val stroke = 1.5.dp.toPx()
                 val radius = edgeRadius.toPx()
@@ -366,7 +370,7 @@ internal fun VideoLoadingBackdrop(
                 )
                 // And a much fainter inner haze along the same light.
                 drawRoundRect(
-                    brush = androidx.compose.ui.graphics.Brush.sweepGradient(*stops.map { (x, c) -> x to c.copy(alpha = c.alpha * 0.35f) }.toTypedArray(), center = center),
+                    brush = androidx.compose.ui.graphics.Brush.sweepGradient(*stops.map { (x, c) -> x to hazeColor.copy(alpha = c.alpha * 0.35f) }.toTypedArray(), center = center),
                     topLeft = androidx.compose.ui.geometry.Offset(stroke * 2, stroke * 2),
                     size = androidx.compose.ui.geometry.Size(size.width - stroke * 4, size.height - stroke * 4),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),

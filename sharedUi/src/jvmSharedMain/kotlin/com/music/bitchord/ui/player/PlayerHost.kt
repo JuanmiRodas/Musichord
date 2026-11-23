@@ -247,6 +247,12 @@ interface PlayerHost {
     /** BitChord Audio: the cover picker for [song]. */
     fun chooseCover(song: Song) {}
 
+    /** BitChord Audio: [song] shown with the next of its album's other covers. */
+    fun cycleCover(song: Song) {}
+
+    /** BitChord Audio: the editor of the player's buttons (Settings › Player buttons). */
+    fun openQuickActionsEditor() {}
+
     /** BitChord Audio: how far [trackId]'s lyrics are moved (+ later, − earlier), in ms. */
     fun lyricsOffset(trackId: String): StateFlow<Long> = MutableStateFlow(0L)
 

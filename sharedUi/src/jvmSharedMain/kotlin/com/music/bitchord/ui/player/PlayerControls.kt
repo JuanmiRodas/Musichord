@@ -1187,7 +1187,7 @@ internal fun CircleGlyph(
         }
         if (busy) {
             CircularProgressIndicator(
-                color = Color.White,
+                color = LocalLastWave.current?.primary ?: Color.White,
                 strokeWidth = 1.5.dp,
                 modifier = Modifier.matchParentSize(),
             )
@@ -1753,9 +1753,13 @@ internal fun OutputCaption(
     song: Song? = null,
     /** BitChord Audio: "Playing from …" — with LastWave it joins the one line at the foot. */
     origin: String? = null,
+    /** BitChord Audio: where a tap on the playlist's name in the foot line goes. */
+    onOpenOrigin: () -> Unit = {},
+    /** BitChord Audio: just the playlist's (album's, radio's) name, for the foot line. */
+    originName: String? = null,
 ) {
-    if (song != null && origin != null && LocalLastWave.current != null) {
-        FootLine(song, origin, accountName, onOpenOutput)
+    if (song != null && originName != null && LocalLastWave.current != null) {
+        FootLine(song, originName, onOpenOrigin)
         return
     }
     if (song != null) {
@@ -2563,44 +2567,58 @@ private fun ShimmerText(
  * The line opens the source picker; held, the outputs.
  */
 @Composable
-private fun FootLine(song: Song, origin: String, accountName: String?, onOpenOutput: () -> Unit) {
-    val device = rememberAudioOutputName(accountName)
+private fun FootLine(song: Song, originName: String, onOpenOrigin: () -> Unit) {
+    // BitChord Audio: "Playlist – Source – Format kbps", still and centred. The format
+    // goes under, on its own centred line, only when the three don't fit on one.
+    // The playlist opens it; the source and the format choose the song's file.
     val (place, format) = sourceParts(song)
-    val text = buildString {
-        append(origin)
-        append(" on ").append(device)
-        append(" from ").append(place)
-        if (format.isNotBlank()) append(" - ").append(format)
-    }
-    Row(
+    val style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
+    val tint = Color.White.copy(alpha = 0.6f)
+    val choose = { PlayerPlatform.host.chooseSource(song) }
+    @Composable
+    fun part(text: String, onClick: () -> Unit, ellipsize: Boolean = false) = Text(
+        text = text,
+        style = style,
+        color = tint,
+        maxLines = 1,
+        overflow = if (ellipsize) TextOverflow.Ellipsis else TextOverflow.Clip,
+        softWrap = false,
+        modifier = Modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onClick,
+        ),
+    )
+    val hasFormat = format.isNotBlank()
+    androidx.compose.ui.layout.Layout(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-            color = Color.White.copy(alpha = 0.6f),
-            maxLines = 1,
-            modifier = Modifier
-                .weight(1f, fill = false)
-                .combinedClickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onLongClick = onOpenOutput,
-                ) { PlayerPlatform.host.chooseSource(song) }
-                .basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_000, velocity = 24.dp),
+        content = {
+            part(originName, onOpenOrigin, ellipsize = true)
+            part(" – $place", choose)
+            part(if (hasFormat) " – $format" else "", choose)
+            part(format, choose)
+        },
+    ) { measurables, constraints ->
+        val max = constraints.maxWidth
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val placeP = measurables[1].measure(loose)
+        val inlineP = measurables[2].measure(loose)
+        val originFull = measurables[0].maxIntrinsicWidth(constraints.maxHeight.coerceAtMost(10_000))
+        val oneLine = !hasFormat || originFull + placeP.width + inlineP.width <= max
+        val originP = measurables[0].measure(
+            loose.copy(maxWidth = (max - placeP.width - if (oneLine) inlineP.width else 0).coerceAtLeast(0)),
         )
-        Icon(
-            imageVector = Icons.Rounded.CoverIcon,
-            contentDescription = "Cover",
-            tint = Color.White.copy(alpha = 0.6f),
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .clickable { PlayerPlatform.host.chooseCover(song) }
-                .padding(horizontal = 5.dp)
-                .size(13.dp),
-        )
+        val aloneP = if (oneLine) null else measurables[3].measure(loose)
+        val lineH = maxOf(originP.height, placeP.height)
+        val height = lineH + (aloneP?.height ?: 0)
+        layout(max, height) {
+            val rowW = originP.width + placeP.width + if (oneLine) inlineP.width else 0
+            var x = (max - rowW) / 2
+            originP.placeRelative(x, 0); x += originP.width
+            placeP.placeRelative(x, 0); x += placeP.width
+            if (oneLine) inlineP.placeRelative(x, 0)
+            aloneP?.placeRelative((max - aloneP.width) / 2, lineH)
+        }
     }
 }
 

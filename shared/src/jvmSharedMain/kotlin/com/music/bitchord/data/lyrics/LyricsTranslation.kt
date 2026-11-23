@@ -403,16 +403,47 @@ object LyricsTranslation {
         target: String,
         sourceLanguage: String = "auto",
     ): BatchAnswer? {
+        // BitChord Audio: one way failing was every translation gone ("nothing appears"):
+        // the batch is asked through Google's other web client too, and, if the markers
+        // still don't come back whole, line by line.
+        for (clientName in listOf("dict-chrome-ex", "gtx")) {
+            val answer = askTranslation(clientName, batch.payload, target, sourceLanguage) ?: continue
+            val parts = splitMarked(answer.first)
+            if (parts.size == batch.slots.size && parts.none { it.isBlank() }) {
+                return BatchAnswer(parts, answer.second, batch.payload.length)
+            }
+            com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation ($clientName): ${parts.size} parts for ${batch.slots.size} lines")
+        }
+        val single = coroutineScope {
+            batch.slots.chunked(4).flatMap { group ->
+                group.map { slot ->
+                    async {
+                        askTranslation("gtx", slot.text, target, sourceLanguage)
+                            ?: askTranslation("dict-chrome-ex", slot.text, target, sourceLanguage)
+                    }
+                }.awaitAll()
+            }
+        }
+        if (single.any { it == null || it.first.isBlank() }) {
+            com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation unavailable: ${single.count { it == null }} of ${batch.slots.size} lines got no answer")
+            return null
+        }
+        val source = single.filterNotNull().groupBy { it.second }.maxByOrNull { it.value.size }?.key.orEmpty()
+        return BatchAnswer(single.map { it!!.first.trim() }, source, batch.payload.length)
+    }
+
+    /** Google's answer to [text]: the translation and the language it found, or null. */
+    private suspend fun askTranslation(clientName: String, text: String, target: String, sourceLanguage: String): Pair<String, String>? {
         val body = FormBody.Builder()
-            .add("client", "dict-chrome-ex")
+            .add("client", clientName)
             .add("sl", sourceLanguage)
             .add("tl", target)
             .add("dt", "t")
-            .add("q", batch.payload)
+            .add("q", text)
             .build()
         val request = Request.Builder()
             .url(ENDPOINT)
-            .header("User-Agent", "BitChord/1.7.1")
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36")
             .header("Accept", "application/json")
             .post(body)
             .build()
@@ -420,18 +451,18 @@ object LyricsTranslation {
             client.newCall(request).awaitBody()
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: IOException) {
+        } catch (e: IOException) {
+            com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation ($clientName) failed: ${e.message}")
             return null
         }
         return runCatching {
             val root = json.parseToJsonElement(response).jsonArray
-            val translatedBody = root[0].jsonArray.joinToString(separator = "") { segment ->
+            val translated = root[0].jsonArray.joinToString(separator = "") { segment ->
                 segment.jsonArray.getOrNull(0)?.jsonPrimitive?.contentOrNull.orEmpty()
             }
-            val source = root.getOrNull(2)?.jsonPrimitive?.contentOrNull.orEmpty()
-            val parts = splitMarked(translatedBody)
-            if (parts.size != batch.slots.size || parts.any { it.isBlank() }) return@runCatching null
-            BatchAnswer(parts, source, batch.payload.length)
+            translated to root.getOrNull(2)?.jsonPrimitive?.contentOrNull.orEmpty()
+        }.onFailure {
+            com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation ($clientName): unreadable answer: ${response.take(120)}")
         }.getOrNull()
     }
 

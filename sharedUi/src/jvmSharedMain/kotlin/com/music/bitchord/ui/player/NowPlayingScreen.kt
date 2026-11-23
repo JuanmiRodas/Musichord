@@ -60,6 +60,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -2106,7 +2107,7 @@ fun NowPlayingScreen(
         if (!(sideways && !fullscreenInPlace)) {
             Spacer(Modifier.height(18.dp))
             Box(
-                modifier = Modifier.fillMaxWidth().height(20.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 20.dp),
                 contentAlignment = Alignment.TopCenter,
             ) {
                 // BitChord Audio: where the song plays from (and the cover button) on the
@@ -2117,6 +2118,9 @@ fun NowPlayingScreen(
                     onOpenMembers = openListenTogetherMembers,
                     song = song,
                     origin = playbackOriginText(song, playedBy),
+                    onOpenOrigin = openPlaybackOrigin,
+                    originName = playedBy?.let { playbackOriginText(song, playedBy) }
+                        ?: song.radioName ?: song.playbackSource ?: song.albumName ?: stringResource(Res.string.queue),
                 )
             }
         }
@@ -4366,15 +4370,19 @@ fun NowPlayingScreen(
                                 // thumbnail puts the queue or the lyrics away again.
                                 .then(
                                     if (queueOpen || lyricsOpen) {
-                                        Modifier.clickable {
+                                        // BitChord Audio: held, the cover picker.
+                                        Modifier.combinedClickable(
+                                            onLongClick = { PlayerPlatform.host.chooseCover(song) },
+                                        ) {
                                             queueOpen = false
                                             closeLyrics()
                                         }
                                     } else {
-                                        // BitChord Audio: a tap on the cover opens its album.
-                                        Modifier.clickable(
+                                        // BitChord Audio: a tap on the cover opens its album; held, the cover picker.
+                                        Modifier.combinedClickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null,
+                                            onLongClick = { PlayerPlatform.host.chooseCover(song) },
                                         ) {
                                             val album = PlayerPlatform.host.albumPageIdOf(song) ?: song.albumId
                                             if (album != null) onOpenAlbum(album) else PlayerPlatform.host.openAlbumOf(song)
@@ -4658,7 +4666,7 @@ fun NowPlayingScreen(
                         // BitChord Audio: the sung line (its translation above it, smaller)
                         // sits at the foot of the cover, where the credits were; the
                         // credits move down into the line's old place over the scrubber.
-                        val lyricsAboveCredits = !lyricsOpen && syncedLyricsEnabled && !videoOverlay &&
+                        val lyricsAboveCredits = !lyricsOpen && syncedLyricsEnabled && !videoOverlay && !hideLyricsPreview &&
                             lyricsTranslation.displayedLyrics.any { it.timeMs > 0L }
                         if (lyricsAboveCredits) {
                             val withTranslation = songLyricsTranslation && lyricsTranslation.translatedLines != null
@@ -5268,7 +5276,10 @@ fun NowPlayingScreen(
                     SlidingPlayerDeck(
                         // BitChord Audio: LastWave's waves rise above the deck — drawn under
                         // the cover and the title above it, not over them.
-                        modifier = if (lastWaveLook != null) Modifier.zIndex(-1f) else Modifier,
+                        // Only on the main player: in the queue or the lyrics the deck stays on top, or the
+                        // list under it took the taps meant for its buttons (the queue button played a
+                        // song from the queue instead of going back).
+                        modifier = if (lastWaveLook != null && !queueOpen && !lyricsOpen) Modifier.zIndex(-1f) else Modifier,
                         // A pick owns the screen: the transport is hidden for as long
                         // as it is on, and a scroll that would reveal it is refused
                         // (see [LyricsPanel]'s bottom-half tap), so nothing brings the
@@ -5433,9 +5444,23 @@ fun NowPlayingScreen(
                                         enabled = action != PlayerQuickAction.VIDEO_AUDIO || videoModeOn,
                                         busy = action == PlayerQuickAction.VIDEO && videoModeOn && videoModeLooking == song.videoId,
                                         haptic = if (action == PlayerQuickAction.STAR) (if (liked) Haptic.ToggleOff else Haptic.ToggleOn) else Haptic.Tap,
-                                        onLongClick = if (action == PlayerQuickAction.VIDEO) {
-                                            { PlayerPlatform.host.openVideoSearch(song) }
-                                        } else null,
+                                        // BitChord Audio: a long press does the button's other half.
+                                        onLongClick = when (action) {
+                                            PlayerQuickAction.VIDEO -> { { PlayerPlatform.host.openVideoSearch(song) } }
+                                            // Lyrics ⇄ translation: each one's long press is the other's switch.
+                                            PlayerQuickAction.LYRICS -> { {
+                                                if (videoOverlay) PlayerPlatform.host.setVideoModeTranslation(!videoModeTranslation)
+                                                else PlayerPlatform.host.setSongLyricsTranslation(!songLyricsTranslation)
+                                            } }
+                                            PlayerQuickAction.TRANSLATION -> { {
+                                                if (videoOverlay) PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics)
+                                                else PlayerPlatform.host.runQuickAction(PlayerQuickAction.LYRICS.id, song)
+                                            } }
+                                            // Kept as liked, left out of what's recommended (and future mixes).
+                                            PlayerQuickAction.STAR -> { { PlayerPlatform.host.runQuickAction(PlayerQuickAction.DONT_RECOMMEND.id, song) } }
+                                            PlayerQuickAction.ALBUM, PlayerQuickAction.COVER -> { { PlayerPlatform.host.chooseCover(song) } }
+                                            else -> null
+                                        },
                                         onClick = {
                                             when (action) {
                                                 PlayerQuickAction.VIDEO -> PlayerPlatform.host.toggleVideoMode(song)
@@ -5457,7 +5482,8 @@ fun NowPlayingScreen(
                                                 }
                                                 PlayerQuickAction.ARTIST -> if (!PlayerPlatform.host.goToArtist(song)) onOpenArtist(song.artistId, song.artist)
                                                 PlayerQuickAction.SOURCE -> PlayerPlatform.host.chooseSource(song)
-                                                PlayerQuickAction.COVER -> PlayerPlatform.host.chooseCover(song)
+                                                // A tap: the next of the album's other covers; held: the picker.
+                                                PlayerQuickAction.COVER -> PlayerPlatform.host.cycleCover(song)
                                                 else -> PlayerPlatform.host.runQuickAction(action.id, song)
                                             }
                                         },
@@ -5467,6 +5493,8 @@ fun NowPlayingScreen(
                                     icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
                                     contentDescription = stringResource(Res.string.more),
                                     onClick = onOpenMenu,
+                                    // Held: which buttons sit in this row.
+                                    onLongClick = { PlayerPlatform.host.openQuickActionsEditor() },
                                     haptic = Haptic.Tap,
                                     size = disc,
                                     modifier = Modifier.menuAnchor(),

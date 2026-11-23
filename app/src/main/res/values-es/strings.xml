@@ -2137,4 +2137,6 @@
     <string name="qa_source">Elegir la fuente</string>
     <string name="qa_cover">Cambiar la portada</string>
     <string name="qa_info">Info de la canción</string>
+    <string name="cover_no_alternatives">No hay otras portadas para este álbum</string>
+    <string name="cover_cycled">Portada %1$d de %2$d</string>
 </resources>
