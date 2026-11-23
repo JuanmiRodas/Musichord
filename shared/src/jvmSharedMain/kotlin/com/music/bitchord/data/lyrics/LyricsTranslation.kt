@@ -403,34 +403,29 @@ object LyricsTranslation {
         target: String,
         sourceLanguage: String = "auto",
     ): BatchAnswer? {
-        // BitChord Audio: one way failing was every translation gone ("nothing appears"):
-        // the batch is asked through Google's other web client too, and, if the markers
-        // still don't come back whole, line by line.
-        for (clientName in listOf("dict-chrome-ex", "gtx")) {
-            val answer = askTranslation(clientName, batch.payload, target, sourceLanguage) ?: continue
-            val parts = splitMarked(answer.first)
-            if (parts.size == batch.slots.size && parts.none { it.isBlank() }) {
-                return BatchAnswer(parts, answer.second, batch.payload.length)
-            }
-            com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation ($clientName): ${parts.size} parts for ${batch.slots.size} lines")
-        }
-        val single = coroutineScope {
-            batch.slots.chunked(4).flatMap { group ->
-                group.map { slot ->
-                    async {
-                        askTranslation("gtx", slot.text, target, sourceLanguage)
-                            ?: askTranslation("dict-chrome-ex", slot.text, target, sourceLanguage)
-                    }
-                }.awaitAll()
+        // BitChord Audio: Google first (two web clients); when it says "too many requests"
+        // (429, seen for a whole evening in the log) it is left alone for a while and
+        // Microsoft's translator (Edge's, line by line in one request) answers instead.
+        if (System.currentTimeMillis() >= googleRestUntil) {
+            for (clientName in listOf("dict-chrome-ex", "gtx")) {
+                val answer = askTranslation(clientName, batch.payload, target, sourceLanguage) ?: if (System.currentTimeMillis() < googleRestUntil) break else continue
+                val parts = splitMarked(answer.first)
+                if (parts.size == batch.slots.size && parts.none { it.isBlank() }) {
+                    return BatchAnswer(parts, answer.second, batch.payload.length)
+                }
+                com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation ($clientName): ${parts.size} parts for ${batch.slots.size} lines")
             }
         }
-        if (single.any { it == null || it.first.isBlank() }) {
-            com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation unavailable: ${single.count { it == null }} of ${batch.slots.size} lines got no answer")
-            return null
+        val ms = MicrosoftTranslator.translate(batch.slots.map { it.text }, target, sourceLanguage.takeUnless { it == "auto" })
+        if (ms != null && ms.first.size == batch.slots.size && ms.first.none { it.isBlank() }) {
+            return BatchAnswer(ms.first, ms.second, batch.payload.length)
         }
-        val source = single.filterNotNull().groupBy { it.second }.maxByOrNull { it.value.size }?.key.orEmpty()
-        return BatchAnswer(single.map { it!!.first.trim() }, source, batch.payload.length)
+        com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation unavailable for ${batch.slots.size} lines (Google and Microsoft both failed)")
+        return null
     }
+
+    /** Until when Google's translator is left alone after a 429. */
+    @Volatile private var googleRestUntil = 0L
 
     /** Google's answer to [text]: the translation and the language it found, or null. */
     private suspend fun askTranslation(clientName: String, text: String, target: String, sourceLanguage: String): Pair<String, String>? {
@@ -453,6 +448,10 @@ object LyricsTranslation {
             throw cancelled
         } catch (e: IOException) {
             com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation ($clientName) failed: ${e.message}")
+            if (e.message?.contains("429") == true) {
+                googleRestUntil = System.currentTimeMillis() + 15 * 60_000L
+                com.music.bitchord.data.TrackLog.w("LyricsTranslation", "Google translate rate-limited: Microsoft's translator for 15 min")
+            }
             return null
         }
         return runCatching {

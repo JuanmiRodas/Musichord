@@ -135,7 +135,6 @@ import com.music.bitchord.data.lyrics.isGeniusSectionHeader
 import com.music.bitchord.data.lyrics.GrowingWord
 import com.music.bitchord.data.lyrics.LyricAlignment
 import com.music.bitchord.data.lyrics.LyricLine
-import com.music.bitchord.data.lyrics.LyricWord
 import com.music.bitchord.data.lyrics.LyricsSource
 import com.music.bitchord.data.lyrics.translationLanguageName
 import com.music.bitchord.ui.haptics.Haptic
@@ -3618,17 +3617,7 @@ private fun VideoLyricWithTranslation(
         textAlign = TextAlign.Start,
         shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 8f),
     )
-    val shownLine = lines.getOrNull(index.coerceAtLeast(0))?.takeIf { index >= 0 }
-    // BitChord Audio: a line with no word timing gets words timed through it (by their
-    // length, up to the next line), so it sweeps and lifts word by word like the lyrics view.
-    val line = remember(shownLine, lines) {
-        shownLine?.let { l ->
-            if (l.isWordSynced) l else {
-                val next = lines.firstOrNull { it.timeMs > l.timeMs }?.timeMs
-                projectedWords(l, next)
-            }
-        }
-    }
+    val line = lines.getOrNull(index.coerceAtLeast(0))?.takeIf { index >= 0 }
     // By time, not by position: word-timed and romaji lines needn't number
     // the same as the lines the translation was made from.
     val translated = remember(line, translation) {
@@ -3657,31 +3646,22 @@ private fun VideoLyricWithTranslation(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),
             )
-            when {
-                line == null -> Spacer(Modifier.height(base.lineHeight.value.dp))
-                line.isWordSynced -> SweptLyricLine(
-                    line = line,
-                    clock = clock,
-                    style = base,
-                    dimAlpha = 0.55f,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    // As in the lyrics view: each word lifts and glows as it is sung.
-                    rise = true,
-                    glowAlpha = 0.5f,
-                    feather = true,
-                    laneLocked = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                else -> Text(
-                    text = line.text,
-                    style = base,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            // BitChord Audio: the lyrics view's own line — its sweep, its words lifting one by
+            // one as they are sung, its bloom — one line at a time.
+            if (line == null) Spacer(Modifier.height(base.lineHeight.value.dp))
+            else PanelVoice(
+                line = line,
+                clock = clock,
+                style = voiceStyle(base, line.text, alignEnd = false, laneLocked = false),
+                isActive = true,
+                sung = false,
+                synced = true,
+                browsing = false,
+                glowAlpha = GLOW_ALPHA,
+                room = GLOW_ROOM,
+                alignEnd = false,
+                modifier = Modifier.fillMaxWidth().offset(x = -GLOW_ROOM),
+            )
         }
     }
 }
@@ -3691,37 +3671,6 @@ private fun VideoLyricWithTranslation(
  * rising from the bottom edge and fading out well before the sides and top,
  * so the words read on any picture while the picture still reads around them.
  */
-/**
- * BitChord Audio: [line]'s words timed through it — each by its length, from the line's
- * stamp to the next line's (at most ~0.45 s a character's worth), so a line-timed lyric
- * sweeps word by word. Unspaced Japanese or Chinese goes character by character.
- */
-internal fun projectedWords(line: LyricLine, nextMs: Long?): LyricLine {
-    val text = line.text
-    if (text.isBlank()) return line
-    val pieces = Regex("\\S+\\s*").findAll(text).map { it.value }.toList()
-        .flatMap { piece ->
-            if (piece.any { Character.UnicodeScript.of(it.code).let { sc -> sc == Character.UnicodeScript.HAN || sc == Character.UnicodeScript.HIRAGANA || sc == Character.UnicodeScript.KATAKANA } }) {
-                piece.map { it.toString() }
-            } else listOf(piece)
-        }
-    if (pieces.isEmpty()) return line
-    val chars = pieces.sumOf { it.trim().length.coerceAtLeast(1) }
-    val end = line.sungUntilMs
-        ?: nextMs?.let { minOf(it - 150L, line.timeMs + chars * 450L) }
-        ?: (line.timeMs + chars * 300L)
-    val span = (end - line.timeMs).coerceAtLeast(400L)
-    var at = line.timeMs
-    var done = 0
-    val words = pieces.map { piece ->
-        val weight = piece.trim().length.coerceAtLeast(1)
-        done += weight
-        val until = line.timeMs + span * done / chars
-        LyricWord(startMs = at, endMs = until, text = piece.trimEnd()).also { at = until }
-    }.filter { it.text.isNotEmpty() }
-    return line.copy(words = words)
-}
-
 internal fun Modifier.videoLyricsScrim(strength: Float = 0.78f): Modifier = this.drawBehind {
     val w = size.width
     val h = size.height

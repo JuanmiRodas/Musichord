@@ -2546,6 +2546,8 @@ fun NowPlayingScreen(
                                 modifier = m,
                                 scale = videoLyricsScale,
                                 translation = if (withTranslation) lyricsTranslation.translatedLines else null,
+                                // One line at a time, as the lyrics view draws it.
+                                singleLine = true,
                             )
                         }
                     } else {
@@ -5414,15 +5416,29 @@ fun NowPlayingScreen(
                             }
                         }.take(PlayerQuickAction.MAX)
                         BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
-                            val count = quick.size + 1
+                            // BitChord Audio: the video's own buttons only while the video is on —
+                            // coming and going with a soft bounce, the rest gliding to make room.
+                            fun showsNow(a: PlayerQuickAction) = a != PlayerQuickAction.VIDEO_AUDIO || videoModeOn
+                            val count = quick.count(::showsNow) + 1
                             val gap = 12.dp
-                            val disc = ((maxWidth - gap * (count - 1)) / count).coerceIn(26.dp, 34.dp)
-                            val spacing = ((maxWidth - disc * count) / (count - 1).coerceAtLeast(1)).coerceIn(4.dp, 18.dp)
+                            val bounce = androidx.compose.animation.core.spring<androidx.compose.ui.unit.Dp>(dampingRatio = 0.62f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow)
+                            val disc by androidx.compose.animation.core.animateDpAsState(((maxWidth - gap * (count - 1)) / count).coerceIn(26.dp, 34.dp), bounce, label = "quickDisc")
+                            val spacing by androidx.compose.animation.core.animateDpAsState(((maxWidth - disc * count) / (count - 1).coerceAtLeast(1)).coerceIn(4.dp, 18.dp), bounce, label = "quickGap")
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(spacing, Alignment.CenterHorizontally),
+                                horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 for (action in quick) {
+                                  androidx.compose.animation.AnimatedVisibility(
+                                    visible = showsNow(action),
+                                    enter = androidx.compose.animation.fadeIn(tween(220)) +
+                                        androidx.compose.animation.scaleIn(androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow), initialScale = 0.3f) +
+                                        androidx.compose.animation.expandHorizontally(androidx.compose.animation.core.spring(dampingRatio = 0.7f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow), expandFrom = Alignment.CenterHorizontally),
+                                    exit = androidx.compose.animation.fadeOut(tween(180)) +
+                                        androidx.compose.animation.scaleOut(tween(220), targetScale = 0.3f) +
+                                        androidx.compose.animation.shrinkHorizontally(androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow), shrinkTowards = Alignment.CenterHorizontally),
+                                  ) {
+                                  Box(Modifier.padding(horizontal = spacing / 2)) {
                                     val liked = likeStatus == LikeStatus.LIKE
                                     val translationOn = if (videoOverlay) videoModeTranslation else songLyricsTranslation
                                     val lyricsOnCover = if (videoOverlay) videoModeLyrics else !hideLyricsPreview
@@ -5488,7 +5504,10 @@ fun NowPlayingScreen(
                                             }
                                         },
                                     )
+                                  }
+                                  }
                                 }
+                                Box(Modifier.padding(horizontal = spacing / 2)) {
                                 CircleGlyph(
                                     icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
                                     contentDescription = stringResource(Res.string.more),
@@ -5499,6 +5518,7 @@ fun NowPlayingScreen(
                                     size = disc,
                                     modifier = Modifier.menuAnchor(),
                                 )
+                                }
                             }
                         }
                     }
