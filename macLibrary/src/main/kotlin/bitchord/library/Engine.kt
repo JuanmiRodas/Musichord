@@ -296,6 +296,7 @@ object Engine {
         val replace = ArrayList<Builder.Item>()
         var stuck = 0
         val reformat = HashMap<String, LibFile>() // item's target → the file in another format it replaces
+        val notSame = ArrayList<String>() // better copies not used: they sound like another recording
         while (pending.isNotEmpty() && !Live.stop) {
             val i = pending.removeFirst()
             val cur = held[i.target]!!
@@ -304,7 +305,16 @@ object Engine {
             // Kept now in another format (an MP3 320 whose FLAC is here: AAC 320): written anew, the old file goes after.
             if (cur.rel.substringAfterLast('.').lowercase() != target.substringAfterLast('.').lowercase()) { reformat[i.target] = cur; Live.done.incrementAndGet(); continue }
             val curSource = manifest.source(cur.rel)
-            val better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (known[curSource]?.let { Builder.rank(it) } ?: 9)
+            var better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (known[curSource]?.let { Builder.rank(it) } ?: 9)
+            // A better copy replaces the song only if it sounds the same (another version may share its name and length).
+            if (better) {
+                val old = curSource?.takeIf { File(it).isFile } ?: lib.local(cur)?.path
+                val s = old?.let { Fingerprint.similarity(it, i.track.path) }
+                if (s != null && s < Fingerprint.SAME) {
+                    better = false; notSame += "%.0f %% · $target ← ${i.track.path}".format(s * 100)
+                    ops.log("app", "kept $target: ${i.track.path} sounds ${"%.0f".format(s * 100)} % alike")
+                }
+            }
             if (cur.actual == target) {
                 manifest.put(target, i, curSource ?: Words.nfc(i.track.path), manifest.id(target), manifest.written(target))
                 if (better) replace += i else placed += i to cur; Live.done.incrementAndGet(); continue
@@ -351,7 +361,20 @@ object Engine {
             return !(same("title", i.title) && same("artist", i.artist) && same("album", i.album) && same("album_artist", i.albumArtist) &&
                 (t["date"] ?: t["year"]).orEmpty().take(4) == i.year.orEmpty() && t["track"]?.substringBefore('/')?.trim()?.toIntOrNull() == i.trackNo)
         }
-        val missing = plan.copy.filter { it.target !in held && !lib.exists(rel(it.target)) }
+        // New songs whose best copy is a phone download (JioSaavn, YouTube Music): written from it only if it sounds
+        // like the copy found elsewhere; if not, from that other copy.
+        val missing = plan.copy.filter { it.target !in held && !lib.exists(rel(it.target)) }.map { i ->
+            if (!i.track.path.contains("/Music/BitChord/")) return@map i
+            val other = i.copies.filter { !it.contains("/Music/BitChord/") }.mapNotNull { Scanner.get(it) }
+                .maxWithOrNull(compareBy({ Builder.rank(it) }, { it.kbps })) ?: return@map i
+            Live.current = "comparando cómo suena: " + i.target.substringAfterLast('/'); Live.write()
+            val s = Fingerprint.similarity(other.path, i.track.path)
+            if (s == null || s >= Fingerprint.SAME) return@map i
+            notSame += "%.0f %% · ${rel(i.target)} ← ${i.track.path}".format(s * 100)
+            ops.log("app", "${i.track.path} sounds different from ${other.path}: written from the latter")
+            val ext = Builder.Formats.extOf(other) ?: return@map i
+            i.copy(track = other, target = i.target.substringBeforeLast('.') + "." + ext)
+        }
         // Every file whose tags (or cover) the app hasn't written with the current rules is written again:
         // files only moved keep the tags they came with.
         val rewrite = placed.map { it.first }.filter { i ->
@@ -385,6 +408,10 @@ object Engine {
         }
         pool.shutdown()
         while (!pool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
+        if (notSame.isNotEmpty()) runCatching {
+            File(Live.dir, "no-sustituidas.txt").writeText("Copias mejores que no se usaron porque no suenan igual (${notSame.size}; % de parecido: 97–100 misma grabación, 60–80 dudosa — otra velocidad o mezcla —, menos de 60 otra versión o canción):\n" + notSame.joinToString("\n"))
+            ops.log("app", "${notSame.size} better copies not used: they sound like another recording (no-sustituidas.txt)")
+        }
         manifest.save(publish); covers.save(); Scanner.saveIndex()
         // What would be better at 320 (AAC under 290 kbps, MP3 under 320, false 320s, Opus): a list for the phone,
         // which can download those songs at 320 into Music/BitChord — the next build swaps them in by itself.

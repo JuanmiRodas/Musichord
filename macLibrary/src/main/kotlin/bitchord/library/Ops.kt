@@ -168,6 +168,7 @@ class Ops(val root: String) {
         runCatching { appendLine("— Última tarea —\n" + File(Live.dir, "live.json").readText()) }
         runCatching { CoverReview.load().let { p -> appendLine("Portadas: " + p.groupingBy { it.status }.eachCount().entries.joinToString { "${it.value} ${it.key}" }) } }
         runCatching { appendLine("— Plan —\n" + File(Live.dir, "plan-overview.txt").readText()) }
+        runCatching { File(Live.dir, "no-sustituidas.txt").readLines().take(80).forEach { appendLine(it) } }
         runCatching { File(Live.dir, "update.log").readLines().takeLast(8).takeIf { it.isNotEmpty() }?.let { appendLine("— Actualizaciones —"); it.forEach { l -> appendLine(l) } } }
         appendLine("— Últimas líneas del registro —")
         runCatching { logFile.readLines().takeLast(40).forEach { appendLine(it) } }

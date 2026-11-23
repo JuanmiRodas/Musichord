@@ -68,7 +68,7 @@ private class Cache(name: String) {
  */
 object AcoustId {
     private val cache = Cache("acoustid.json")
-    private val fpcalc: String? by lazy {
+    internal val fpcalc: String? by lazy {
         val f = File(Store.dir, "bin/fpcalc")
         if (f.canExecute()) return@lazy f.path
         listOf("/opt/homebrew/bin/fpcalc", "/usr/local/bin/fpcalc").firstOrNull { File(it).canExecute() }?.let { return@lazy it }
@@ -226,4 +226,49 @@ object Fanart {
         cache.save()
         return found
     }
+}
+
+/**
+ * Whether two files are the same recording, by how they sound (Chromaprint's raw fingerprint of
+ * their first two minutes, compared at the best offset): a better copy only replaces a song when
+ * it sounds the same — never another version that happens to share its name and length.
+ */
+object Fingerprint {
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, IntArray>()
+
+    private fun of(path: String): IntArray? {
+        val f = File(path)
+        if (!f.isFile) return null
+        val k = Words.nfc(path) + "|" + f.length()
+        cache[k]?.let { return it }
+        val fp = AcoustId.fpcalc ?: return null
+        val (code, out) = Tools.run(fp, "-raw", "-length", "120", "-plain", path, timeoutSec = 120)
+        if (code != 0) return null
+        val ints = out.trim().split(',').mapNotNull { it.trim().toLongOrNull()?.toInt() }.toIntArray()
+        if (ints.size < 30) return null
+        cache[k] = ints
+        return ints
+    }
+
+    /** How alike (0 to 1): 1 − the share of differing bits, at the offset where they line up best. */
+    fun similarity(a: String, b: String): Double? {
+        val x = of(a) ?: return null
+        val y = of(b) ?: return null
+        var best = 0.0
+        for (off in -40..40) {
+            var bits = 0; var n = 0
+            for (i in x.indices) {
+                val j = i + off
+                if (j < 0 || j >= y.size) continue
+                bits += Integer.bitCount(x[i] xor y[j]); n++
+            }
+            if (n >= 30) best = maxOf(best, 1.0 - bits / (32.0 * n))
+        }
+        return best
+    }
+
+    /** True: the same recording; false: sounds different; null: couldn't tell (no fpcalc, unreadable file). */
+    fun same(a: String, b: String): Boolean? = similarity(a, b)?.let { it >= SAME }
+    /** At or above: the same recording (measured: same recording 0.97+, live/acoustic version ≈ 0.58, another song ≈ 0.50). */
+    const val SAME = 0.80
 }
