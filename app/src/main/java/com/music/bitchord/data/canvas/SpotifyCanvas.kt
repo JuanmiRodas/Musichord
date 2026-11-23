@@ -67,6 +67,49 @@ object SpotifyCanvas {
     @Volatile private var sharing = false
     private fun disabled(): Boolean = !sharing && AppSettings.disableSpotifyCanvas.value
 
+    /**
+     * BitChord Audio: a Spotify track's name, artists, album and length (for a Spotify link
+     * opened in the app), with your Spotify sign-in or open.spotify.com's anonymous token;
+     * failing both, the name alone from Spotify's public oEmbed.
+     */
+    data class TrackInfo(val title: String, val artist: String, val album: String?, val durationMs: Long)
+
+    suspend fun trackInfo(trackId: String): TrackInfo? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val token = SpotifyToken.accessToken() ?: SpotifyToken.anonymousToken()
+        if (token != null) {
+            val viaApi = runCatching {
+                val req = okhttp3.Request.Builder().url("https://api.spotify.com/v1/tracks/$trackId")
+                    .header("Authorization", "Bearer $token").header("User-Agent", CANVAS_UA).build()
+                com.music.bitchord.data.Http.client.newCall(req).execute().use { r ->
+                    val body = r.body?.string()
+                    if (!r.isSuccessful || body == null) { Log.w(TAG, "track $trackId: HTTP ${r.code}"); return@use null }
+                    val o = json.parseToJsonElement(body).jsonObject
+                    val name = o["name"]?.jsonPrimitive?.contentOrNull ?: return@use null
+                    val artists = (o["artists"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull {
+                        it.jsonObject["name"]?.jsonPrimitive?.contentOrNull
+                    }.orEmpty()
+                    TrackInfo(
+                        title = name,
+                        artist = artists.joinToString(", "),
+                        album = o["album"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull,
+                        durationMs = o["duration_ms"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                    )
+                }
+            }.getOrNull()
+            if (viaApi != null) return@withContext viaApi
+        }
+        runCatching {
+            val req = okhttp3.Request.Builder()
+                .url("https://open.spotify.com/oembed?url=" + java.net.URLEncoder.encode("https://open.spotify.com/track/$trackId", "UTF-8"))
+                .header("User-Agent", CANVAS_UA).build()
+            com.music.bitchord.data.Http.client.newCall(req).execute().use { r ->
+                val body = r.body?.string() ?: return@use null
+                val title = json.parseToJsonElement(body).jsonObject["title"]?.jsonPrimitive?.contentOrNull ?: return@use null
+                TrackInfo(title, "", null, 0L)
+            }
+        }.getOrNull()
+    }
+
     /** BitChord Audio: the song's page on Spotify (open.spotify.com/track/…), when signed in to Spotify. */
     suspend fun trackUrl(title: String, artist: String, album: String?): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         // Signed in or not: open.spotify.com's anonymous token searches as well.

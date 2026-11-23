@@ -26,6 +26,9 @@ sealed interface LinkRequest {
      */
     data class Search(val query: String, val play: Boolean) : LinkRequest
 
+    /** BitChord Audio: a Spotify link — a track to find and play here, or anything else to hand on to Spotify. */
+    data class Spotify(val uri: Uri, val trackId: String?) : LinkRequest
+
     /** "Play music", with nothing said about what. */
     data object Resume : LinkRequest
 
@@ -119,6 +122,11 @@ object MusicLink {
     fun parse(uri: Uri): LinkRequest? {
         val host = uri.host?.lowercase()?.removePrefix("www.") ?: return null
         val segments = uri.pathSegments.orEmpty()
+        // BitChord Audio: open.spotify.com/track/<id> (also /intl-es/track/<id>), spotify.link short links.
+        if (host == "open.spotify.com" || host == "spotify.link" || host == "spotify.app.link") {
+            val at = segments.indexOf("track")
+            return LinkRequest.Spotify(uri, segments.getOrNull(at + 1)?.takeIf { at >= 0 && it.isNotBlank() })
+        }
         if (host == "youtu.be") {
             return segments.firstOrNull()?.let(::track)
         }

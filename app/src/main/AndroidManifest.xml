@@ -241,6 +241,18 @@
                 <data android:host="youtu.be" />
             </intent-filter>
 
+            <!-- BitChord Audio: Spotify song links, played here (found on YouTube Music / your
+                 files), and handed to Spotify's app when they can't be. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="open.spotify.com" />
+                <data android:pathPattern="/track/.*" />
+                <data android:pathPattern="/intl-.*/track/.*" />
+            </intent-filter>
+
             <!-- Public Listen Together invites. autoVerify makes a tap open
                  BitChord directly once the domain publishes its assetlinks
                  association for the production signing certificate. -->

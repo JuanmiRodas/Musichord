@@ -2205,6 +2205,35 @@ private fun BitChordApp(
                     viewModel.searchFor(request.query)
                 }
             }
+            // BitChord Audio: a Spotify link — the song found by its name and artist and played
+            // here; what can't be found (or isn't a song) opens in Spotify's own app.
+            is LinkRequest.Spotify -> {
+                val info = request.trackId?.let { com.music.bitchord.data.canvas.SpotifyCanvas.trackInfo(it) }
+                val match = info?.let { i ->
+                    val wanted = Song(
+                        videoId = "spotify:" + request.trackId,
+                        title = i.title,
+                        artist = i.artist,
+                        thumbnailUrl = null,
+                        durationText = if (i.durationMs > 0) "%d:%02d".format(i.durationMs / 60_000, i.durationMs / 1000 % 60) else null,
+                        albumName = i.album,
+                    )
+                    val found = YtMusicRepository.search("${i.title} ${i.artist.split(',').first()}".trim(), SearchFilter.SONGS).getOrNull()
+                        ?.mapNotNull { (it as? SearchResult.Track)?.song ?: (it as? SearchResult.TopTrack)?.song }
+                        .orEmpty()
+                    com.music.bitchord.data.sources.TrackMatcher.best(found, com.music.bitchord.data.sources.TrackMatcher.targetOf(wanted))
+                        ?: found.firstOrNull()?.takeIf { i.artist.isBlank() }
+                }
+                if (match != null) {
+                    playRadio(match, QueueSource(sharedLinkLabel, PlaybackSourceType.SHARED_LINK, match.videoId))
+                } else {
+                    com.music.bitchord.data.TrackLog.w("MusicLink", "Spotify link ${request.uri}: not found here (${info?.title}); opening Spotify")
+                    val spotify = Intent(Intent.ACTION_VIEW, request.uri).setPackage("com.spotify.music")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    val opened = runCatching { context.startActivity(spotify) }.isSuccess
+                    if (!opened) Toast.makeText(context, context.getString(R.string.couldnt_open_link), Toast.LENGTH_SHORT).show()
+                }
+            }
             // "Play music", nothing named. The playback service restores its
             // bounded queue before the controller connects, so this resumes
             // both a live session and one recovered after process death.
