@@ -33,6 +33,10 @@ object NameSources {
     internal fun lucene(s: String) = s.replace(Regex("""([+\-!(){}\[\]^"~*?:\\/]|&&|\|\|)"""), "\\\\$1")
 
     internal suspend fun getJson(url: String, musicBrainz: Boolean = false): JSONObject? = withContext(Dispatchers.IO) {
+        // BitChord Audio: vgmdb.info is gone; the same answers read from vgmdb.net.
+        if (url.contains("://vgmdb.info/")) {
+            return@withContext com.music.bitchord.data.sources.VgmdbNet.text(url)?.let { runCatching { JSONObject(it) }.getOrNull() }
+        }
         if (musicBrainz) {
             mbGate.withLock {
                 val wait = 1_100 - (System.currentTimeMillis() - mbLast)

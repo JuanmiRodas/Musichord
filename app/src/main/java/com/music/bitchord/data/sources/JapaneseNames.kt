@@ -495,7 +495,7 @@ object JapaneseNames {
     private val http by lazy { Http.client.newBuilder().callTimeout(8, TimeUnit.SECONDS).build() }
     private const val AGENT = "BitChordAudio/1.9 (https://github.com/JuanmiRodas/Musichord)"
 
-    private fun get(url: String): String? = runCatching {
+    private fun get(url: String): String? = if (url.contains("://vgmdb.info/")) com.music.bitchord.data.sources.VgmdbNet.text(url) else runCatching {
         http.newCall(Request.Builder().url(url).header("User-Agent", AGENT).header("Accept", "application/json").build())
             .execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
     }.getOrNull()

@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -716,7 +717,8 @@ object MusicVideoEngine {
      * [InnerTubeXResolver.extractVideo]. A video that needed it is asked that
      * way from the start next time.
      */
-    private val RESOLVE_TIMEOUT_MS = 15_000L
+    private val RESOLVE_TIMEOUT_MS = 25_000L
+    private val resolving = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<InnerTubeXResolver.VideoStream?>>()
     @Volatile private var frameWatch: kotlinx.coroutines.Job? = null
     @Volatile private var preparedAt = 0L
     private val smallOnce: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
@@ -787,8 +789,19 @@ object MusicVideoEngine {
             val stream = try {
                 cachedStream(videoId, cap)
                     // BitChord Audio: never waits forever — a resolve that hangs (YouTube's
-                    // player page not answering) left the picture loading for good.
-                    ?: (kotlinx.coroutines.withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { resolve(videoId, cap) } ?: run {
+                    // player page not answering) left the picture loading for good. And one
+                    // resolve per video: a reload or a surface coming back while it is still
+                    // being asked joins it instead of starting over (each restart began the
+                    // wait again, so a slow answer never arrived).
+                    ?: (resolving.getOrPut("$videoId@$cap") {
+                        scope.async {
+                            try {
+                                kotlinx.coroutines.withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { resolve(videoId, cap) }
+                            } finally {
+                                resolving.remove("$videoId@$cap")
+                            }
+                        }
+                    }.await() ?: run {
                         TrackLog.w(TAG, "video: no answer in ${RESOLVE_TIMEOUT_MS / 1000}s — trying the next video", about = videoId)
                         if (loadedId == videoId) loadedId = null
                         loadedFor?.let { forId -> com.music.bitchord.data.video.VideoMode.failed(forId, ref) }

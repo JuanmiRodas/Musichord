@@ -173,6 +173,13 @@ internal object DnaJapan {
      * network failure, a rate limit or a server error is thrown: the source didn't answer.
      */
     private suspend fun get(url: String, gapMs: Long = 1_000, accept: String = "application/json, text/html;q=0.9"): String? {
+        // BitChord Audio: vgmdb.info is gone; the same answers read from vgmdb.net.
+        if (url.contains("://vgmdb.info/")) return hostLocks.getOrPut("vgmdb.net") { Mutex() }.withLock {
+            val wait = (lastCall["vgmdb.net"] ?: 0L) + gapMs - System.currentTimeMillis()
+            if (wait > 0) kotlinx.coroutines.delay(wait)
+            lastCall["vgmdb.net"] = System.currentTimeMillis()
+            kotlinx.coroutines.withContext(Dispatchers.IO) { com.music.bitchord.data.sources.VgmdbNet.text(url) }
+        }
         val host = runCatching { java.net.URL(url).host }.getOrDefault(url)
         return hostLocks.getOrPut(host) { Mutex() }.withLock {
             val wait = (lastCall[host] ?: 0L) + gapMs - System.currentTimeMillis()
