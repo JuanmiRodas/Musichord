@@ -102,6 +102,8 @@ data class Track(
     val ext get() = path.substringAfterLast('.', "").lowercase()
     val lossless get() = codec in setOf("flac", "alac", "pcm_s16le", "pcm_s24le", "pcm_s16be", "pcm_s24be") || ext in setOf("flac", "wav", "aiff", "aif")
     val mp3_320 get() = codec == "mp3" && kbps >= 315
+    /** The bit rate, worked out from size and length when the file states a wrong one (some YouTube Music .m4a say "4"). */
+    val bitrate get() = if (kbps < 16 && (seconds ?: 0.0) > 1) (size * 8 / seconds!! / 1000).toInt() else kbps
     val title get() = tags["title"].orEmpty()
     val artist get() = tags["artist"].orEmpty()
     val album get() = tags["album"].orEmpty()
@@ -264,7 +266,7 @@ object Audit {
             t.lossless -> add(Issue.LOSSLESS)
             t.codec != "mp3" && !(Builder.Formats.native && t.codec == "aac") -> add(Issue.FORBIDDEN_FORMAT)
             t.codec == "mp3" && t.kbps < 315 -> add(Issue.LOW_BITRATE)
-            t.codec == "aac" && t.kbps < 290 -> add(Issue.LOW_BITRATE)
+            t.codec == "aac" && t.bitrate < 290 -> add(Issue.LOW_BITRATE)
             t.fake320 == true -> add(Issue.FAKE_320)
         }
         if (!t.hasCover) add(Issue.NO_COVER)

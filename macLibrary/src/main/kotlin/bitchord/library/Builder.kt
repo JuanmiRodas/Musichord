@@ -63,7 +63,7 @@ object Builder {
         t.codec == "mp3" -> 1 + (if (t.kbps >= 256) 1 else 0)
         // AAC (YouTube Music's .m4a) and Opus (.webm) kept as they are: as good as a 256 kbps MP3 when not starved.
         // AAC 320 (.m4a) is as good as MP3 320; an AAC 256 is kept until something better turns up (low priority on the to-do).
-        Formats.native && t.codec == "aac" -> if (t.kbps >= 290) 3 else if (t.kbps >= 190) 2 else 1
+        Formats.native && t.codec == "aac" -> if (t.bitrate >= 290) 3 else if (t.bitrate >= 190) 2 else 1
         // Opus (YouTube's .webm) is not kept as it is: it becomes AAC 320, and is replaced by any MP3 or AAC copy.
         Formats.native && t.codec == "opus" -> 1
         else -> 0
@@ -944,7 +944,7 @@ object Builder {
                 source = p.best.source, track = t, target = listOf(targetRoot, d.folder, albumDir, "$name.${Formats.extOf(t)}").filter { it.isNotEmpty() }.joinToString("/"),
                 reason = when {
                     t.lossless -> if (Formats.native) "sin pérdida → AAC 320" else "sin pérdida → MP3 320"
-                    t.codec == "aac" -> if (t.kbps >= 290) "AAC ${t.kbps} kbps" else "AAC ${t.kbps} kbps (a la to-do, poca prioridad)"
+                    t.codec == "aac" -> if (t.bitrate >= 290) "AAC ${t.bitrate} kbps" else "AAC ${t.bitrate} kbps (a la to-do, poca prioridad)"
                     t.codec == "opus" -> "Opus → AAC 320 (a la to-do: buscar mejor copia)"
                     rank(t) == 3 -> "MP3 320"
                     else -> "MP3 ${t.kbps} kbps (mientras tanto; a la to-do)"

@@ -183,6 +183,9 @@ object Live {
  * are left where they are and listed. Sources are only read.
  */
 object Engine {
+    /** Beside the library: second copies of songs it holds, found in it but not made by the app. */
+    const val SPARE_FOLDER = "Sobrantes de la Biblioteca"
+
     fun build(sources: List<Source>, tracks: List<Track>, root: String, workers: Int = 3): String {
         val ops = Ops(root)
         Live.begin("Construir y ordenar", root)
@@ -238,6 +241,8 @@ object Engine {
         // Files the app made before it kept a manifest: told by length and title (from what the app read of them).
         val byLength = plan.copy.filter { it.target !in held }.groupBy { ((it.track.seconds ?: 0.0) * 2).toInt() }
         val unknown = ArrayList<String>()
+        val spare = ArrayList<LibFile>()
+        val byLengthAll = plan.copy.groupBy { ((it.track.seconds ?: 0.0) * 2).toInt() }
         for (f in leftovers) {
             val t = lib.local(f)?.let { Scanner.get(it.path) }
             val s = t?.seconds
@@ -245,7 +250,16 @@ object Engine {
             val match = if (s == null) null else (-1..1).flatMap { byLength[(s * 2).toInt() + it].orEmpty() }
                 .filter { it.target !in held && kotlin.math.abs((it.track.seconds ?: 0.0) - s) < 1.0 && Words.plain(it.title).let { w -> w.length >= 2 && name.contains(w) } }
                 .distinctBy { it.target }.singleOrNull()
-            if (match != null) { held[match.target] = f; manifest.adopt(f.rel, Words.nfc(match.track.path)) } else unknown += f.rel
+            if (match != null) { held[match.target] = f; manifest.adopt(f.rel, Words.nfc(match.track.path)); continue }
+            // A second copy of a song the library already holds (an old "(1)" folder, a copy made before): set aside,
+            // beside the library, not deleted.
+            val dup = if (s == null) null else (-1..1).flatMap { byLengthAll[(s * 2).toInt() + it].orEmpty() }
+                .firstOrNull { it.target in held && kotlin.math.abs((it.track.seconds ?: 0.0) - s) < 1.5 && Words.plain(it.title).let { w -> w.length >= 2 && name.contains(w) } }
+            if (dup != null) spare += f else unknown += f.rel
+        }
+        for (f in spare) {
+            val e = lib.moveOut(f, SPARE_FOLDER + "/" + f.rel)
+            if (e == null) ops.log("app", "set aside ${f.rel} (a second copy) → $SPARE_FOLDER") else unknown += f.rel
         }
         Live.unmatched = unknown
         if (unknown.isNotEmpty()) ops.log("app", "library: ${unknown.size} files not made by the app and matching no song (left where they are): ${unknown.take(5)}")

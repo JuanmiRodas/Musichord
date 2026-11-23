@@ -188,10 +188,11 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
     /** "/Users/juanmi/pCloud Drive/Biblioteca" → "/Biblioteca". */
     private val remoteRoot = "/" + mountRoot.substringAfter("/pCloud Drive").trim('/')
     private val folders = java.util.concurrent.ConcurrentHashMap<String, Long>() // rel (one form, lower case) → folder id
+    private val folderNames = java.util.concurrent.ConcurrentHashMap<String, String>() // rel (one form, lower case) → its name as pCloud has it
     private val files = java.util.concurrent.ConcurrentHashMap<String, LibFile>()
 
     override fun list(): Map<String, LibFile> {
-        files.clear(); folders.clear()
+        files.clear(); folders.clear(); folderNames.clear()
         val o = api.call("listfolder", mapOf("path" to remoteRoot, "recursive" to "1")).getJSONObject("metadata")
         folders[""] = o.getLong("folderid")
         fun walk(m: JSONObject, rel: String) {
@@ -201,7 +202,7 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
                 val n = x.getString("name")
                 if (n.startsWith(".")) continue
                 val r = if (rel.isEmpty()) n else "$rel/$n"
-                if (x.optBoolean("isfolder")) { folders.putIfAbsent(nfc(r).lowercase(), x.getLong("folderid")); walk(x, r) }
+                if (x.optBoolean("isfolder")) { folders.putIfAbsent(nfc(r).lowercase(), x.getLong("folderid")); folderNames.putIfAbsent(nfc(r).lowercase(), n); walk(x, r) }
                 else if (n.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) files[nfc(r)] = LibFile(nfc(r), r, x.optLong("size"), x.getLong("fileid"))
             }
         }
@@ -211,10 +212,17 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
 
     @Synchronized private fun folder(rel: String): Long {
         if (rel.isEmpty()) return folders[""]!!
-        folders[nfc(rel).lowercase()]?.let { return it }
+        folders[nfc(rel).lowercase()]?.let { id ->
+            // Same folder, other capitals ("Buck-Tick" for "BUCK-TICK"): renamed to the plan's spelling.
+            val want = nfc(rel.substringAfterLast('/'))
+            val have = folderNames[nfc(rel).lowercase()]
+            if (have != null && have != want) runCatching { api.call("renamefolder", mapOf("folderid" to id.toString(), "toname" to want)); folderNames[nfc(rel).lowercase()] = want }
+            return id
+        }
         val parent = folder(rel.substringBeforeLast('/', ""))
         val id = api.call("createfolderifnotexists", mapOf("folderid" to parent.toString(), "name" to nfc(rel.substringAfterLast('/')))).getJSONObject("metadata").getLong("folderid")
         folders[nfc(rel).lowercase()] = id
+        folderNames[nfc(rel).lowercase()] = nfc(rel.substringAfterLast('/'))
         return id
     }
 
