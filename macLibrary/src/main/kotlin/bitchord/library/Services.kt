@@ -19,6 +19,37 @@ object Keys {
         o.put(name, value.trim()); file.writeText(o.toString(1))
     }
     const val ACOUSTID = "acoustid"; const val DISCOGS = "discogs"; const val LASTFM = "lastfm"; const val FANART = "fanart"
+
+    /** Asks the service whether [name]'s key works: a few words to show beside its field. */
+    fun test(name: String): String {
+        val k = get(name) ?: return "falta la clave"
+        val e = URLEncoder.encode(k, "UTF-8")
+        fun call(url: String): Pair<Int, String> = runCatching {
+            val c = URL(url).openConnection() as HttpURLConnection
+            c.connectTimeout = 10_000; c.readTimeout = 15_000
+            c.setRequestProperty("User-Agent", "BitChord-Library/1.0 (https://github.com/JuanmiRodas/Musichord)")
+            val code = c.responseCode
+            code to ((if (code < 400) c.inputStream else c.errorStream)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: "")
+        }.getOrElse { -1 to (it.message ?: "") }
+        val (code, body) = when (name) {
+            ACOUSTID -> call("https://api.acoustid.org/v2/lookup?client=$e&duration=100&fingerprint=AQAAAA")
+            DISCOGS -> call("https://api.discogs.com/oauth/identity?token=$e")
+            LASTFM -> call("https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=Cher&api_key=$e&format=json")
+            FANART -> call("https://webservice.fanart.tv/v3/music/cc197bad-dc9c-440d-a5b5-d52ba2e14234?api_key=$e")
+            else -> return "?"
+        }
+        if (code == -1) return "sin conexión: $body"
+        val bad = when (name) {
+            ACOUSTID -> body.contains("\"code\": 4") || body.contains("\"code\":4") || body.contains("invalid API key", ignoreCase = true)
+            LASTFM -> body.contains("\"error\":10") || body.contains("\"error\": 10") || code == 403
+            else -> code == 401 || code == 403
+        }
+        return when {
+            bad -> "✗ el servicio no acepta esta clave"
+            code in 200..299 || name == ACOUSTID && code == 400 -> "✓ funciona"
+            else -> "✗ respuesta $code"
+        }
+    }
 }
 
 private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")

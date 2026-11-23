@@ -724,8 +724,15 @@ private fun SettingsPane(state: LibraryState) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { (k, label) ->
                     var v by remember { mutableStateOf(Keys.get(k).orEmpty()) }
-                    OutlinedTextField(v, { v = it; Keys.set(k, it) }, label = { Text(label) }, singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.weight(1f))
+                    var state by remember { mutableStateOf("") }
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(v, { v = it; Keys.set(k, it); state = "" }, label = { Text(label) }, singleLine = true,
+                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.weight(1f))
+                            OutlinedButton(enabled = v.isNotBlank(), onClick = { state = "comprobando…"; Thread { state = Keys.test(k) }.start() }) { Text("Comprobar") }
+                        }
+                        if (state.isNotEmpty()) Text(state, color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+                    }
                 }
             }
         }
