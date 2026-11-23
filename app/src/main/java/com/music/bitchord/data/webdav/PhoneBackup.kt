@@ -89,6 +89,10 @@ object PhoneBackup {
 
     private const val KEY_EVER = "ever_sent"
 
+    /** A name pCloud takes: the characters it won't (\\ : * ? " < > | %) simply left out. */
+    private fun safe(name: String): String =
+        name.replace(Regex("""[\\:*?"<>|%]"""), "").replace(Regex("""\s{2,}"""), " ").trim().ifEmpty { "_" }
+
     /**
      * The mirror's top folder: "Music" at the top of pCloud; if it is gone after files were
      * sent, wherever the folder holding "BitChord" (the app's downloads) now is — else null.
@@ -256,12 +260,12 @@ object PhoneBackup {
                     var dir = mirror
                     var ok = true
                     for (f in folders) {
-                        dir = WebDavClient.joinUrl(dir, f.replace(Regex("""[\\:*?"<>|%]"""), " ").trim())
+                        dir = WebDavClient.joinUrl(dir, safe(f))
                         if (made.add(dir) && WebDavClient.ensureCollection(dir, user, pass).isFailure) { made.remove(dir); ok = false; break }
                     }
                     // One folder that can't be made skips its files, not the rest of the pass.
                     if (!ok) { TrackLog.w(TAG, "phone backup: no folder ${folders.joinToString("/")}"); continue }
-                    val target = WebDavClient.joinUrl(dir, place.name)
+                    val target = WebDavClient.joinUrl(dir, safe(place.name))
                     _state.value = _state.value.copy(current = (folders + place.name).joinToString("/"), waiting = remaining)
                     // Already there (sent before, or put there another way): counted as backed up.
                     if (WebDavClient.exists(target, user, pass).getOrDefault(false)) {
