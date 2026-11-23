@@ -215,13 +215,27 @@ object SpotifyCanvas {
             return null
         }
         val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
-        val firstItem = root?.get("data")?.jsonObject
+        val items = root?.get("data")?.jsonObject
             ?.get("searchV2")?.jsonObject
             ?.get("tracksV2")?.jsonObject
             ?.get("items")?.jsonArray
-            ?.firstOrNull()
-            ?.jsonObject?.get("item")?.jsonObject
-            ?.get("data")?.jsonObject
+            ?.mapNotNull { runCatching { it.jsonObject["item"]?.jsonObject?.get("data")?.jsonObject }.getOrNull() }
+            .orEmpty()
+        // BitChord Audio: the hit has to be the song — its name and an artist — not just
+        // Spotify's top answer. "Time" by Hikaru Utada came back as another "Time" (an anime
+        // idol group's), and its canvas played as the song's video.
+        fun nameOf(o: JsonObject) = runCatching { o["name"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+        fun artistsOf(o: JsonObject) = runCatching {
+            o["artists"]?.jsonObject?.get("items")?.jsonArray?.mapNotNull {
+                it.jsonObject["profile"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
+            }
+        }.getOrNull().orEmpty()
+        val named = items.filter { nameOf(it) != null }
+        val firstItem = if (named.isEmpty()) items.firstOrNull() else named.firstOrNull { isMatch(nameOf(it)!!, artistsOf(it), title, artist) }
+        if (firstItem == null && named.isNotEmpty()) {
+            Log.d(TAG, "pathfinder: no hit is '$title' by '$artist' (top: '${nameOf(named.first())}' by ${artistsOf(named.first())})")
+            return null
+        }
         if (firstItem == null) {
             Log.w(TAG, "pathfinder response had no hit (http $code): ${body.take(200)}")
             return null
