@@ -116,82 +116,118 @@ internal class BandTap {
             peak[k] = maxOf(raws[k], peak[k] * PEAK_DECAY, 1e-4f)
             out[k] = sqrt((raws[k] / peak[k]).coerceIn(0f, 1f))
         }
-        // BitChord Audio: the thumb's beat follows one part of the song and keeps to it —
-        // the drums', the piano's, the guitar's: whichever band hits most regularly. Each
-        // band's onsets (a rise well above its usual rise) are timed; the band whose gaps
-        // between onsets are the steadiest leads, and only changes when another has been
-        // clearly steadier for a while.
+        // BitChord Audio: the thumb's pulse — the song's beat, locked on. The kick (bass energy
+        // well above its last second's average, rising) is detected; the gaps between kicks
+        // give the tempo; once the kicks are regular, the pulse lands on every beat of that
+        // tempo, kept in phase by each kick that comes — so it follows the drums steadily
+        // even where a hit is soft or missing, and never fires at random.
         val at = lastPublished
-        if (at < lastAt) resetRhythm()
+        if (at < lastAt || at - lastAt > 1_000_000L) resetRhythm()
         lastAt = at
-        var beat = false
-        for (k in 0..2) {
-            val flux = (raws[k] - prevRaw[k]).coerceAtLeast(0f)
-            prevRaw[k] = raws[k]
-            fluxMean[k] += (flux - fluxMean[k]) * 0.02f
-            fluxVar[k] += ((flux - fluxMean[k]) * (flux - fluxMean[k]) - fluxVar[k]) * 0.02f
-            val threshold = fluxMean[k] + 1.6f * sqrt(fluxVar[k])
-            // (Never hit yet counts as long ago: at − MIN_VALUE overflowed, and no onset was ever taken.)
-            val since = if (lastOnset[k] == Long.MIN_VALUE) Long.MAX_VALUE else at - lastOnset[k]
-            if (flux > threshold && flux > peak[k] * 0.04f && since > MIN_ONSET_GAP_US) {
-                if (lastOnset[k] != Long.MIN_VALUE && since < 2_000_000L) {
-                    gaps[k][gapHead[k]] = since.toFloat()
-                    gapHead[k] = (gapHead[k] + 1) % GAPS
-                    if (gapCount[k] < GAPS) gapCount[k]++
-                }
-                lastOnset[k] = at
-                // The thumb's pulse: the drums and bass first; another band only while
-                // the bass has had no hit for a few seconds (and then the steadiest one).
-                if (k == 0 || (k == lead && (lastOnset[0] == Long.MIN_VALUE || at - lastOnset[0] > 3_000_000L))) beat = true
-            }
-        }
-        if (at - lastChoice > CHOOSE_EVERY_US) {
-            lastChoice = at
-            val scores = FloatArray(3) { steadiness(it) }
-            val best = scores.indices.maxByOrNull { scores[it] } ?: lead
-            if (best != lead && scores[best] > scores[lead] * 1.35f + 0.05f) {
-                if (++challenger[best] >= 3) { lead = best; challenger.fill(0) }
-            } else {
-                challenger.fill(0)
-            }
-        }
-        AudioBands.publish(out[0], out[1], out[2], beat)
+        AudioBands.publish(out[0], out[1], out[2], beatAt(at, raw0))
     }
 
-    private var lead = 0
     private var lastAt = Long.MIN_VALUE
-    private var lastChoice = Long.MIN_VALUE
-    private val prevRaw = FloatArray(3)
-    private val fluxMean = FloatArray(3)
-    private val fluxVar = FloatArray(3)
-    private val lastOnset = LongArray(3) { Long.MIN_VALUE }
-    private val gaps = Array(3) { FloatArray(GAPS) }
-    private val gapHead = IntArray(3)
-    private val gapCount = IntArray(3)
-    private val challenger = IntArray(3)
+    private val energy = FloatArray(AVG_BLOCKS)
+    private var energyHead = 0
+    private var energyCount = 0
+    private var prevEnergy = 0f
+    private var lastKick = Long.MIN_VALUE
+    private val gaps = LongArray(GAPS)
+    private var gapHead = 0
+    private var gapCount = 0
+    private var period = 0L
+    private var nextBeat = Long.MIN_VALUE
+    private var locked = 0
 
-    /** How steady a band's onsets are: many, evenly spaced (or at multiples of one gap). */
-    private fun steadiness(k: Int): Float {
-        val n = gapCount[k]
-        if (n < 4) return 0f
-        val g = gaps[k].copyOf(n).sorted()
-        val median = g[n / 2]
-        if (median <= 0f) return 0f
-        // Each gap measured against the nearest whole multiple of the median: a skipped hit still counts as on time.
-        var err = 0f
-        for (x in g) {
-            val m = (x / median).let { kotlin.math.round(it).coerceAtLeast(1f) }
-            err += kotlin.math.abs(x - m * median) / median
+    private fun beatAt(at: Long, bass: Float): Boolean {
+        val e = bass * bass
+        var avg = 0f
+        for (k in 0 until energyCount) avg += energy[k]
+        avg = if (energyCount > 0) avg / energyCount else e
+        var variance = 0f
+        for (k in 0 until energyCount) variance += (energy[k] - avg) * (energy[k] - avg)
+        variance = if (energyCount > 0) variance / energyCount else 0f
+        energy[energyHead] = e
+        energyHead = (energyHead + 1) % AVG_BLOCKS
+        if (energyCount < AVG_BLOCKS) energyCount++
+        // The louder the bass swings, the higher the bar (the classic sound-energy beat rule).
+        val c = (1.55f - 0.25f * (variance / (avg * avg + 1e-9f)).coerceAtMost(2f)).coerceAtLeast(1.25f)
+        val rising = e > prevEnergy
+        prevEnergy = e
+        val sinceKick = if (lastKick == Long.MIN_VALUE) Long.MAX_VALUE else at - lastKick
+        val kick = energyCount >= AVG_BLOCKS / 2 && rising && e > avg * c && e > 1e-7f && sinceKick > MIN_KICK_GAP_US
+        if (kick) {
+            if (lastKick != Long.MIN_VALUE && sinceKick < 2_000_000L) {
+                gaps[gapHead] = sinceKick
+                gapHead = (gapHead + 1) % GAPS
+                if (gapCount < GAPS) gapCount++
+                tempo()
+            }
+            lastKick = at
         }
-        return (1f / (err / n + 0.08f)) * (n / GAPS.toFloat())
+        if (period <= 0L || locked < 3) {
+            // Not locked yet: the kicks themselves.
+            if (kick && period > 0L) nextBeat = at + period
+            return kick
+        }
+        // Locked: a beat on the grid; a kick near it pulls the grid onto the kick.
+        if (kick) {
+            val off = at - (nextBeat - period)
+            if (kotlin.math.abs(off) < period / 4) {
+                nextBeat = at + period
+                locked = minOf(locked + 1, 12)
+                return true
+            } else if (kotlin.math.abs(at - nextBeat) < period / 4) {
+                nextBeat = at + period
+                locked = minOf(locked + 1, 12)
+                return true
+            } else {
+                locked--
+            }
+        }
+        if (at >= nextBeat) {
+            while (nextBeat <= at) nextBeat += period
+            // Beats with no kick for long (a break): the grid fades out until the drums return.
+            if (lastKick != Long.MIN_VALUE && at - lastKick > period * 6) { locked = 0; return false }
+            return true
+        }
+        return false
+    }
+
+    /** The tempo from the kicks' gaps: the most common gap, folded into one beat (0.33–1 s). */
+    private fun tempo() {
+        if (gapCount < 4) return
+        val folded = (0 until gapCount).map { k ->
+            var g = gaps[k].toDouble()
+            while (g > 1_000_000.0) g /= 2.0
+            while (g < 330_000.0) g *= 2.0
+            g
+        }.sorted()
+        val median = folded[folded.size / 2]
+        val close = folded.count { kotlin.math.abs(it - median) < median * 0.08 }
+        if (close * 2 >= folded.size) {
+            val p = folded.filter { kotlin.math.abs(it - median) < median * 0.08 }.average().toLong()
+            if (period == 0L || kotlin.math.abs(p - period) > period / 12) {
+                period = p
+                locked = 3
+            } else {
+                period = (period * 3 + p) / 4
+                locked = minOf(locked + 1, 12)
+            }
+            if (nextBeat == Long.MIN_VALUE || nextBeat < lastKick) nextBeat = lastKick + period
+        }
     }
 
     private fun resetRhythm() {
-        lastOnset.fill(Long.MIN_VALUE)
-        gapCount.fill(0)
-        gapHead.fill(0)
-        challenger.fill(0)
-        lastChoice = Long.MIN_VALUE
+        energyCount = 0
+        energyHead = 0
+        lastKick = Long.MIN_VALUE
+        gapCount = 0
+        gapHead = 0
+        period = 0L
+        nextBeat = Long.MIN_VALUE
+        locked = 0
     }
 
     private companion object {
@@ -200,8 +236,9 @@ internal class BandTap {
         const val MID_HZ = 2500.0
         /** Per published block (~100 a second): a loud bar fades from the scale in a few seconds. */
         const val PEAK_DECAY = 0.996f
-        const val MIN_ONSET_GAP_US = 180_000L
-        const val GAPS = 16
-        const val CHOOSE_EVERY_US = 2_000_000L
+        /** About a second of blocks (~100 a second published). */
+        const val AVG_BLOCKS = 90
+        const val MIN_KICK_GAP_US = 220_000L
+        const val GAPS = 12
     }
 }

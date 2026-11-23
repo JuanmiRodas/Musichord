@@ -5249,6 +5249,9 @@ fun NowPlayingScreen(
                     // which is what keeps this row of controls in the same place on
                     // every screen instead of being shoved off the bottom of a tall one.
                     SlidingPlayerDeck(
+                        // BitChord Audio: LastWave's waves rise above the deck — drawn under
+                        // the cover and the title above it, not over them.
+                        modifier = if (lastWaveLook != null) Modifier.zIndex(-1f) else Modifier,
                         // A pick owns the screen: the transport is hidden for as long
                         // as it is on, and a scroll that would reveal it is refused
                         // (see [LyricsPanel]'s bottom-half tap), so nothing brings the
@@ -5267,7 +5270,8 @@ fun NowPlayingScreen(
                     ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.washTint({ videoWash }, { videoWashAmount }).onSizeChanged { size ->
+                        // (No video tint with LastWave: its off-screen layer would cut the waves off at the deck's top.)
+                        modifier = Modifier.washTint({ videoWash }, { if (lastWaveLook != null) 0f else videoWashAmount }).onSizeChanged { size ->
                             if (spotifyCanvasPresentation) {
                                 val measuredHeight = with(density) { size.height.toDp() }
                                 if (measuredHeight != spotifyCanvasDeckHeight) {
