@@ -474,6 +474,9 @@ object AppSettings {
     /** BitChord Audio: the LastWave-style player instead of the classic one. Off unless chosen. */
     val lastWavePlayer = MutableStateFlow(false)
 
+    /** BitChord Audio: the player's buttons over the transport, in order (ids of PlayerQuickAction). */
+    val playerQuickActions = MutableStateFlow(com.music.bitchord.ui.player.PlayerQuickAction.DEFAULT.map { it.id })
+
     /** Show the output / Listen Together pill under the player's transport. */
     val showListenTogetherButton = MutableStateFlow(false)
 
@@ -1161,6 +1164,9 @@ object AppSettings {
         showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
         showBestPart.value = prefs.getBoolean(KEY_BEST_PART, true)
         lastWavePlayer.value = prefs.getBoolean(KEY_LASTWAVE_PLAYER, false)
+        prefs.getString(KEY_QUICK_ACTIONS, null)?.let { saved ->
+            playerQuickActions.value = saved.split(',').filter { it.isNotBlank() }
+        }
         showListenTogetherButton.value = prefs.getBoolean(KEY_LISTEN_TOGETHER_BUTTON, false)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
         onboardingComplete.value = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false)
@@ -1599,6 +1605,12 @@ object AppSettings {
     fun setShowNerdStats(value: Boolean) {
         showNerdStats.value = value
         prefs.edit().putBoolean(KEY_NERD_STATS, value).apply()
+    }
+
+    fun setPlayerQuickActions(ids: List<String>) {
+        val clean = ids.distinct().take(com.music.bitchord.ui.player.PlayerQuickAction.MAX)
+        playerQuickActions.value = clean
+        prefs.edit().putString(KEY_QUICK_ACTIONS, clean.joinToString(",")).apply()
     }
 
     fun setLastWavePlayer(value: Boolean) {
@@ -2616,6 +2628,7 @@ object AppSettings {
     private const val KEY_NERD_STATS = "show_nerd_stats"
     private const val KEY_BEST_PART = "show_best_part"
     private const val KEY_LASTWAVE_PLAYER = "lastwave_player"
+    private const val KEY_QUICK_ACTIONS = "player_quick_actions"
     private const val KEY_LISTEN_TOGETHER_BUTTON = "show_listen_together_button"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
     private const val KEY_REDUCE_ANIMATION = "reduce_animation"

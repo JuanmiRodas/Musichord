@@ -2446,6 +2446,17 @@ fun SettingsScreen(
                 )
             }
             // BitChord Audio: no "Best part" button (it sat over the lyrics) — the setting went with it.
+            val quickTitle = stringResource(R.string.quick_actions_title)
+            row(quickTitle, "buttons", "botones", "player", "reproductor", "quick") {
+                var editing by remember { mutableStateOf(false) }
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = quickTitle,
+                    subtitle = stringResource(R.string.quick_actions_subtitle),
+                    onClick = { editing = true },
+                )
+                if (editing) com.music.bitchord.ui.components.QuickActionsEditor(onDismiss = { editing = false })
+            }
             val lastWaveTitle = stringResource(R.string.lastwave_player)
             row(lastWaveTitle, "lastwave", "style", "waves", "glass", "estilo", "ondas") {
                 val lastWave by AppSettings.lastWavePlayer.collectAsStateWithLifecycle()

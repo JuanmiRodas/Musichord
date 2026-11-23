@@ -108,6 +108,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         override val showBestPart: kotlinx.coroutines.flow.StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)
         override val showListenTogetherButton get() = AppSettings.showListenTogetherButton
         override val lastWavePlayer get() = AppSettings.lastWavePlayer
+        override val playerQuickActions get() = AppSettings.playerQuickActions
         override val smartAnalysis get() = AppSettings.smartAnalysis
         override val automixDetail get() = AppSettings.automixDetail
         override val smartFadeEnabled get() = AppSettings.smartFadeEnabled
@@ -341,6 +342,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
     override fun askNotificationAccess() {
         main.post { com.music.bitchord.playback.NotificationIcons.ask(app) }
+    }
+
+    override fun runQuickAction(id: String, song: com.music.bitchord.data.model.Song) {
+        QuickActionBridge.handler?.invoke(id, song)
     }
 
     override fun albumPageIdOf(song: com.music.bitchord.data.model.Song): String? =

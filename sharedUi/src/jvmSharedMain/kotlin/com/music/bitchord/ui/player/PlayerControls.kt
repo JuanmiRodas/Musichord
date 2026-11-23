@@ -34,6 +34,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.material.icons.rounded.PhoneAndroid
 
 import org.jetbrains.compose.resources.DrawableResource
 import androidx.compose.animation.animateContentSize
@@ -57,6 +60,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -831,6 +835,70 @@ internal fun PlayerActionRow(
 ) {
     val showPartyButton by PlayerSettings.showListenTogetherButton.collectAsStateWithLifecycle()
     val inParty = rememberPartyBadge().inParty
+    // BitChord Audio: LastWave's row — one glass button each, centred: lyrics, the
+    // device, shuffle, the queue (and repeat and AutoPlay beside shuffle while the
+    // queue is up).
+    if (LocalLastWave.current != null) {
+        val badge = rememberPartyBadge()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GlassRoundButton(
+                icon = BitChordIcons.LyricsQuote,
+                contentDescription = stringResource(if (lyricsOpen) Res.string.close_lyrics else Res.string.open_lyrics),
+                onClick = onToggleLyrics,
+                highlighted = lyricsOpen,
+            )
+            DeviceButton(onOpenOutput = onOpenOutput)
+            if (showPartyButton || inParty) {
+                GlassRoundButton(
+                    icon = Icons.Rounded.Person,
+                    contentDescription = stringResource(Res.string.listen_together_open),
+                    onClick = if (badge.inParty) onOpenListenTogetherMembers else onListenTogether,
+                    highlighted = badge.inParty,
+                )
+            }
+            GlassRoundButton(
+                icon = BitChordIcons.Shuffle,
+                contentDescription = stringResource(if (shuffleEnabled) Res.string.shuffle_on else Res.string.shuffle_off),
+                onClick = onToggleShuffle,
+                highlighted = shuffleEnabled,
+                haptic = if (shuffleEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
+            )
+            AnimatedVisibility(visible = queueOpen, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    GlassRoundButton(
+                        icon = BitChordIcons.Repeat,
+                        label = if (repeatMode == RepeatModes.ONE) "1" else null,
+                        contentDescription = when (repeatMode) {
+                            RepeatModes.ONE -> stringResource(Res.string.repeat_one)
+                            RepeatModes.ALL -> stringResource(Res.string.repeat_all)
+                            else -> stringResource(Res.string.repeat_off)
+                        },
+                        onClick = onCycleRepeat,
+                        highlighted = repeatMode != RepeatModes.OFF,
+                    )
+                    GlassRoundButton(
+                        icon = BitChordIcons.Infinity,
+                        contentDescription = stringResource(if (autoplayEnabled) Res.string.autoplay_on else Res.string.autoplay_off),
+                        onClick = onToggleAutoplay,
+                        highlighted = autoplayEnabled,
+                    )
+                }
+            }
+            GlassRoundButton(
+                icon = BitChordIcons.Queue,
+                contentDescription = stringResource(Res.string.up_next),
+                // In the queue, back to the player.
+                onClick = onToggleQueue,
+                highlighted = queueOpen,
+                haptic = if (queueOpen) Haptic.Tap else Haptic.Expand,
+            )
+        }
+        return
+    }
     // Just the output glyph in the middle.
     val compact = !queueOpen && !showPartyButton && !inParty
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -1059,6 +1127,9 @@ internal fun CircleGlyph(
     onLongClick: (() -> Unit)? = null,
     /** BitChord Audio: a ring round the glyph while what it started is working. */
     busy: Boolean = false,
+    /** BitChord Audio: smaller when many share the row. */
+    size: Dp = 34.dp,
+    enabled: Boolean = true,
 ) {
     val haptics = rememberHaptics()
     val discAlpha by animateFloatAsState(
@@ -1068,9 +1139,11 @@ internal fun CircleGlyph(
     val chrome = LocalPlayerChrome.current
     Box(
         modifier = modifier
-            .size(34.dp)
+            .size(size)
+            .graphicsLayer { alpha = if (enabled) 1f else 0.4f }
             .clip(CircleShape)
             .combinedClickable(
+                enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onLongClick = onLongClick?.let { long ->
@@ -1109,7 +1182,7 @@ internal fun CircleGlyph(
                 imageVector = glyph,
                 contentDescription = contentDescription,
                 tint = Color.White,
-                modifier = Modifier.size(19.dp),
+                modifier = Modifier.size(19.dp * (size / 34.dp)),
             )
         }
         if (busy) {
@@ -1678,7 +1751,13 @@ internal fun OutputCaption(
     onOpenMembers: () -> Unit,
     /** BitChord Audio: the playing song — its source (place · format · kbps) shares the line. */
     song: Song? = null,
+    /** BitChord Audio: "Playing from …" — with LastWave it joins the one line at the foot. */
+    origin: String? = null,
 ) {
+    if (song != null && origin != null && LocalLastWave.current != null) {
+        FootLine(song, origin, accountName, onOpenOutput)
+        return
+    }
     if (song != null) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2478,6 +2557,73 @@ private fun ShimmerText(
  * BitChord Audio: "pCloud · MP3 · 320 kbps" — the place the playing copy comes
  * from and what it is. Tapping it opens the source picker.
  */
+/**
+ * BitChord Audio: LastWave's foot — one centred line, sliding when it doesn't fit:
+ * "Playing from <list> on <device> from <place> - <format> <kbps>" and the cover button.
+ * The line opens the source picker; held, the outputs.
+ */
+@Composable
+private fun FootLine(song: Song, origin: String, accountName: String?, onOpenOutput: () -> Unit) {
+    val device = rememberAudioOutputName(accountName)
+    val (place, format) = sourceParts(song)
+    val text = buildString {
+        append(origin)
+        append(" on ").append(device)
+        append(" from ").append(place)
+        if (format.isNotBlank()) append(" - ").append(format)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = Color.White.copy(alpha = 0.6f),
+            maxLines = 1,
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onLongClick = onOpenOutput,
+                ) { PlayerPlatform.host.chooseSource(song) }
+                .basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_000, velocity = 24.dp),
+        )
+        Icon(
+            imageVector = Icons.Rounded.CoverIcon,
+            contentDescription = "Cover",
+            tint = Color.White.copy(alpha = 0.6f),
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .clickable { PlayerPlatform.host.chooseCover(song) }
+                .padding(horizontal = 5.dp)
+                .size(13.dp),
+        )
+    }
+}
+
+/** Where the playing copy comes from ("pCloud", "Local Storage", "YouTube") and what it is ("MP3 320 kbps"). */
+@Composable
+private fun sourceParts(song: Song): Pair<String, String> {
+    val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
+    val snapshot = nerdStats?.takeIf { it.mediaId == null || it.mediaId == song.videoId }
+    fun known(name: String?) = name?.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) }
+    val place = known(snapshot?.sourceName)
+        ?: known(NerdStats.sourceFor(song.videoId))
+        ?: when {
+            song.videoId.startsWith("webdav:") -> "pCloud"
+            song.localUri != null -> "Phone"
+            else -> "YouTube"
+        }
+    val format = listOfNotNull(
+        codecLabel(snapshot?.mimeType),
+        (snapshot?.claimed?.kbps ?: snapshot?.bitrateKbps)?.let { "$it kbps" },
+    ).joinToString(" ")
+    return place to format
+}
+
 @Composable
 internal fun SourceLine(song: Song, modifier: Modifier = Modifier, detail: String? = null, caption: Boolean = false) {
     val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
@@ -2720,4 +2866,119 @@ internal fun lastWavePressScale(interaction: MutableInteractionSource, pressedSc
         label = "lwPress",
     )
     return scale
+}
+
+
+/**
+ * BitChord Audio: a bottom-row button in LastWave's glass — the same look lit or not
+ * (lit is the glass brighter, never a different shape), the same size as the classic glyph.
+ */
+@Composable
+private fun GlassRoundButton(
+    icon: ImageVector?,
+    contentDescription: String,
+    onClick: () -> Unit,
+    highlighted: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
+    haptic: Haptic = Haptic.Tap,
+    label: String? = null,
+    iconSize: Dp = BOTTOM_ICON_SIZE,
+    content: (@Composable () -> Unit)? = null,
+) {
+    val haptics = rememberHaptics()
+    val interaction = remember { MutableInteractionSource() }
+    val scale = lastWavePressScale(interaction)
+    Box(
+        modifier = Modifier
+            .size(BOTTOM_ACTION_SIZE)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .lastWaveButton(CircleShape, active = highlighted)
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                onLongClick = onLongClick?.let { long -> { haptics.play(Haptic.Expand); long() } },
+            ) {
+                haptics.play(haptic)
+                onClick()
+            }
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            content != null -> content()
+            icon != null -> Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(iconSize))
+        }
+        if (label != null) {
+            Text(
+                label,
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+    }
+}
+
+/**
+ * BitChord Audio: the one device button. A tap casts to the speaker last cast to (and,
+ * while casting, brings the music back to the phone); holding it opens the list of
+ * outputs. It shows where the music is playing: a speaker group while casting, the
+ * buds, headphones or speaker it is coming out of, or the phone — with the cast mark
+ * on it, since from the phone this is the button that sends it elsewhere.
+ */
+@Composable
+private fun DeviceButton(onOpenOutput: () -> Unit) {
+    val cast by PlayerPlatform.host.castState.collectAsStateWithLifecycle()
+    val watch by PlayerPlatform.host.watchOutput.collectAsStateWithLifecycle()
+    val active = rememberAudioOutputs().firstOrNull { it.isActive }
+    val casting = cast.connectedName != null || cast.connecting
+    val budsIcon = vectorResource(Res.drawable.ic_output_buds)
+    val speakerIcon = vectorResource(Res.drawable.ic_output_speaker)
+    val (icon, onPhone) = when {
+        casting -> Icons.Rounded.SpeakerGroup to false
+        watch.active -> Icons.Rounded.Watch to false
+        else -> when (active?.kind) {
+            null, AudioOutputKind.PHONE -> Icons.Rounded.PhoneAndroid to true
+            AudioOutputKind.BLUETOOTH -> when (active.form) {
+                BluetoothForm.BUDS -> budsIcon to false
+                BluetoothForm.SPEAKER -> speakerIcon to false
+                BluetoothForm.CAR -> Icons.Rounded.DirectionsCar to false
+                BluetoothForm.HEADPHONES, BluetoothForm.UNKNOWN -> Icons.Rounded.Headphones to false
+            }
+            AudioOutputKind.WIRED, AudioOutputKind.USB -> Icons.Rounded.Headphones to false
+            AudioOutputKind.HDMI -> Icons.Rounded.Tv to false
+            AudioOutputKind.OTHER -> speakerIcon to false
+        }
+    }
+    GlassRoundButton(
+        icon = null,
+        contentDescription = cast.connectedName ?: active?.name ?: stringResource(Res.string.audio_output),
+        highlighted = casting,
+        onClick = {
+            if (cast.supported && (casting || cast.recentName != null)) PlayerPlatform.host.castToRecent() else onOpenOutput()
+        },
+        onLongClick = onOpenOutput,
+    ) {
+        Box(Modifier.size(BOTTOM_ICON_SIZE), contentAlignment = Alignment.Center) {
+            if (onPhone) {
+                // The phone, with the cast mark over its top corner: from here, this is
+                // the button that sends the music elsewhere.
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.fillMaxSize(0.86f).align(Alignment.BottomStart),
+                )
+                Icon(
+                    Icons.Rounded.Cast,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(BOTTOM_ICON_SIZE * 0.5f).align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp),
+                )
+            } else {
+                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.fillMaxSize())
+            }
+        }
+    }
 }

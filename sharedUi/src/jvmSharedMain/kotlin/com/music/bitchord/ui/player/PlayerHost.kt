@@ -241,6 +241,9 @@ interface PlayerHost {
     /** BitChord Audio: the album page of a file of yours (its album in your pCloud library), or null. */
     fun albumPageIdOf(song: Song): String? = null
 
+    /** BitChord Audio: a [PlayerQuickAction] the app carries out (the ⋯ menu's own work). */
+    fun runQuickAction(id: String, song: Song) {}
+
     /** BitChord Audio: the cover picker for [song]. */
     fun chooseCover(song: Song) {}
 
@@ -426,6 +429,8 @@ interface PlayerSettingsSource {
     val showBestPart: StateFlow<Boolean>
     /** BitChord Audio: the LastWave-style player (waves, liquid glass, moving colours) instead of the classic one. */
     val lastWavePlayer: StateFlow<Boolean> get() = defaultLastWavePlayer
+    /** BitChord Audio: the buttons over the transport, in order — [PlayerQuickAction] ids. */
+    val playerQuickActions: StateFlow<List<String>> get() = DefaultQuickActionIds
     /** Whether the output / Listen Together pill sits under the transport. */
     val showListenTogetherButton: StateFlow<Boolean>
     val smartAnalysis: StateFlow<SmartAnalysis>

@@ -192,6 +192,8 @@ class LastWaveLook internal constructor(
     /** The artwork's colours deepened and saturated, as LastWave's fluid backdrop shows them. */
     val deep: List<Color>,
     val motion: WaveMotion,
+    /** The cover is pale: the status bar needs a darker top to stay readable. */
+    val paleTop: Boolean = false,
 )
 
 val LocalLastWave = compositionLocalOf<LastWaveLook?> { null }
@@ -238,6 +240,7 @@ internal fun rememberLastWaveLook(enabled: Boolean, artworkUrl: String?, playing
             tertiary = c2.ensureLuminous(0.28f),
             deep = listOf(c0, c1, c2).map { deepen(it) },
             motion = motion,
+            paleTop = colors.isNotEmpty() && colors.take(3).map { it.luminance() }.average() > 0.55,
         )
     }
 }

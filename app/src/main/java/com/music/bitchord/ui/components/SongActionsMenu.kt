@@ -116,6 +116,8 @@ fun SongActionsMenu(
      * re-runs it; the conflict dialog keeps that idempotent.
      */
     onUploadToWebDav: (() -> Unit)? = null,
+    /** BitChord Audio: delete the file of this song on the phone (a wrong version saved, say). */
+    onDeletePhoneCopy: (() -> Unit)? = null,
     onToggleLike: () -> Unit,
     onToggleDislike: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -430,6 +432,14 @@ fun SongActionsMenu(
             )
         }
         WebDavUploadRow(song, palette, isOffline, onUploadToWebDav)
+        onDeletePhoneCopy?.let {
+            ActionRow(
+                icon = SfIcons.Trash,
+                label = stringResource(R.string.delete_phone_copy),
+                accent = palette.accent,
+                onClick = it,
+            )
+        }
         onRemoveFromHistory?.let {
             ActionRow(
                 icon = SfIcons.History,

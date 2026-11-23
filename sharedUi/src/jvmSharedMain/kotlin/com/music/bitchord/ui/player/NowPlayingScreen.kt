@@ -2116,6 +2116,7 @@ fun NowPlayingScreen(
                     onOpenOutput = openAudioOutput,
                     onOpenMembers = openListenTogetherMembers,
                     song = song,
+                    origin = playbackOriginText(song, playedBy),
                 )
             }
         }
@@ -3471,6 +3472,20 @@ fun NowPlayingScreen(
                                         brush = topScrimBrush,
                                         size = Size(size.width, size.height + above),
                                     )
+                                    // BitChord Audio: a pale cover gets a soft dark fall from the top,
+                                    // so the status bar's white icons stay readable over it.
+                                    if (lastWaveLook != null && lastWaveLook.paleTop) {
+                                        val h = size.height + above + 48.dp.toPx()
+                                        drawRect(
+                                            brush = Brush.verticalGradient(
+                                                0f to Color.Black.copy(alpha = 0.42f * (1f - p())),
+                                                0.55f to Color.Black.copy(alpha = 0.16f * (1f - p())),
+                                                1f to Color.Transparent,
+                                                endY = h,
+                                            ),
+                                            size = Size(size.width, h),
+                                        )
+                                    }
                                 }
                             },
                         contentAlignment = Alignment.Center,
@@ -3494,7 +3509,8 @@ fun NowPlayingScreen(
                                 }
                                 .width(38.dp)
                                 .height(5.dp)
-                                .graphicsLayer { alpha = spotifyChromeAlpha }
+                                // BitChord Audio: no handle bar with LastWave — the line at the foot says it all.
+                                .graphicsLayer { alpha = if (lastWaveLook != null) 0f else spotifyChromeAlpha }
                                 .shadow(2.dp, RoundedCornerShape(3.dp), clip = false)
                                 .clip(RoundedCornerShape(3.dp))
                                 .additiveChrome(LocalPlayerChrome.current)
@@ -3504,7 +3520,8 @@ fun NowPlayingScreen(
                         // composition until its final frame gives the caption a real
                         // fade on both entry and exit, but removes its click target
                         // entirely once lyrics or the queue owns the player.
-                        if (!hideSongStatus) {
+                        // BitChord Audio: with LastWave, "Playing from…" moves to the line at the foot.
+                        if (!hideSongStatus && lastWaveLook == null) {
                             WhileShown({ !collapseAlmostDone }) {
                                 PlaybackOriginCaption(
                                     text = playbackOriginText(song, playedBy),
@@ -5373,40 +5390,88 @@ fun NowPlayingScreen(
                         onScrubFinished = onScrubFinished,
                     ) {
                     }
-                    // BitChord Audio: the song's own buttons, centred under the timeline.
+                    // BitChord Audio: the song's own buttons, centred under the timeline — the
+                    // ones chosen in Settings (up to 8), then the ⋯ menu, always.
                     if (!(lyricsOpen || queueOpen)) {
-                        Row(
-                            modifier = Modifier.padding(top = 14.dp, bottom = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(18.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (PlayerPlatform.host.videoModeSupported) {
+                        val quickIds by PlayerSettings.playerQuickActions.collectAsStateWithLifecycle()
+                        val lit by PlayerQuickActionState.lit.collectAsStateWithLifecycle()
+                        val quick = quickIds.mapNotNull { PlayerQuickAction.of(it) }.filter { a ->
+                            when (a) {
+                                PlayerQuickAction.VIDEO, PlayerQuickAction.VIDEO_AUDIO -> PlayerPlatform.host.videoModeSupported
+                                PlayerQuickAction.STAR -> signedIn || song.localUri != null
+                                else -> true
+                            }
+                        }.take(PlayerQuickAction.MAX)
+                        BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
+                            val count = quick.size + 1
+                            val gap = 12.dp
+                            val disc = ((maxWidth - gap * (count - 1)) / count).coerceIn(26.dp, 34.dp)
+                            val spacing = ((maxWidth - disc * count) / (count - 1).coerceAtLeast(1)).coerceIn(4.dp, 18.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(spacing, Alignment.CenterHorizontally),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                for (action in quick) {
+                                    val liked = likeStatus == LikeStatus.LIKE
+                                    val translationOn = if (videoOverlay) videoModeTranslation else songLyricsTranslation
+                                    val lyricsOnCover = if (videoOverlay) videoModeLyrics else !hideLyricsPreview
+                                    CircleGlyph(
+                                        icon = when (action) {
+                                            PlayerQuickAction.STAR -> if (liked) BitChordIcons.StarFilled else BitChordIcons.Star
+                                            else -> action.icon
+                                        },
+                                        contentDescription = action.label,
+                                        size = disc,
+                                        active = when (action) {
+                                            PlayerQuickAction.VIDEO -> videoModeOn
+                                            PlayerQuickAction.VIDEO_AUDIO -> videoModeOn && videoModeOriginalAudio
+                                            PlayerQuickAction.TRANSLATION -> translationOn
+                                            PlayerQuickAction.LYRICS -> lyricsOnCover
+                                            PlayerQuickAction.STAR -> liked
+                                            else -> action.id in lit
+                                        },
+                                        enabled = action != PlayerQuickAction.VIDEO_AUDIO || videoModeOn,
+                                        busy = action == PlayerQuickAction.VIDEO && videoModeOn && videoModeLooking == song.videoId,
+                                        haptic = if (action == PlayerQuickAction.STAR) (if (liked) Haptic.ToggleOff else Haptic.ToggleOn) else Haptic.Tap,
+                                        onLongClick = if (action == PlayerQuickAction.VIDEO) {
+                                            { PlayerPlatform.host.openVideoSearch(song) }
+                                        } else null,
+                                        onClick = {
+                                            when (action) {
+                                                PlayerQuickAction.VIDEO -> PlayerPlatform.host.toggleVideoMode(song)
+                                                PlayerQuickAction.VIDEO_AUDIO -> PlayerPlatform.host.setVideoModeOriginalAudio(!videoModeOriginalAudio)
+                                                PlayerQuickAction.TRANSLATION -> if (videoOverlay) {
+                                                    PlayerPlatform.host.setVideoModeTranslation(!videoModeTranslation)
+                                                } else {
+                                                    PlayerPlatform.host.setSongLyricsTranslation(!songLyricsTranslation)
+                                                }
+                                                PlayerQuickAction.LYRICS -> if (videoOverlay) {
+                                                    PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics)
+                                                } else {
+                                                    PlayerPlatform.host.runQuickAction(action.id, song)
+                                                }
+                                                PlayerQuickAction.STAR -> onToggleLike()
+                                                PlayerQuickAction.ALBUM -> {
+                                                    val album = PlayerPlatform.host.albumPageIdOf(song) ?: song.albumId
+                                                    if (album != null) onOpenAlbum(album) else PlayerPlatform.host.openAlbumOf(song)
+                                                }
+                                                PlayerQuickAction.ARTIST -> if (!PlayerPlatform.host.goToArtist(song)) onOpenArtist(song.artistId, song.artist)
+                                                PlayerQuickAction.SOURCE -> PlayerPlatform.host.chooseSource(song)
+                                                PlayerQuickAction.COVER -> PlayerPlatform.host.chooseCover(song)
+                                                else -> PlayerPlatform.host.runQuickAction(action.id, song)
+                                            }
+                                        },
+                                    )
+                                }
                                 CircleGlyph(
-                                    icon = Icons.Rounded.SmartDisplay,
-                                    contentDescription = stringResource(Res.string.video_mode),
-                                    onClick = { PlayerPlatform.host.toggleVideoMode(song) },
-                                    onLongClick = { PlayerPlatform.host.openVideoSearch(song) },
-                                    active = videoModeOn,
-                                    busy = videoModeOn && videoModeLooking == song.videoId,
+                                    icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
+                                    contentDescription = stringResource(Res.string.more),
+                                    onClick = onOpenMenu,
+                                    haptic = Haptic.Tap,
+                                    size = disc,
+                                    modifier = Modifier.menuAnchor(),
                                 )
                             }
-                            if (signedIn || song.localUri != null) {
-                                val liked = likeStatus == LikeStatus.LIKE
-                                CircleGlyph(
-                                    icon = if (liked) BitChordIcons.StarFilled else BitChordIcons.Star,
-                                    contentDescription = stringResource(if (liked) Res.string.remove_from_liked else Res.string.like),
-                                    onClick = onToggleLike,
-                                    active = liked,
-                                    haptic = if (liked) Haptic.ToggleOff else Haptic.ToggleOn,
-                                )
-                            }
-                            CircleGlyph(
-                                icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
-                                contentDescription = stringResource(Res.string.more),
-                                onClick = onOpenMenu,
-                                haptic = Haptic.Tap,
-                                modifier = Modifier.menuAnchor(),
-                            )
                         }
                     }
 

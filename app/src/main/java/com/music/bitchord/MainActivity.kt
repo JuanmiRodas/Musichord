@@ -2596,6 +2596,63 @@ private fun BitChordApp(
         startDownload(listOf(withDuration), null)
     }
 
+    // BitChord Audio: the player's quick buttons — the ⋯ menu's own work, one tap away.
+    val deleteLocalCopy: (Song) -> Unit = { song -> scope.launch { com.music.bitchord.download.deletePhoneCopy(context, song, controller) } }
+    androidx.compose.runtime.SideEffect {
+        com.music.bitchord.ui.player.QuickActionBridge.handler = handler@{ id, song ->
+            when (id) {
+                "lyrics" -> AppSettings.setHideLyricsPreview(!AppSettings.hideLyricsPreview.value)
+                "dont_recommend" -> {
+                    val previous = viewModel.toggleDislike(song.videoId)
+                    if (previous != null && shouldSkipAfterDislike(previous, song.videoId, player.song?.videoId)) {
+                        controller?.seekToNextMediaItem()
+                    }
+                }
+                "download" -> downloadSong(song)
+                "delete_copy" -> deleteLocalCopy(song)
+                "radio" -> startRadio(song)
+                "playlist" -> if (song.localUri != null && (song.videoId.startsWith("content://") || song.videoId.startsWith("file://") ||
+                        com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(song.videoId))
+                ) {
+                    offlinePlaylistTarget = song
+                } else {
+                    viewModel.loadPlaylists()
+                    playlistTarget = song
+                }
+                "share" -> context.startActivity(
+                    Intent.createChooser(
+                        Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "https://music.youtube.com/watch?v=${song.videoId}")
+                        },
+                        song.title,
+                    ),
+                )
+                "sleep" -> {
+                    val timer = com.music.bitchord.playback.SleepTimer
+                    if (timer.isRunning) {
+                        timer.cancel()
+                        Toast.makeText(context, context.getString(R.string.quick_sleep_off), Toast.LENGTH_SHORT).show()
+                    } else {
+                        timer.start(30)
+                        Toast.makeText(context, context.getString(R.string.quick_sleep_on, 30), Toast.LENGTH_SHORT).show()
+                    }
+                }
+                "info" -> com.music.bitchord.ui.components.SongDnaActions.openInPlayer()
+            }
+        }
+    }
+    // Lit quick buttons: the song saved on the phone, the sleep timer running.
+    val savedDownloads by com.music.bitchord.download.Downloads.saved.collectAsStateWithLifecycle()
+    val sleepDeadline by com.music.bitchord.playback.SleepTimer.deadline.collectAsStateWithLifecycle()
+    val sleepAfterTrack by com.music.bitchord.playback.SleepTimer.afterTrack.collectAsStateWithLifecycle()
+    LaunchedEffect(player.song?.videoId, savedDownloads, sleepDeadline, sleepAfterTrack) {
+        com.music.bitchord.ui.player.PlayerQuickActionState.lit.value = buildSet {
+            if (player.song?.videoId in savedDownloads) add("download")
+            if (sleepDeadline != null || sleepAfterTrack) add("sleep")
+        }
+    }
+
     val performQueueBulkAction: suspend (List<Song>, QueueBulkAction) -> Boolean = { songs, action ->
         try {
             when (action) {
@@ -4855,6 +4912,12 @@ private fun BitChordApp(
                     },
                 // The sheet stays up for a rating: it shows the new state
                 // in place, and people often thumb a song and then queue it.
+                // BitChord Audio: the file playing from the phone, deleted (a wrong version saved).
+                // The app's own downloads keep their own row ("Saved · Delete") above.
+                onDeletePhoneCopy = song.localUri?.takeIf {
+                    (it.startsWith("content://") || it.startsWith("file://")) &&
+                        com.music.bitchord.download.Downloads.saved.value[song.videoId] == null
+                }?.let { { songActions = null; deleteLocalCopy(song) } },
                 onToggleLike = { toggleLikeOf(song) },
                 onToggleDislike = {
                     val previousStatus = viewModel.toggleDislike(song.videoId)
