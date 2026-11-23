@@ -718,6 +718,17 @@ private fun SettingsPane(state: LibraryState) {
             }) { Text("Guardar y comprobar") }
             Text(spState, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
         }
+        // Other services' keys (all free): typed here, kept on this Mac.
+        Text("Otras claves (gratis): AcoustID (acoustid.org → Register an application), Discogs (Settings → Developers → Generate new token), Last.fm (last.fm/api/account/create), fanart.tv (tu perfil → API).", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+        listOf(Keys.ACOUSTID to "AcoustID (API key)", Keys.DISCOGS to "Discogs (personal access token)", Keys.LASTFM to "Last.fm (API key)", Keys.FANART to "fanart.tv (API key)").chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { (k, label) ->
+                    var v by remember { mutableStateOf(Keys.get(k).orEmpty()) }
+                    OutlinedTextField(v, { v = it; Keys.set(k, it) }, label = { Text(label) }, singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.weight(1f))
+                }
+            }
+        }
         var comps by remember { mutableStateOf(Builder.Layout.compilationsFirst) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(comps, { comps = it; Builder.Layout.compilationsFirst = it })

@@ -171,6 +171,18 @@ object Compilations {
         }
     }
 
+    /** Adds a compilation found elsewhere (Discogs) to [artist]'s; false if it was there already. */
+    @Synchronized fun add(artist: String, id: String, title: String, year: String?, tracks: List<Track>, coverUrl: String?): Boolean {
+        val o = db()
+        val list = o.optJSONArray(Words.plain(artist)) ?: JSONArray().also { o.put(Words.plain(artist), it) }
+        if ((0 until list.length()).any { list.getJSONObject(it).optString("id") == id || Builder.albumKey(list.getJSONObject(it).optString("title")) == Builder.albumKey(title) }) return false
+        list.put(JSONObject().put("id", id).put("title", title).put("year", year ?: "")
+            .put("tracks", JSONArray(tracks.map { JSONObject().put("no", it.no).put("disc", it.disc).put("title", it.title).put("seconds", it.seconds ?: JSONObject.NULL) })))
+        coverUrl?.let { u -> runCatching { val d = File(coverRoot, id).apply { mkdirs() }; AlbumArt.fetch(u, 1100)?.takeIf { it.size > 3000 }?.let { File(d, "cover.jpg").writeBytes(it) } } }
+        runCatching { file.writeText(o.toString()) }
+        return true
+    }
+
     private fun tracksOf(release: JSONObject): List<Track> = buildList {
         val media = release.optJSONArray("media") ?: return@buildList
         for (m in 0 until media.length()) {

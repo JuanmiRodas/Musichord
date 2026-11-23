@@ -134,3 +134,8 @@ Para archivos que desaparecen y aparecen sin que el Mac lo diga (otra herramient
 - **1.0.32**: «L'Arc~en~Ciel» sin el nombre japonés detrás. Comprobación con Spotify (catálogo de
   Japón y luego de España) si se ponen Client ID/secret en Ajustes: año que falte, portada
   propuesta y, en el informe, los álbumes que Spotify no tiene, con otro año o con menos canciones.
+- **1.0.33**: claves de AcoustID, Discogs, Last.fm y fanart.tv en Ajustes (se guardan solo en el
+  Mac). `built.json` gana **`artists`**: `{ "Utada Hikaru (宇多田ヒカル)": { "thumb": url, "logo": url,
+  "background": url } }` (fanart.tv), para la página de artista del móvil. AcoustID reconoce por
+  el sonido las canciones sin nombre útil; Last.fm decide el tipo en «Otros artistas»; Discogs
+  añade recopilatorios que MusicBrainz no tiene.

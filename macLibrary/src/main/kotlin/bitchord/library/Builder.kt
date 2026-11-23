@@ -284,7 +284,16 @@ object Builder {
      * The kind of music of an artist with few songs, for "Otros artistas/<kind>/<artist>": from its
      * genre tags, its words and where it was found. As few kinds as will do.
      */
-    fun kindOf(tracks: List<Track>, titles: List<String>, years: List<Int>): String {
+    fun kindOf(tracks: List<Track>, titles: List<String>, years: List<Int>, tags: List<String> = emptyList()): String {
+        // Last.fm's tags of the artist first, when it has them.
+        val lt = tags.joinToString(" ")
+        val eightiesTag = Regex("\\b80s\\b|ochenta").containsMatchIn(lt) || years.isNotEmpty() && years.average() in 1977.0..1992.0
+        when {
+            Regex("j-?pop|j-?rock|japanese|anime|city pop|vocaloid|enka|seiyuu|anison").containsMatchIn(lt) -> return "JPOP"
+            Regex("spanish|español|espanol|latin|movida|flamenco|rumba|pop rock español").containsMatchIn(lt) -> return if (eightiesTag) "80s en España" else "Español"
+            Regex("french|chanson|français|francais").containsMatchIn(lt) -> return "Francés"
+            Regex("classical|soundtrack|score|ost|composer|film music").containsMatchIn(lt) -> return "Clásica y bandas sonoras"
+        }
         val genres = tracks.joinToString(" ") { it.tags["genre"].orEmpty() }.lowercase()
         val text = (titles + tracks.map { it.path.substringAfterLast("/Música").substringAfterLast("/Discografías") }).joinToString(" ")
         val japanese = CJK.containsMatchIn(text) || Regex("(?i)j-?pop|j-?rock|anime|japan|vocaloid|enka|city ?pop").containsMatchIn(genres + " " + text)
@@ -435,6 +444,13 @@ object Builder {
                 !Regex("^\\(?(19|20)\\d{2}\\)?$").matches(p) && Words.plain(p) != Words.plain(title) && !Words.noAlbum(p) && !GRAB_BAG.matches(p.trim())
             }?.let { album = it }
             val year = t.year ?: fYear ?: dirs.asReversed().firstNotNullOfOrNull { Regex("^((19|20)\\d{2})\\b").find(it)?.groupValues?.get(1) }
+            // Nothing (or nothing useful) in its tags: what AcoustID heard it is, when it is sure.
+            AcoustId.of(t.path)?.let { h ->
+                if (tag(t, "title").isBlank() || tag(t, "artist").isBlank() || artist.isEmpty() || Words.noArtist(tag(t, "artist"))) {
+                    title = h.title; artist = h.artist
+                    if (album.isEmpty()) h.album?.let { album = it }
+                }
+            }
             ids[t.path] = Id(title.ifBlank { File(t.path).nameWithoutExtension }, artist, albumArtist, various, album, year, t.trackNo ?: fn.no, t.discNo ?: fn.disc ?: discDir?.groupValues?.get(1)?.toIntOrNull())
         }
         // Folders holding one album only: their picture is that album's (a folder of loose songs' isn't anyone's).
@@ -825,7 +841,7 @@ object Builder {
         // "Otros artistas/<kind>/<artist>": each artist with few songs under its kind of music (JPOP, Español, Inglés…).
         val kindOfOwner = regrouped.filter { it.homeKind < 2 }.groupBy { p -> val g0 = gid(ownerOf(p.best.id).ifBlank { ownerOf(p.chosen.id) }); ownerArtist[g0] ?: g0 }
             .filterKeys { (artistSongs[it] ?: 0) < 5 }
-            .mapValues { (_, l) -> kindOf(l.map { it.best.track }, l.map { it.best.id.title }, l.mapNotNull { it.best.id.year?.toIntOrNull() }) }
+            .mapValues { (g, l) -> kindOf(l.map { it.best.track }, l.map { it.best.id.title }, l.mapNotNull { it.best.id.year?.toIntOrNull() }, LastFm.tags(shown(ownerOf(l.first().best.id).ifBlank { g }))) }
         val draftsAll = regrouped.map { p ->
             val id = p.chosen.id
             val g0 = gid(ownerOf(p.best.id).ifBlank { ownerOf(id) })
@@ -1037,7 +1053,17 @@ object Builder {
         val sp = runCatching {
             Spotify.check(plan.copy.filter { it.album.isNotBlank() }.groupBy { (it.albumArtist.ifBlank { it.artist }) to it.album }.filter { it.value.size >= 3 }.keys)
         }.getOrDefault(0)
-        val found = if (Live.stop) 0 else r + t + a + c + sp
+        // With the listener's keys (Ajustes): AcoustID for songs nothing names, Last.fm for "Otros artistas", Discogs
+        // for the compilations MusicBrainz lacks, fanart.tv for the artists' photos.
+        val rel2 = plan.copy.map { it to it.target.removePrefix(targetRoot).trimStart('/') }
+        val ac = runCatching { AcoustId.fill(rel2.filter { (i, r) -> i.artist.isBlank() || r.startsWith("Sin identificar/") }.map { it.first.track.path }) }.getOrDefault(0)
+        val lf = runCatching { LastFm.fill(rel2.filter { it.second.startsWith("Otros artistas/") }.map { it.first.albumArtist.ifBlank { it.first.artist } }) }.getOrDefault(0)
+        val dg = if (!Layout.compilationsFirst) 0 else runCatching {
+            Discogs.fill(rel2.filter { (i, r) -> r.count { it == '/' } >= 2 && !r.startsWith("Otros artistas/") && i.grouping == null }
+                .groupBy { (i, _) -> i.albumArtist.ifBlank { i.artist } }.filter { it.value.map { p -> p.first.album }.distinct().size >= 3 }.keys)
+        }.getOrDefault(0)
+        runCatching { Fanart.fill(rel2.filter { (i, r) -> !r.startsWith("Otros artistas/") && i.grouping == null }.groupBy { it.first.albumArtist.ifBlank { it.first.artist } }.filter { it.value.size >= 5 }.keys) }
+        val found = if (Live.stop) 0 else r + t + a + c + sp + ac + lf + dg
         if (found > 0) plan = plan(sources, tracks, targetRoot)
         return plan
     }

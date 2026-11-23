@@ -88,7 +88,12 @@ class Manifest(root: String) {
     /** The cover file (in `.bitchord-library/covers/`) of an album's source folder, when known. */
     @Volatile var coverOf: ((String) -> String?)? = null
 
-    @Synchronized fun json(): String = JSONObject().put("version", 2).put("updated", System.currentTimeMillis())
+    /** Photos and logos of the artists (fanart.tv), for the phone's artist pages: "artists" in built.json. */
+    private fun artistsJson(): JSONObject = JSONObject().also { o ->
+        entries.values.mapNotNull { it.artist?.substringBefore(",")?.trim() }.filter { it.isNotBlank() }.distinct().forEach { a -> Fanart.of(a)?.let { o.put(a, it) } }
+    }
+
+    @Synchronized fun json(): String = JSONObject().put("version", 2).put("updated", System.currentTimeMillis()).put("artists", artistsJson())
         .put("files", JSONObject().apply {
             entries.forEach { (k, e) ->
                 put(k, JSONObject().put("id", e.id).put("source", e.source).put("copies", JSONArray(e.copies)).put("seconds", e.seconds ?: JSONObject.NULL)
