@@ -2145,4 +2145,7 @@
     <string name="share_no_spotify">No está en Spotify: se comparte YouTube Music</string>
     <string name="share_links_title">Compartir</string>
     <string name="share_not_found">No encontrado</string>
+    <string name="qa_shade">Sombra de la letra en el vídeo</string>
+    <string name="video_shade_auto">Sombra: automática</string>
+    <string name="video_shade_level">Sombra %1$d de 5</string>
 </resources>

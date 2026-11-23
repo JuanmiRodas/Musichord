@@ -510,6 +510,7 @@ object MusicVideoEngine {
         looksJob?.cancel()
         val known = com.music.bitchord.data.video.VideoMode.looksOf(key)
         com.music.bitchord.data.video.VideoMode.showLooks(known)
+        com.music.bitchord.data.video.VideoMode.showingVideo(key)
         // BitChord Audio: read all through the video, not only its first seconds — subtitles
         // and credits come and go, and a reading taken in an intro without any (the log: most
         // videos "level 0.00", kept for good) left the lyrics without their shade. The bars

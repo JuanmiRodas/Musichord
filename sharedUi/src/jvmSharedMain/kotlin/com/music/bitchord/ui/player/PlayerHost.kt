@@ -162,6 +162,11 @@ interface PlayerHost {
 
     /** BitChord Audio: the music video's own sound in place of the song's. */
     val videoModeOriginalAudio: StateFlow<Boolean> get() = NoVideoMode
+
+    /** BitChord Audio: the video lyrics' shade set by hand — 0 automatic, 1–5 light to dark. */
+    val videoShadeLevel: StateFlow<Int> get() = NoShade
+    fun cycleVideoShade() {}
+    fun autoVideoShade() {}
     fun setVideoModeOriginalAudio(on: Boolean) = Unit
 
     /** The playing music video's width over its height. */
@@ -695,6 +700,8 @@ internal fun rememberRemoteArtworkUrl(song: Song?): String? =
 @Composable
 internal fun AudioPipelineDialog(hazeState: HazeState, isPlaying: Boolean, onDismiss: () -> Unit) =
     PlayerPlatform.host.AudioPipelineDialog(hazeState, isPlaying, onDismiss)
+
+private val NoShade: StateFlow<Int> = kotlinx.coroutines.flow.MutableStateFlow(0)
 
 private val NoVideoOver: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)
 

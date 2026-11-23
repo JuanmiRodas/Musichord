@@ -2126,4 +2126,7 @@
     <string name="share_no_spotify">Not found on Spotify: sharing YouTube Music</string>
     <string name="share_links_title">Share</string>
     <string name="share_not_found">Not found</string>
+    <string name="qa_shade">Lyrics shade on the video</string>
+    <string name="video_shade_auto">Shade: automatic</string>
+    <string name="video_shade_level">Shade %1$d of 5</string>
 </resources>

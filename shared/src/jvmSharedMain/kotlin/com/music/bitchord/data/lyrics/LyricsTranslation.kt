@@ -313,7 +313,7 @@ object LyricsTranslation {
         // is still sent as `tl` because the web endpoint requires it, but it is
         // deliberately excluded from this cache key: changing "translate to"
         // cannot change how the source language is pronounced.
-        val cacheKey = cacheKey(trackId, "romanize-jp2", slots) // BitChord Audio: -jp2: romaji made before Chinese forms were read as Japanese are made again.
+        val cacheKey = cacheKey(trackId, "romanize-jp3", slots) // BitChord Audio: -jp2: romaji made before Chinese forms were read as Japanese are made again.
         val cached = memory.get(cacheKey) ?: readCache(cacheKey)?.also {
             memory.put(cacheKey, it)
         }

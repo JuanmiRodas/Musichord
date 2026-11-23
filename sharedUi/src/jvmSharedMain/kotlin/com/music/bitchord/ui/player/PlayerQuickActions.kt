@@ -6,6 +6,7 @@ import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Gradient
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
@@ -45,6 +46,7 @@ enum class PlayerQuickAction(val id: String, val label: String, val icon: ImageV
     SOURCE("source", "Choose the source", Icons.Rounded.SwapHoriz),
     COVER("cover", "Change the cover", Icons.Rounded.Image),
     INFO("info", "Song info", Icons.Rounded.Info),
+    SHADE("shade", "Lyrics shade on the video", Icons.Rounded.Gradient),
     ;
 
     companion object {

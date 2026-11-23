@@ -184,6 +184,32 @@ object VideoMode {
 
     fun showLooks(looks: Looks?) { _currentLooks.value = looks }
 
+    // BitChord Audio: the lyrics' shade over a video set by hand — 0 automatic (by the text
+    // found on screen), 1–5 from light to dark — kept per video.
+    private val _shadeLevel = MutableStateFlow(0)
+    val shadeLevel: StateFlow<Int> = _shadeLevel.asStateFlow()
+    @Volatile private var shadeKey: String? = null
+
+    /** The video now on screen, so its own shade is the one shown and set. */
+    fun showingVideo(key: String) {
+        shadeKey = key
+        _shadeLevel.value = prefs?.getInt("shade:$key", 0) ?: 0
+    }
+
+    fun setShadeLevel(level: Int) {
+        val v = level.coerceIn(0, 5)
+        _shadeLevel.value = v
+        shadeKey?.let { k -> prefs?.edit()?.putInt("shade:$k", v)?.apply() }
+        app?.let { ctx ->
+            scope.launch(Dispatchers.Main) {
+                Toast.makeText(ctx, if (v == 0) ctx.getString(R.string.video_shade_auto) else ctx.getString(R.string.video_shade_level, v), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** One step darker, round to the lightest after the fifth. */
+    fun cycleShade() = setShadeLevel(_shadeLevel.value % 5 + 1)
+
     // ── The search, remembered ────────────────────────────────────────────
 
     /** What was last searched for [song]'s video, else for any. */

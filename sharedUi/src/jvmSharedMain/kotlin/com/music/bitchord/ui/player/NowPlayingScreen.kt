@@ -1119,7 +1119,10 @@ fun NowPlayingScreen(
     // credits) — the lyrics' shade goes much darker over it.
     // BitChord Audio: the more text the picture carries, the darker (and taller) the shade.
     val videoTextLevel = videoLooks?.let { if (it.busyBottom) maxOf(it.textLevel, 0.4f) else it.textLevel } ?: 0f
+    val shadeByHand by PlayerPlatform.host.videoShadeLevel.collectAsStateWithLifecycle()
     val videoShade = when {
+        // BitChord Audio: set by hand (the shade button), light to dark.
+        shadeByHand in 1..5 -> floatArrayOf(0.5f, 0.72f, 0.85f, 0.95f, 0.99f)[shadeByHand - 1]
         videoTextLevel >= 0.6f -> 0.99f
         videoTextLevel >= 0.3f || videoLooks?.busyBottom == true -> 0.95f
         else -> 0.72f
@@ -5410,7 +5413,7 @@ fun NowPlayingScreen(
                         val lit by PlayerQuickActionState.lit.collectAsStateWithLifecycle()
                         val quick = quickIds.mapNotNull { PlayerQuickAction.of(it) }.filter { a ->
                             when (a) {
-                                PlayerQuickAction.VIDEO, PlayerQuickAction.VIDEO_AUDIO -> PlayerPlatform.host.videoModeSupported
+                                PlayerQuickAction.VIDEO, PlayerQuickAction.VIDEO_AUDIO, PlayerQuickAction.SHADE -> PlayerPlatform.host.videoModeSupported
                                 PlayerQuickAction.STAR -> signedIn || song.localUri != null
                                 else -> true
                             }
@@ -5418,7 +5421,7 @@ fun NowPlayingScreen(
                         BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
                             // BitChord Audio: the video's own buttons only while the video is on —
                             // coming and going with a soft bounce, the rest gliding to make room.
-                            fun showsNow(a: PlayerQuickAction) = a != PlayerQuickAction.VIDEO_AUDIO || videoModeOn
+                            fun showsNow(a: PlayerQuickAction) = (a != PlayerQuickAction.VIDEO_AUDIO && a != PlayerQuickAction.SHADE) || videoModeOn
                             val count = quick.count(::showsNow) + 1
                             val gap = 12.dp
                             val bounce = androidx.compose.animation.core.spring<androidx.compose.ui.unit.Dp>(dampingRatio = 0.62f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow)
@@ -5454,6 +5457,7 @@ fun NowPlayingScreen(
                                             PlayerQuickAction.VIDEO_AUDIO -> videoModeOn && videoModeOriginalAudio
                                             PlayerQuickAction.TRANSLATION -> translationOn
                                             PlayerQuickAction.LYRICS -> lyricsOnCover
+                                            PlayerQuickAction.SHADE -> shadeByHand > 0
                                             PlayerQuickAction.STAR -> liked
                                             else -> action.id in lit
                                         },
@@ -5476,6 +5480,9 @@ fun NowPlayingScreen(
                                             PlayerQuickAction.STAR -> { { PlayerPlatform.host.runQuickAction(PlayerQuickAction.DONT_RECOMMEND.id, song) } }
                                             PlayerQuickAction.ALBUM, PlayerQuickAction.COVER -> { { PlayerPlatform.host.chooseCover(song) } }
                                             PlayerQuickAction.SHARE -> { { PlayerPlatform.host.runQuickAction("share_links", song) } }
+                                            // The video's sound held: the lyrics' shade a step darker. Shade held: automatic.
+                                            PlayerQuickAction.VIDEO_AUDIO -> { { PlayerPlatform.host.cycleVideoShade() } }
+                                            PlayerQuickAction.SHADE -> { { PlayerPlatform.host.autoVideoShade() } }
                                             else -> null
                                         },
                                         onClick = {
@@ -5501,6 +5508,7 @@ fun NowPlayingScreen(
                                                 PlayerQuickAction.SOURCE -> PlayerPlatform.host.chooseSource(song)
                                                 // A tap: the next of the album's other covers; held: the picker.
                                                 PlayerQuickAction.COVER -> PlayerPlatform.host.cycleCover(song)
+                                                PlayerQuickAction.SHADE -> PlayerPlatform.host.cycleVideoShade()
                                                 else -> PlayerPlatform.host.runQuickAction(action.id, song)
                                             }
                                         },

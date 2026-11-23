@@ -3638,7 +3638,7 @@ private fun VideoLyricWithTranslation(
     }
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 0.dp else 2.dp),
         horizontalAlignment = Alignment.Start,
     ) {
         androidx.compose.runtime.key(index) {
@@ -3669,7 +3669,15 @@ private fun VideoLyricWithTranslation(
                 glowAlpha = GLOW_ALPHA,
                 room = GLOW_ROOM,
                 alignEnd = false,
-                modifier = Modifier.fillMaxWidth().offset(x = -GLOW_ROOM),
+                // The glow's room taken back out of the layout (left and top), so the line sits
+                // where the text would and the translation right over it.
+                modifier = Modifier.fillMaxWidth().layout { measurable, constraints ->
+                    val room = GLOW_ROOM.roundToPx()
+                    val placeable = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + room * 2))
+                    layout(constraints.maxWidth, (placeable.height - room * 2).coerceAtLeast(0)) {
+                        placeable.place(-room, -room)
+                    }
+                },
             )
         }
     }
