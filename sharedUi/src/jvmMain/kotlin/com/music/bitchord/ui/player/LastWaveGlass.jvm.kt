@@ -18,3 +18,8 @@ actual fun Modifier.lastWaveLiquidGlass(backdrop: Any?, shape: Shape, interactiv
 actual fun lastWaveGlassActive(backdrop: Any?): Boolean = false
 
 actual fun lastWaveSwatches(bitmap: ImageBitmap): List<Color?> = listOf(null, null, null)
+
+@Composable
+actual fun LastWaveFluid(artworkUrl: String?, seedKey: String, playing: Boolean, modifier: Modifier, fallback: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.Box(modifier) { fallback() }
+}

@@ -3100,6 +3100,9 @@ fun NowPlayingScreen(
                         )
                         LastWaveBackdrop(
                             look = look,
+                            artworkUrl = remoteArt ?: song.thumbnailUrl,
+                            seedKey = song.videoId,
+                            playing = isPlaying,
                             alpha = { backdropAlpha },
                             modifier = Modifier.fillMaxSize(),
                         )

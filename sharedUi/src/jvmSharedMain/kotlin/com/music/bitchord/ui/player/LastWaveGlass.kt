@@ -107,3 +107,11 @@ internal fun Modifier.lastWaveButton(shape: Shape, active: Boolean = false): Mod
         clipped.then(Modifier.background(Color.Black.copy(alpha = 0.30f)).background(veil))
     }
 }
+
+/**
+ * LastWave's FluidArtworkBackground: copies of the artwork turning, twisted, graded and
+ * blurred, moving only while [playing]. [fallback] shows until it is ready, and where the
+ * platform can't draw it.
+ */
+@Composable
+expect fun LastWaveFluid(artworkUrl: String?, seedKey: String, playing: Boolean, modifier: Modifier, fallback: @Composable () -> Unit)
