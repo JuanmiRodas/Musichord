@@ -4553,10 +4553,12 @@ fun NowPlayingScreen(
                                     if (videoOverlay && videoModeLyrics && syncedLyricsEnabled) {
                                         val shift = lyricsTranslation.offsetMs
                                         var shiftShown by remember { mutableStateOf(false) }
-                                        var lastShift by remember(song.videoId) { mutableStateOf(shift) }
-                                        LaunchedEffect(shift) {
-                                            if (shift == lastShift) return@LaunchedEffect
-                                            lastShift = shift
+                                        // Only a shift set by hand: the default put on as lyrics load says nothing.
+                                        val nudges by LyricsNudges.count.collectAsStateWithLifecycle()
+                                        var seenNudges by remember { mutableStateOf(nudges) }
+                                        LaunchedEffect(nudges) {
+                                            if (nudges == seenNudges) return@LaunchedEffect
+                                            seenNudges = nudges
                                             shiftShown = true
                                             delay(1_400)
                                             shiftShown = false
@@ -4724,19 +4726,28 @@ fun NowPlayingScreen(
                                 run {
                                     val shift = lyricsTranslation.offsetMs
                                     var shiftShown by remember { mutableStateOf(false) }
-                                    var lastShift by remember(song.videoId) { mutableStateOf(shift) }
-                                    LaunchedEffect(shift) {
-                                        if (shift == lastShift) return@LaunchedEffect
-                                        lastShift = shift
+                                    // Only a shift set by hand: the default put on as lyrics load says nothing.
+                                    val nudges by LyricsNudges.count.collectAsStateWithLifecycle()
+                                    var seenNudges by remember { mutableStateOf(nudges) }
+                                    LaunchedEffect(nudges) {
+                                        if (nudges == seenNudges) return@LaunchedEffect
+                                        seenNudges = nudges
                                         shiftShown = true
                                         delay(1_400)
                                         shiftShown = false
                                     }
+                                    // Above the lyrics, taking no room: they never move for it.
                                     androidx.compose.animation.AnimatedVisibility(
                                         visible = shiftShown,
                                         enter = androidx.compose.animation.fadeIn(tween(150)),
                                         exit = androidx.compose.animation.fadeOut(tween(400)),
-                                        modifier = Modifier.align(Alignment.TopCenter),
+                                        modifier = Modifier
+                                            .align(Alignment.TopCenter)
+                                            .zIndex(2f)
+                                            .layout { measurable, constraints ->
+                                                val p = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity))
+                                                layout(0, 0) { p.place(-p.width / 2, -p.height - 6.dp.roundToPx()) }
+                                            },
                                     ) {
                                         Text(
                                             text = (if (shift > 0) "+" else if (shift < 0) "−" else "±") +

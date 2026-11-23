@@ -995,7 +995,9 @@ private fun BitChordApp(
     val activeAccountId by viewModel.activeAccountId.collectAsStateWithLifecycle()
     val activeProfileId by viewModel.activeProfileId.collectAsStateWithLifecycle()
     val historyState by viewModel.history.collectAsStateWithLifecycle()
-    val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
+    val lyricsAll by viewModel.lyrics.collectAsStateWithLifecycle()
+    // BitChord Audio: the credits some lyrics open with (title, artist, writers) left out.
+    val lyrics = remember(lyricsAll) { com.music.bitchord.data.lyrics.LyricCredits.strip(lyricsAll) }
     val lyricsSource by viewModel.lyricsSource.collectAsStateWithLifecycle()
     val lyricsChecked by viewModel.lyricsChecked.collectAsStateWithLifecycle()
     val lyricsProviderStates by viewModel.lyricsProviderStates.collectAsStateWithLifecycle()

@@ -3423,7 +3423,7 @@ internal fun rememberLyricsTranslation(
         ensureTranslation = ensureTranslation,
         toggleRomanization = toggleRomanization,
         offsetMs = offsetMs,
-        nudge = { delta -> lyrics?.let { PlayerPlatform.host.nudgeLyrics(trackId, it, delta) } },
+        nudge = { delta -> lyrics?.let { PlayerPlatform.host.nudgeLyrics(trackId, it, delta); LyricsNudges.count.value++ } },
     )
 }
 
@@ -3711,3 +3711,9 @@ internal fun Modifier.videoLyricsScrim(strength: Float = 0.78f): Modifier = this
     }
 }
 
+
+
+/** BitChord Audio: taps that shifted the lyrics by hand — the shift's pop-up shows for these only. */
+internal object LyricsNudges {
+    val count = kotlinx.coroutines.flow.MutableStateFlow(0)
+}

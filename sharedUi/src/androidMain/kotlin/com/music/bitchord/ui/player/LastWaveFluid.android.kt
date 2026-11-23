@@ -157,7 +157,8 @@ private const val ORBIT_RADIUS_MID = 0.25f
 private const val ORBIT_RADIUS_SMALL = 0.10f
 private const val ORBIT_RATE_MID = 0.045f
 private const val ORBIT_RATE_SMALL = 0.09f
-private const val FLOW_SPEED = 2.5f
+// BitChord Audio: half LastWave's flow, drawn twice as often — slower and smoother.
+private const val FLOW_SPEED = 1.25f
 
 private const val SATURATION = 1.9f
 private const val BRIGHTNESS = 0.52f
@@ -176,7 +177,7 @@ private const val TEXTURE_PX = 256
 private const val TEXTURE_CACHE = 3
 private const val CROSSFADE_MS = 1400
 private const val APPEAR_MS = 800
-private const val FRAME_INTERVAL_MS = 66L
+private const val FRAME_INTERVAL_MS = 33L
 
 private val textureCache = LinkedHashMap<String, Bitmap>()
 

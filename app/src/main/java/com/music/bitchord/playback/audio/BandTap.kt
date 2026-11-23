@@ -29,8 +29,6 @@ internal class BandTap {
     private val peak = floatArrayOf(1e-4f, 1e-4f, 1e-4f)
     private val raws = FloatArray(3)
     private val out = FloatArray(3)
-    private var bassAverage = 0f
-    private var lastBeatUs = Long.MIN_VALUE
 
     fun configure(sampleRate: Int) {
         if (sampleRate <= 0) return
@@ -47,6 +45,7 @@ internal class BandTap {
         }
         low = 0f
         high = 0f
+        resetRhythm()
     }
 
     fun analyze(block: AudioBlock, timeUs: Long) {
@@ -117,13 +116,79 @@ internal class BandTap {
             peak[k] = maxOf(raws[k], peak[k] * PEAK_DECAY, 1e-4f)
             out[k] = sqrt((raws[k] / peak[k]).coerceIn(0f, 1f))
         }
-        // A kick: the bass well above its own recent average, not too soon after the last one.
+        // BitChord Audio: the thumb's beat follows one part of the song and keeps to it —
+        // the drums', the piano's, the guitar's: whichever band hits most regularly. Each
+        // band's onsets (a rise well above its usual rise) are timed; the band whose gaps
+        // between onsets are the steadiest leads, and only changes when another has been
+        // clearly steadier for a while.
         val at = lastPublished
-        val beat = raw0 > bassAverage * BEAT_RATIO && raw0 > peak[0] * 0.35f &&
-            (lastBeatUs == Long.MIN_VALUE || at - lastBeatUs > MIN_BEAT_GAP_US || at < lastBeatUs)
-        if (beat) lastBeatUs = at
-        bassAverage += (raw0 - bassAverage) * 0.08f
+        if (at < lastAt) resetRhythm()
+        lastAt = at
+        var beat = false
+        for (k in 0..2) {
+            val flux = (raws[k] - prevRaw[k]).coerceAtLeast(0f)
+            prevRaw[k] = raws[k]
+            fluxMean[k] += (flux - fluxMean[k]) * 0.02f
+            fluxVar[k] += ((flux - fluxMean[k]) * (flux - fluxMean[k]) - fluxVar[k]) * 0.02f
+            val threshold = fluxMean[k] + 1.6f * sqrt(fluxVar[k])
+            val since = at - lastOnset[k]
+            if (flux > threshold && flux > peak[k] * 0.04f && since > MIN_ONSET_GAP_US) {
+                if (lastOnset[k] != Long.MIN_VALUE && since < 2_000_000L) {
+                    gaps[k][gapHead[k]] = since.toFloat()
+                    gapHead[k] = (gapHead[k] + 1) % GAPS
+                    if (gapCount[k] < GAPS) gapCount[k]++
+                }
+                lastOnset[k] = at
+                if (k == lead) beat = true
+            }
+        }
+        if (at - lastChoice > CHOOSE_EVERY_US) {
+            lastChoice = at
+            val scores = FloatArray(3) { steadiness(it) }
+            val best = scores.indices.maxByOrNull { scores[it] } ?: lead
+            if (best != lead && scores[best] > scores[lead] * 1.35f + 0.05f) {
+                if (++challenger[best] >= 3) { lead = best; challenger.fill(0) }
+            } else {
+                challenger.fill(0)
+            }
+        }
         AudioBands.publish(out[0], out[1], out[2], beat)
+    }
+
+    private var lead = 0
+    private var lastAt = Long.MIN_VALUE
+    private var lastChoice = Long.MIN_VALUE
+    private val prevRaw = FloatArray(3)
+    private val fluxMean = FloatArray(3)
+    private val fluxVar = FloatArray(3)
+    private val lastOnset = LongArray(3) { Long.MIN_VALUE }
+    private val gaps = Array(3) { FloatArray(GAPS) }
+    private val gapHead = IntArray(3)
+    private val gapCount = IntArray(3)
+    private val challenger = IntArray(3)
+
+    /** How steady a band's onsets are: many, evenly spaced (or at multiples of one gap). */
+    private fun steadiness(k: Int): Float {
+        val n = gapCount[k]
+        if (n < 4) return 0f
+        val g = gaps[k].copyOf(n).sorted()
+        val median = g[n / 2]
+        if (median <= 0f) return 0f
+        // Each gap measured against the nearest whole multiple of the median: a skipped hit still counts as on time.
+        var err = 0f
+        for (x in g) {
+            val m = (x / median).let { kotlin.math.round(it).coerceAtLeast(1f) }
+            err += kotlin.math.abs(x - m * median) / median
+        }
+        return (1f / (err / n + 0.08f)) * (n / GAPS.toFloat())
+    }
+
+    private fun resetRhythm() {
+        lastOnset.fill(Long.MIN_VALUE)
+        gapCount.fill(0)
+        gapHead.fill(0)
+        challenger.fill(0)
+        lastChoice = Long.MIN_VALUE
     }
 
     private companion object {
@@ -132,7 +197,8 @@ internal class BandTap {
         const val MID_HZ = 2500.0
         /** Per published block (~100 a second): a loud bar fades from the scale in a few seconds. */
         const val PEAK_DECAY = 0.996f
-        const val BEAT_RATIO = 1.45f
-        const val MIN_BEAT_GAP_US = 260_000L
+        const val MIN_ONSET_GAP_US = 180_000L
+        const val GAPS = 16
+        const val CHOOSE_EVERY_US = 2_000_000L
     }
 }
