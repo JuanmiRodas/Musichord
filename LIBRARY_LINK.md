@@ -111,7 +111,7 @@ Para archivos que desaparecen y aparecen sin que el Mac lo diga (otra herramient
   `BITCHORD_ID` (átomo `----`); en todo caso el id está en `built.json`.
 - **Fuera de la biblioteca**: las pistas instrumentales de las bandas sonoras de las series
   (Sailor Moon, Pokémon…) ya no están en `Biblioteca`; se apartan a
-  `pCloud Drive/Bandas sonoras instrumentales/<serie>/…` (aparecen en `moves`? no: en
+  `pCloud Drive/Bandas sonoras instrumentales/<serie>/…` (en `built.json` figuran en
   `removed`), pendientes de decidir.
 - **«Otros artistas»** se divide por tipo: `Otros artistas/<JPOP|Español|Inglés|Francés|80s en España|Clásica y bandas sonoras>/<Artista>/…`.
 - **Nueva fuente**: `pCloud Drive/Music/BitChord` (las descargas del móvil). Sus archivos son
