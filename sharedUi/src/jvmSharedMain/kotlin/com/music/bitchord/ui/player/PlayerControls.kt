@@ -2962,20 +2962,47 @@ private fun DeviceButton(onOpenOutput: () -> Unit) {
     ) {
         Box(Modifier.size(BOTTOM_ICON_SIZE), contentAlignment = Alignment.Center) {
             if (onPhone) {
-                // The phone, with the cast mark over its top corner: from here, this is
-                // the button that sends the music elsewhere.
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.fillMaxSize(0.86f).align(Alignment.BottomStart),
-                )
-                Icon(
-                    Icons.Rounded.Cast,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(BOTTOM_ICON_SIZE * 0.5f).align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp),
-                )
+                // The phone, with the cast waves rising from its top: from here, this is
+                // the button that sends the music elsewhere. Drawn, not two icons stacked.
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    val stroke = 1.9.dp.toPx()
+                    val w = size.width
+                    val h = size.height
+                    val phoneW = w * 0.44f
+                    val phoneH = h * 0.58f
+                    val left = (w - phoneW) / 2f
+                    val top = h - phoneH - stroke / 2f
+                    drawRoundRect(
+                        color = Color.White,
+                        topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                        size = androidx.compose.ui.geometry.Size(phoneW, phoneH),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(phoneW * 0.22f),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+                    )
+                    // The speaker slot.
+                    drawLine(
+                        Color.White,
+                        androidx.compose.ui.geometry.Offset(w / 2f - phoneW * 0.14f, top + phoneH * 0.13f),
+                        androidx.compose.ui.geometry.Offset(w / 2f + phoneW * 0.14f, top + phoneH * 0.13f),
+                        strokeWidth = stroke * 0.8f,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    )
+                    // The waves, centred over the phone's top edge.
+                    val cx = w / 2f
+                    val cy = top - stroke
+                    listOf(0.13f, 0.25f).forEach { r ->
+                        val radius = w * r
+                        drawArc(
+                            color = Color.White,
+                            startAngle = -140f,
+                            sweepAngle = 100f,
+                            useCenter = false,
+                            topLeft = androidx.compose.ui.geometry.Offset(cx - radius, cy - radius),
+                            size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                        )
+                    }
+                }
             } else {
                 Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.fillMaxSize())
             }

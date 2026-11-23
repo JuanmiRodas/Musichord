@@ -669,6 +669,10 @@ class CastPlayback(
             requestedAt = SystemClock.elapsedRealtime()
             Log.d(TAG, "cast: phone moved to ${item.mediaMetadata.title}; speaker jumps to its queued copy")
             expect(item.mediaId)
+            // An edit of the speaker's queue landing mid-jump interrupts the jump.
+            reconcileJob?.cancel()
+            reconcileJob = null
+            reconcileAgain = false
             remote.queueJumpToItem(queuedId, null)
             sink?.onRemotePlaybackChanged()
         } else {
@@ -1008,6 +1012,18 @@ class CastPlayback(
                 // Let the receiver's own status catch up with whatever just
                 // changed it; reading its queue earlier reads the old one.
                 delay(RECONCILE_DELAY_MS)
+                // BitChord Audio: not while the speaker is still starting the song. Seen in
+                // the log on every skip: a jump to the queued copy, the queue edited while
+                // it loaded, the speaker "interrupted" with nothing playing — and 12 s later
+                // the whole queue sent again (a reconnect). Edited once it plays, a queue
+                // change behind the playing song interrupts nothing.
+                kotlinx.coroutines.withTimeoutOrNull(10_000L) {
+                    while (active) {
+                        val state = client?.mediaStatus?.playerState
+                        if (state == MediaStatus.PLAYER_STATE_PLAYING || state == MediaStatus.PLAYER_STATE_PAUSED) break
+                        delay(400)
+                    }
+                }
                 if (active && !loading) {
                     try {
                         reconcileOnce()

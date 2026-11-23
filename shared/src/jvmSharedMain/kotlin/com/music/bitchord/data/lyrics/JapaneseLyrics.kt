@@ -35,18 +35,42 @@ object ProvidedRomaji {
         if (o.isEmpty() || r.isEmpty() || o == r || !NON_LATIN.containsMatchIn(o)) return
         // Romaji that still has kanji or kana in it is a partial reading, not romaji.
         if (NON_LATIN.containsMatchIn(r)) return
-        if (byLine.size > 20_000) byLine.clear()
+        if (byLine.size > 20_000) { byLine.clear(); byKey.clear() }
         byLine[o] = r
+        byKey[key(o)] = r
+    }
+
+    /**
+     * BitChord Audio: lines matched loosely too — the shown lyrics often come from another
+     * source than the romaji (a full-width space, other punctuation), and one line not
+     * matching exactly threw the source's romaji away for the whole song.
+     */
+    private val byKey = ConcurrentHashMap<String, String>()
+    private fun key(s: String) = Normalizer.normalize(s, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
+        .filter { it.isLetterOrDigit() }
+
+    private fun lookup(text: String): String? = byLine[text.trim()] ?: key(text).takeIf { it.isNotEmpty() }?.let { byKey[it] }
+
+    /**
+     * The source's romaji line for line where it has it, null elsewhere — when it covers
+     * most of the song (the rest read here), or null when it doesn't.
+     */
+    fun partial(texts: List<String>): List<String?>? {
+        val needing = texts.filter { NON_LATIN.containsMatchIn(it) }
+        if (needing.isEmpty()) return null
+        val known = needing.count { lookup(it) != null }
+        if (known < needing.size * 0.7) return null
+        return texts.map { t -> if (NON_LATIN.containsMatchIn(t)) lookup(t) else t }
     }
 
     /** Romaji for every non-Latin line of [texts], or null if a source didn't give it for most. */
     fun forLines(texts: List<String>): List<String>? {
         val needing = texts.filter { NON_LATIN.containsMatchIn(it) }
         if (needing.isEmpty()) return null
-        val known = needing.count { byLine.containsKey(it.trim()) }
+        val known = needing.count { lookup(it) != null }
         // All or nothing: a line left in Japanese among romaji reads as a bug.
         if (known < needing.size) return null
-        return texts.map { byLine[it.trim()] ?: it }
+        return texts.map { lookup(it) ?: it }
     }
 
     /** Pairs the lines of an original and a romaji LRC by their times. */

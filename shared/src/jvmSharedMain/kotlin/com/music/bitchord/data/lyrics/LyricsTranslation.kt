@@ -255,6 +255,19 @@ object LyricsTranslation {
         ProvidedRomaji.forLines(slots.map { it.text })?.let { texts ->
             return RomanizationResult.Romanized(lines = rebuild(lines, slots, texts), sourceLanguage = "ja", fromCache = false)
         }
+        // BitChord Audio: most of it from the source, the few lines it lacks read here.
+        ProvidedRomaji.partial(slots.map { it.text })?.let { some ->
+            val local = localRomanizer
+            val missingAt = some.indices.filter { some[it] == null }
+            val filled = if (missingAt.isEmpty()) emptyList() else local?.let { f ->
+                withContext(Dispatchers.Default) { runCatching { f(missingAt.map { slots[it].text }) }.getOrNull() }
+            }
+            if (missingAt.isEmpty() || (filled != null && filled.size == missingAt.size)) {
+                val texts = some.toMutableList()
+                missingAt.forEachIndexed { k, i -> texts[i] = filled!![k] }
+                return RomanizationResult.Romanized(lines = rebuild(lines, slots, texts.map { it!! }), sourceLanguage = "ja", fromCache = false)
+            }
+        }
         localRomanizer?.let { local ->
             val texts = withContext(Dispatchers.Default) { runCatching { local(slots.map { it.text }) }.getOrNull() }
             if (texts != null && texts.size == slots.size) {

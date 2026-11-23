@@ -315,10 +315,29 @@ object MusicVideoEngine {
                 reload()
                 return
             }
+            // BitChord Audio: a stream cut off mid-video (the connection dropped, a read timed
+            // out, the address expired): found again and picked up where the song is, a few
+            // times, instead of the picture stopping there for the rest of the song.
+            val network = error.errorCode in PlaybackException.ERROR_CODE_IO_UNSPECIFIED..PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE ||
+                error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT
+            if (network) {
+                val tries = midRetries.merge(id, 1, Int::plus) ?: 1
+                if (tries <= 3) {
+                    TrackLog.w(TAG, "video: stream dropped (${error.errorCodeName}); finding it again (try $tries)", about = id)
+                    scope.launch {
+                        delay(1_000L * tries)
+                        if (loadedId == id) reload()
+                    }
+                    return
+                }
+            }
             noPicture += id
             unload()
         }
     }
+
+    /** Streams found again after dropping mid-video, per video. */
+    private val midRetries = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** The app's MediaController, whose position the picture follows. Main thread. */
     fun attach(controller: Player?) {
@@ -804,7 +823,7 @@ object MusicVideoEngine {
                     }.await() ?: run {
                         TrackLog.w(TAG, "video: no answer in ${RESOLVE_TIMEOUT_MS / 1000}s — trying the next video", about = videoId)
                         if (loadedId == videoId) loadedId = null
-                        loadedFor?.let { forId -> com.music.bitchord.data.video.VideoMode.failed(forId, ref) }
+                        loadedFor?.let { forId -> com.music.bitchord.data.video.VideoMode.failed(forId, ref, transient = true) }
                         return@launch
                     })?.also { streams[videoId] = Triple(it, cap, System.currentTimeMillis()) }
             } catch (e: CancellationException) {
@@ -820,6 +839,9 @@ object MusicVideoEngine {
                     noPicture += videoId
                     // BitChord Audio: video mode moves on to the song's next video.
                     loadedFor?.let { forId -> if (forId != videoId || com.music.bitchord.data.video.VideoMode.on.value) com.music.bitchord.data.video.VideoMode.failed(forId, ref) }
+                } else {
+                    // BitChord Audio: asked again in a moment rather than left without a picture.
+                    loadedFor?.let { forId -> com.music.bitchord.data.video.VideoMode.failed(forId, ref, transient = true) }
                 }
                 return@launch
             } catch (e: Exception) {

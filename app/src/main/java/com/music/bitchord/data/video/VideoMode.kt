@@ -11,6 +11,7 @@ import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.VersionTimeMap
+import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.sources.SongOrigins
 import com.music.bitchord.data.sources.TrackMatcher
 import kotlinx.coroutines.CoroutineScope
@@ -91,6 +92,10 @@ object VideoMode {
     /** The YouTube song each media id's video was paired against, for its time map. */
     private val pairedFrom = ConcurrentHashMap<String, String>()
     private val missing = ConcurrentHashMap.newKeySet<String>()
+
+    /** Lookups YouTube refused, per song, to be asked again a few times. */
+    private val lookupTries = ConcurrentHashMap<String, Int>()
+    private const val RETRY_MS = 20_000L
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
 
     fun init(context: Context) {
@@ -305,8 +310,19 @@ object VideoMode {
         if (!ahead) _looking.value = song.videoId
         scope.launch {
             try {
-                val ref = runCatching { resolve(song) }.getOrNull()
-                if (ref == null) {
+                val attempt = runCatching { resolve(song) }
+                val ref = attempt.getOrNull()
+                if (attempt.exceptionOrNull() is LookupFailed) {
+                    // BitChord Audio: YouTube refused (busy, 403): not "no video". Asked again
+                    // in a while instead of saying there is none for the rest of the session.
+                    TrackLog.w(TAG, "video lookup for '${song.title}' failed (YouTube refused); trying again in ${RETRY_MS / 1000}s")
+                    val tries = (lookupTries[song.videoId] ?: 0) + 1
+                    lookupTries[song.videoId] = tries
+                    if (tries <= 3) scope.launch {
+                        kotlinx.coroutines.delay(RETRY_MS * tries)
+                        if (!ahead || cached(song.videoId) == null) request(song, sayIfMissing = false, ahead = ahead)
+                    }
+                } else if (ref == null) {
                     missing += song.videoId
                     TrackLog.d(TAG, "no video for '${song.title}'")
                     if (sayIfMissing) say(R.string.video_mode_none)
@@ -330,18 +346,14 @@ object VideoMode {
     /** Videos YouTube wouldn't play here; never offered again this session. */
     private val unplayable = ConcurrentHashMap.newKeySet<String>()
 
+    /** YouTube couldn't be asked (an error, not "no such video"): the song is looked up again later. */
+    private class LookupFailed : Exception()
+
     private suspend fun resolve(song: Song): VideoRef? {
+        var searchFailed = false
         val linked = linked(song)?.takeUnless { it.key in unplayable || isWrong(song, it) }
-        // BitChord Audio: one of your own videos in pCloud named like the song (from the
-        // folders already looked through — no request), before anything on YouTube.
-        if (linked == null) {
-            PcloudVideos.bestFor(song)?.let { VideoRef(VideoRef.Site.PCLOUD, it.url) }
-                ?.takeUnless { it.key in unplayable || isWrong(song, it) }
-                ?.let {
-                    TrackLog.d(TAG, "video for '${song.title}': your pCloud video '${PcloudVideos.nameOf(it.id)}'")
-                    return it
-                }
-        }
+        // BitChord Audio: your pCloud videos and bilibili are for choosing by hand (the
+        // video picker); found by themselves they took over from YouTube's own video.
         if (song.isVideo && LocalLikes.isYouTubeId(song.videoId) && song.videoId !in unplayable) {
             return VideoRef(VideoRef.Site.YOUTUBE, song.videoId)
         }
@@ -380,9 +392,22 @@ object VideoMode {
                     names.drop(1).take(2).map { "$it $artistName" } +
                     listOfNotNull(latinTitle?.let { "$it ${latinArtist ?: artistName}" })
                 ).distinct()
-            val results = kotlinx.coroutines.coroutineScope {
-                queries.map { q -> async { runCatching { youTube(q) }.getOrDefault(emptyList()) } }.awaitAll()
-            }.flatten().distinctBy { it.videoId }
+            // BitChord Audio: the song's own name first; the other names only when that
+            // finds nothing that is the song. Four searches for every song (and the next
+            // one's, ahead) had YouTube answering "Sorry…" (403) to all of them for a while.
+            var failures = 0
+            suspend fun ask(q: String): List<Song> =
+                YtMusicRepository.search(q, SearchFilter.VIDEOS).fold(
+                    onSuccess = { youTubeResults(q, it) },
+                    onFailure = { failures++; emptyList() },
+                )
+            val firstResults = ask(queries.first())
+            val firstGood = TrackMatcher.ranked(firstResults, TrackMatcher.targetOf(song)).isNotEmpty()
+            val more = if (firstGood || failures > 0 || queries.size == 1) emptyList() else kotlinx.coroutines.coroutineScope {
+                queries.drop(1).map { q -> async { runCatching { ask(q) }.getOrDefault(emptyList()) } }.awaitAll()
+            }.flatten()
+            val results = (firstResults + more).distinctBy { it.videoId }
+            searchFailed = failures > 0 && results.isEmpty()
             val ranked = TrackMatcher.ranked(results, TrackMatcher.targetOf(song))
             // A short title ("OK!") must be a word of the video's title, not a piece of one
             // ("pOKémon"); a longer one may sit anywhere in it.
@@ -411,13 +436,30 @@ object VideoMode {
             .map { it.value }
         if (ordered.isNotEmpty()) TrackLog.d(TAG, "videos for '${song.title}', best first: " +
             ordered.take(4).joinToString { "'${it.title}' · ${it.artist} (${officialScore(it, song)})" })
-        val all = (listOfNotNull(linked, theme) + ordered.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) })
+        // BitChord Audio: YouTube first. An AnimeThemes video (the TV-size opening or
+        // ending, credits and all) leads only when the song is that — a TV-size cut or a
+        // song named an opening/ending, or as short as one; for the full song it stays a
+        // fallback behind YouTube's videos.
+        val themeLeads = theme != null && isThemeCut(song)
+        val youTubeRefs = ordered.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) }
+        val all = (listOfNotNull(linked) + (if (themeLeads) listOfNotNull(theme) + youTubeRefs else youTubeRefs + listOfNotNull(theme)))
             .distinctBy { it.key }
             .filterNot { it.key in unplayable || isWrong(song, it) }
-        val first = all.firstOrNull() ?: return null
+        val first = all.firstOrNull() ?: if (searchFailed) throw LookupFailed() else return null
         alternatives[song.videoId] = all.drop(1).take(5).toMutableList()
         if (base != null && paired != null && first.id == paired.videoId) pairedFrom[song.videoId] = base.videoId
         return first
+    }
+
+    private val THEME_CUT = Regex(
+        "(?i)tv\\s*-?\\s*(size|ver|version|edit|mix)|\\b(op|ed)\\s*\\d*\\b|opening|ending|オープニング|エンディング|テレビサイズ|tvサイズ",
+    )
+
+    /** A TV-size opening or ending: so named, or no longer than one (about 1:30). */
+    private fun isThemeCut(song: Song): Boolean {
+        if (THEME_CUT.containsMatchIn(song.title) || THEME_CUT.containsMatchIn(song.albumName.orEmpty())) return true
+        val ms = song.durationMillis()
+        return ms in 60_000L..115_000L
     }
 
     /**
@@ -453,7 +495,8 @@ object VideoMode {
      * BitChord Audio: [ref] can't be played here (YouTube refused every
      * client): the song's next likely video takes its place.
      */
-    fun failed(mediaId: String, ref: VideoRef) {
+    fun failed(mediaId: String, ref: VideoRef, transient: Boolean = false) {
+        if (transient) return failedForNow(mediaId, ref)
         unplayable += ref.key
         if (_ready.value[mediaId] != ref) return
         val next = alternatives[mediaId]?.let { list ->
@@ -465,6 +508,43 @@ object VideoMode {
         _ready.update { if (next != null) it + (mediaId to next) else it - mediaId }
         if (next == null) missing += mediaId
         else if (next.site == VideoRef.Site.YOUTUBE) fetchNonMusic(next.id)
+    }
+
+    private val retries = ConcurrentHashMap<String, Int>()
+
+    /**
+     * BitChord Audio: [ref] didn't answer in time — YouTube busy or refusing for a while
+     * (the log: every client failing at once, "Sorry…" pages), not a video that can't
+     * play. It isn't struck off: a video you chose is asked again in a moment rather
+     * than swapped for another, and a found one gives way to the next for now, kept
+     * behind it to come back to. Gone for good only after several tries.
+     */
+    private fun failedForNow(mediaId: String, ref: VideoRef) {
+        val tries = (retries[ref.key] ?: 0) + 1
+        retries[ref.key] = tries
+        if (tries > 3) return failed(mediaId, ref)
+        if (_ready.value[mediaId] != ref) return
+        val chosen = prefs?.getString(LINK + "id:" + mediaId, null)?.let(VideoRef::decode) == ref
+        val list = alternatives[mediaId]
+        val next = if (chosen) null else list?.let {
+            while (it.isNotEmpty() && it.first().key in unplayable) it.removeAt(0)
+            it.removeFirstOrNull()
+        }
+        if (next != null) {
+            list?.add(ref)
+            pairedFrom.remove(mediaId)
+            TrackLog.d(TAG, "video ${ref.encode()} didn't answer; trying ${next.encode()} for now")
+            _ready.update { it + (mediaId to next) }
+            if (next.site == VideoRef.Site.YOUTUBE) fetchNonMusic(next.id)
+            return
+        }
+        // The same video again, in a while: taken off and put back, so the player asks anew.
+        TrackLog.d(TAG, "video ${ref.encode()} didn't answer; asking again in ${10 * tries}s")
+        _ready.update { it - mediaId }
+        scope.launch {
+            kotlinx.coroutines.delay(10_000L * tries)
+            if (_ready.value[mediaId] == null && mediaId !in missing) _ready.update { it + (mediaId to ref) }
+        }
     }
 
     /** BitChord Audio: the YouTube release of [song] — what it plays in place of, or the best match. */
@@ -523,8 +603,12 @@ object VideoMode {
     }
 
     suspend fun youTube(query: String, song: Song? = null): List<Song> = withContext(Dispatchers.IO) {
+        youTubeResults(query, YtMusicRepository.search(query, SearchFilter.VIDEOS).getOrNull().orEmpty(), song)
+    }
+
+    private fun youTubeResults(query: String, found: List<SearchResult>, song: Song? = null): List<Song> {
         val wantsKaraoke = TrackMatcher.isKaraokeLike(query)
-        YtMusicRepository.search(query, SearchFilter.VIDEOS).getOrNull().orEmpty()
+        return found
             .mapNotNull {
                 when (it) {
                     is SearchResult.Track -> it.song
