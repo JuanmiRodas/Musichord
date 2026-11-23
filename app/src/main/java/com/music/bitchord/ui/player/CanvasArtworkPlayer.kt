@@ -303,7 +303,12 @@ internal fun AndroidCanvasArtworkPlayer(
                 val aspect = if (width.isFinite() && width > 0f && videoSize.height > 0) {
                     width / videoSize.height
                 } else 0f
-                if (aspect != clipAspect) rendered = false
+                // BitChord Audio: an HLS clip re-reports its size at each loop, sometimes a
+                // pixel off for another rendition of the same picture. Only a real change of
+                // shape hides the clip again — a re-report used to blink it every loop.
+                val reshaped = clipAspect <= 0f || aspect <= 0f || kotlin.math.abs(aspect / clipAspect - 1f) > 0.03f
+                if (!reshaped) return
+                rendered = false
                 clipAspect = aspect
                 reportAspect(aspect)
                 textureView?.applyContentTransform(clipAspect, currentContentMode, currentAlignPortraitTop)
@@ -1109,6 +1114,10 @@ internal fun newCanvasDecoder(context: Context): ExoPlayer {
         player.repeatMode = Player.REPEAT_MODE_ONE
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+            // BitChord Audio: one rendition for good. Adaptive HLS starts each loop over at a
+            // low rendition and climbs, so every repeat swapped the picture under the clip
+            // (a blink, then a sharpen); a short looping clip is cached whole anyway.
+            .setForceHighestSupportedBitrate(true)
             .apply { CanvasPlaybackLimits.maxFrameRate?.let(::setMaxVideoFrameRate) }
             .build()
         return player
