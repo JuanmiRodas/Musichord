@@ -2148,4 +2148,5 @@
     <string name="qa_shade">Sombra de la letra en el vídeo</string>
     <string name="video_shade_auto">Sombra: automática</string>
     <string name="video_shade_level">Sombra %1$d de 5</string>
+    <string name="video_resync">Sincronizando de nuevo el vídeo con la canción…</string>
 </resources>

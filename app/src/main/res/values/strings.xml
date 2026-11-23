@@ -2129,4 +2129,5 @@
     <string name="qa_shade">Lyrics shade on the video</string>
     <string name="video_shade_auto">Shade: automatic</string>
     <string name="video_shade_level">Shade %1$d of 5</string>
+    <string name="video_resync">Matching the video to the song again…</string>
 </resources>

@@ -116,6 +116,7 @@ import org.jetbrains.compose.resources.stringArrayResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -4517,6 +4518,23 @@ fun NowPlayingScreen(
                                         animationSpec = tween(900, easing = FastOutSlowInEasing),
                                         label = "videoBarsShift",
                                     )
+                                    // BitChord Audio: a picture narrower than its frame shows the cover,
+                                    // blurred and dimmed, at its sides — not black bars.
+                                    if (videoRendered && videoOverlay && !squareVideo && !videoEdge) {
+                                        coil3.compose.AsyncImage(
+                                            model = art.request,
+                                            contentDescription = null,
+                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .blur(28.dp)
+                                                .drawWithContent {
+                                                    drawContent()
+                                                    drawRect(Color.Black.copy(alpha = 0.35f))
+                                                },
+                                        )
+                                    }
                                     MusicVideoSurface(
                                         videoId = song.videoId,
                                         fit = !squareVideo && !videoEdge,
@@ -5485,8 +5503,8 @@ fun NowPlayingScreen(
                                             PlayerQuickAction.STAR -> { { PlayerPlatform.host.runQuickAction(PlayerQuickAction.DONT_RECOMMEND.id, song) } }
                                             PlayerQuickAction.ALBUM, PlayerQuickAction.COVER -> { { PlayerPlatform.host.chooseCover(song) } }
                                             PlayerQuickAction.SHARE -> { { PlayerPlatform.host.runQuickAction("share_links", song) } }
-                                            // The video's sound held: the lyrics' shade a step darker. Shade held: automatic.
-                                            PlayerQuickAction.VIDEO_AUDIO -> { { PlayerPlatform.host.cycleVideoShade() } }
+                                            // The video's sound held: the video matched to the song again. Shade held: automatic.
+                                            PlayerQuickAction.VIDEO_AUDIO -> { { PlayerPlatform.host.resyncVideo() } }
                                             PlayerQuickAction.SHADE -> { { PlayerPlatform.host.autoVideoShade() } }
                                             else -> null
                                         },

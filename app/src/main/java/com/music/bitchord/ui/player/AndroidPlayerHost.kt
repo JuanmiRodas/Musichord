@@ -225,6 +225,10 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override val videoModeOriginalAudio: StateFlow<Boolean> get() = com.music.bitchord.data.video.VideoMode.originalAudio
     override val videoShadeLevel: StateFlow<Int> get() = com.music.bitchord.data.video.VideoMode.shadeLevel
     override fun cycleVideoShade() = com.music.bitchord.data.video.VideoMode.cycleShade()
+    override fun resyncVideo() {
+        MusicVideoEngine.resync()
+        showMessage(app.getString(com.music.bitchord.R.string.video_resync))
+    }
     override fun videoThumbFor(mediaId: String): String? {
         val ref = com.music.bitchord.data.video.VideoMode.cached(mediaId)
         val id = when {

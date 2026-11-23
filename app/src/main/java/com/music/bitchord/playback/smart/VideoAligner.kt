@@ -116,6 +116,19 @@ object VideoAligner {
 
     fun timeline(mediaId: String, videoKey: String): Timeline? = results["$mediaId|$videoKey"]
 
+    /**
+     * BitChord Audio: the song and video matched again from scratch (held ♪ in the player) —
+     * a timing that came out wrong, or a pair once judged "different", was kept for good.
+     */
+    fun forget(mediaId: String, videoKey: String) {
+        val key = "$mediaId|$videoKey"
+        results.remove(key)
+        settled.remove(key)
+        waiting.remove(key)
+        runCatching { save() }
+        TrackLog.d(TAG, "video sync for $key forgotten; matching again")
+    }
+
     // ── Kept: on the device, and (see CloudBackup) in pCloud ──
 
     // v3: videos rebuilt to the song (repeats, loops) — the v2 straight lines measured again.
@@ -216,7 +229,7 @@ object VideoAligner {
                     settled.remove(key)
                     waiting[key] = System.currentTimeMillis()
                 }
-                Outcome.Different -> Unit
+                Outcome.Different -> TrackLog.d(TAG, "video sync for '${song.title}': the video's sound isn't this song's (shown as it runs)")
             }
         }
     }

@@ -462,6 +462,15 @@ object MusicVideoEngine {
         load(want.ref, want.mediaId)
     }
 
+    /** BitChord Audio: the picture shown matched to the song again, from scratch. */
+    fun resync() {
+        val ref = loadedRef ?: return
+        val forId = loadedFor ?: return
+        com.music.bitchord.playback.smart.VideoAligner.forget(forId, ref.key)
+        loadedId?.let { com.music.bitchord.playback.smart.VideoAligner.forget(forId, it) }
+        reload()
+    }
+
     private fun reload() {
         val ref = loadedRef ?: return
         val forId = loadedFor ?: return

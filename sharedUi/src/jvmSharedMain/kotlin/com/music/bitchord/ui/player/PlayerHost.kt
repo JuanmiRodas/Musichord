@@ -167,6 +167,9 @@ interface PlayerHost {
     val videoShadeLevel: StateFlow<Int> get() = NoShade
     fun cycleVideoShade() {}
 
+    /** BitChord Audio: the video matched to the song again, from scratch. */
+    fun resyncVideo() {}
+
     /** BitChord Audio: the thumbnail of the video video mode shows for [mediaId], when it has one. */
     fun videoThumbFor(mediaId: String): String? = null
     fun autoVideoShade() {}
