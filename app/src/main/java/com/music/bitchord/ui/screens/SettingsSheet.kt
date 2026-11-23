@@ -795,6 +795,16 @@ fun SettingsScreen(
                     onCheckedChange = com.music.bitchord.data.webdav.PhoneBackup::setOn,
                 )
             }
+            val missingTitle = stringResource(R.string.phone_backup_missing)
+            row(missingTitle, "pcloud", "backup", "upload", "subir", "missing", "falta") {
+                val b by com.music.bitchord.data.webdav.PhoneBackup.state.collectAsStateWithLifecycle()
+                SettingsRow(
+                    icon = androidx.compose.material.icons.Icons.Rounded.CloudUpload,
+                    title = missingTitle,
+                    subtitle = stringResource(R.string.phone_backup_missing_subtitle),
+                    onClick = { if (!b.running) com.music.bitchord.data.webdav.PhoneBackup.uploadMissing() },
+                )
+            }
             // BitChord Audio: the pCloud library cleanup, card by card.
             val cleanupTitle = stringResource(R.string.cleanup_title)
             row(cleanupTitle, "pcloud", "metadata", "tags", "gemini") {

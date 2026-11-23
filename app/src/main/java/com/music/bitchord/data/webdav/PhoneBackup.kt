@@ -132,10 +132,27 @@ object PhoneBackup {
     }
 
     private fun allowed(context: Context): Boolean {
-        if (!_on.value || !WebDavRepository.isConfigured()) return false
+        if (!WebDavRepository.isConfigured()) return false
         if (AppSettings.meteredConnection.value != false) return false
+        // Asked for by hand: on Wi-Fi it goes, switch and battery saver aside.
+        if (forced) return true
+        if (!_on.value) return false
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         return pm?.isPowerSaveMode != true
+    }
+
+    @Volatile private var forced = false
+
+    /**
+     * BitChord Audio: "upload what's missing" — every file on the phone checked against pCloud
+     * again (not only the ones never sent): what is there is only looked at, never sent twice;
+     * what is missing goes up now, on Wi-Fi.
+     */
+    fun uploadMissing() {
+        prefs?.edit()?.remove(KEY_SENT)?.apply()
+        forced = true
+        TrackLog.d(TAG, "phone backup: checking every file on the phone against pCloud (asked by hand)")
+        runNow()
     }
 
     /** Where a file sits on the phone: its folders (from the top of the storage) and its name. */
@@ -239,10 +256,11 @@ object PhoneBackup {
                     var dir = mirror
                     var ok = true
                     for (f in folders) {
-                        dir = WebDavClient.joinUrl(dir, f.replace(Regex("""[\\:*?"<>|]"""), " ").trim())
-                        if (made.add(dir) && WebDavClient.ensureCollection(dir, user, pass).isFailure) { ok = false; break }
+                        dir = WebDavClient.joinUrl(dir, f.replace(Regex("""[\\:*?"<>|%]"""), " ").trim())
+                        if (made.add(dir) && WebDavClient.ensureCollection(dir, user, pass).isFailure) { made.remove(dir); ok = false; break }
                     }
-                    if (!ok) { TrackLog.w(TAG, "phone backup: no folder ${folders.joinToString("/")}"); break }
+                    // One folder that can't be made skips its files, not the rest of the pass.
+                    if (!ok) { TrackLog.w(TAG, "phone backup: no folder ${folders.joinToString("/")}"); continue }
                     val target = WebDavClient.joinUrl(dir, place.name)
                     _state.value = _state.value.copy(current = (folders + place.name).joinToString("/"), waiting = remaining)
                     // Already there (sent before, or put there another way): counted as backed up.
@@ -265,6 +283,7 @@ object PhoneBackup {
                 }
                 TrackLog.d(TAG, "phone backup: done for now — ${sent().size} file(s) in pCloud, $remaining left")
             } finally {
+                forced = false
                 _state.value = _state.value.copy(running = false, current = null, waiting = remaining)
                 running.unlock()
             }

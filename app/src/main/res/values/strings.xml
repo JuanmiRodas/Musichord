@@ -2089,4 +2089,6 @@
     <string name="replay_year_unmute">Unmute the story</string>
     <string name="lastwave_player">Player style: LastWave</string>
     <string name="lastwave_player_subtitle">Waves that move with the bass, mids and highs, liquid glass buttons and moving colours at the bottom. Off: the classic player</string>
+    <string name="phone_backup_missing">Upload what is missing</string>
+    <string name="phone_backup_missing_subtitle">Checks every file on the phone against pCloud now (on Wi-Fi) and uploads only what is not there yet</string>
 </resources>
