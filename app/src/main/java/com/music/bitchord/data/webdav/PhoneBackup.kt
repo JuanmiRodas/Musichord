@@ -54,6 +54,7 @@ object PhoneBackup {
 
     private fun markSent(keys: Collection<String>) {
         if (keys.isEmpty()) return
+        if (prefs?.getBoolean(KEY_EVER, false) != true) prefs?.edit()?.putBoolean(KEY_EVER, true)?.apply()
         val all = sent() + keys
         prefs?.edit()?.putStringSet(KEY_SENT, all)?.apply()
         _state.value = _state.value.copy(sent = all.size)
@@ -67,7 +68,9 @@ object PhoneBackup {
         // Once: what was counted as backed up without going up (another format, a "match" in
         // the library) is checked again — files already in pCloud are only looked at, not resent.
         if (prefs?.getBoolean("mirror_all_v2", false) != true) {
+            val had = sent().isNotEmpty()
             prefs?.edit()?.remove(KEY_SENT)?.putBoolean("mirror_all_v2", true)?.apply()
+            if (had) prefs?.edit()?.putBoolean(KEY_EVER, true)?.apply()
         }
         _state.value = State(sent = sent().size)
         scope.launch {
@@ -83,6 +86,41 @@ object PhoneBackup {
     }
 
     private fun key(s: Song): String = s.localUri ?: s.videoId
+
+    private const val KEY_EVER = "ever_sent"
+
+    /**
+     * The mirror's top folder: "Music" at the top of pCloud; if it is gone after files were
+     * sent, wherever the folder holding "BitChord" (the app's downloads) now is — else null.
+     * Only the very first backup may make it.
+     */
+    private suspend fun mirrorRoot(top: String, user: String, pass: String): String? {
+        val music = WebDavClient.joinUrl(top, "Music").trimEnd('/') + "/"
+        if (WebDavClient.exists(music, user, pass).getOrDefault(false)) return music
+        prefs?.getString("mirror_root", null)?.let { saved ->
+            if (WebDavClient.exists(saved, user, pass).getOrDefault(false)) return saved
+        }
+        if (prefs?.getBoolean(KEY_EVER, false) != true) return music
+        var level = listOf(top)
+        repeat(4) {
+            val next = ArrayList<String>()
+            for (dir in level.take(120)) {
+                for (e in WebDavClient.listFolders(dir, user, pass).getOrNull().orEmpty()) {
+                    val url = e.url.trimEnd('/') + "/"
+                    if (e.displayName.equals("Biblioteca", true)) continue
+                    if (e.displayName.equals("BitChord", true)) {
+                        val found = dir.trimEnd('/') + "/"
+                        TrackLog.d(TAG, "phone backup: the mirror is now at ${android.net.Uri.decode(found)}")
+                        prefs?.edit()?.putString("mirror_root", found)?.apply()
+                        return found
+                    }
+                    next += url
+                }
+            }
+            level = next
+        }
+        return null
+    }
 
     /** Everything on the phone: the app's downloads and your own music files. */
     private suspend fun onPhone(context: Context): List<Song> {
@@ -170,6 +208,12 @@ object PhoneBackup {
                 _state.value = State(running = true, sent = done.size, waiting = todo.size)
                 if (todo.isEmpty()) return@launch
                 TrackLog.d(TAG, "phone backup: ${todo.size} file(s) on the phone not in pCloud yet")
+                // The mirror's folder moved or renamed in pCloud: never made again from scratch
+                // (everything would go up a second time) — looked for by its contents instead.
+                val mirror = mirrorRoot(top, user, pass) ?: run {
+                    TrackLog.w(TAG, "phone backup: the Music folder isn't at the top of pCloud any more and wasn't found — nothing sent")
+                    return@launch
+                }
                 val made = HashSet<String>()
                 for (s in todo) {
                     if (!allowed(ctx)) {
@@ -191,8 +235,8 @@ object PhoneBackup {
                         remaining--
                         continue
                     }
-                    val folders = listOf("Music") + (if (place.folders.firstOrNull().equals("Music", true)) place.folders.drop(1) else place.folders)
-                    var dir = top
+                    val folders = if (place.folders.firstOrNull().equals("Music", true)) place.folders.drop(1) else place.folders
+                    var dir = mirror
                     var ok = true
                     for (f in folders) {
                         dir = WebDavClient.joinUrl(dir, f.replace(Regex("""[\\:*?"<>|]"""), " ").trim())
@@ -200,7 +244,7 @@ object PhoneBackup {
                     }
                     if (!ok) { TrackLog.w(TAG, "phone backup: no folder ${folders.joinToString("/")}"); break }
                     val target = WebDavClient.joinUrl(dir, place.name)
-                    _state.value = _state.value.copy(current = (folders.drop(1) + place.name).joinToString("/"), waiting = remaining)
+                    _state.value = _state.value.copy(current = (folders + place.name).joinToString("/"), waiting = remaining)
                     // Already there (sent before, or put there another way): counted as backed up.
                     if (WebDavClient.exists(target, user, pass).getOrDefault(false)) {
                         markSent(listOf(key(s)))

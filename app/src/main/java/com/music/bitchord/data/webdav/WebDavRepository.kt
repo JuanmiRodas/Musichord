@@ -289,8 +289,50 @@ object WebDavRepository {
         return inMemory ?: saved().orEmpty()
     }
 
-    /** BitChord Audio: the Mac app's clean library, at the top of pCloud. */
+    /** BitChord Audio: the Mac app's clean library, at the top of pCloud — never listed or written by the phone. */
     private val LIBRARY_ROOTS = listOf("Biblioteca")
+
+    private val movedRoots = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * BitChord Audio: where a music folder that is gone from its address ([oldUrl], "…/Music/
+     * Música/") is now — found by its name, folder by folder from the top of pCloud (four
+     * levels at most, the Mac's library skipped). Remembered, and logged, so it is looked
+     * for once.
+     */
+    private suspend fun movedFolder(oldUrl: String, username: String, password: String): String? {
+        val key = oldUrl.trimEnd('/') + "/"
+        movedRoots[key]?.let { return it }
+        val prefs = startPrefs
+        prefs?.getString("moved_root:$key", null)?.let { movedRoots[key] = it; return it }
+        val name = java.text.Normalizer.normalize(android.net.Uri.decode(key.trimEnd('/').substringAfterLast('/')), java.text.Normalizer.Form.NFC)
+        if (name.isBlank()) return null
+        val top = runCatching { java.net.URI(WebDavConfig.normalizeUrl(AppSettings.webdavUrl.value)).let { "${it.scheme}://${it.host}/" } }.getOrNull() ?: return null
+        var level = listOf(top)
+        var asked = 0
+        for (depth in 0 until 4) {
+            val next = ArrayList<String>()
+            for (dir in level) {
+                if (asked++ > 160) break
+                val subs = WebDavClient.listFolders(dir, username, password).getOrNull().orEmpty()
+                for (e in subs) {
+                    val n = java.text.Normalizer.normalize(e.displayName.ifBlank { android.net.Uri.decode(e.url.trimEnd('/').substringAfterLast('/')) }, java.text.Normalizer.Form.NFC)
+                    if (depth == 0 && LIBRARY_ROOTS.any { it.equals(n, true) }) continue
+                    val url = e.url.trimEnd('/') + "/"
+                    if (n == name && url != key) {
+                        TrackLog.d(TAG, "WebDAV: ${android.net.Uri.decode(key)} was moved — found at ${android.net.Uri.decode(url)}")
+                        movedRoots[key] = url
+                        prefs?.edit()?.putString("moved_root:$key", url)?.apply()
+                        return url
+                    }
+                    next += url
+                }
+            }
+            level = next
+        }
+        TrackLog.w(TAG, "WebDAV: ${android.net.Uri.decode(key)} is gone and no folder named '$name' was found")
+        return null
+    }
 
     suspend fun getSongs(): List<Song> = withContext(Dispatchers.IO) {
         val url = AppSettings.webdavUrl.value
@@ -309,11 +351,10 @@ object WebDavRepository {
             // address — 404s, songs that wouldn't play, download or show a cover).
             .flatMap { f ->
                 if (!isServerRoot(f.url)) return@flatMap listOf(f)
-                // BitChord Audio: plus the clean library the Mac app builds ("/Biblioteca", see
-                // LIBRARY_LINK.md): when the old folders go (Música was emptied into it), the
-                // library is found there instead of every listing failing with 404.
-                val known = (musicRootsFromLastListing() + LIBRARY_ROOTS.map { WebDavClient.joinUrl(f.url.trimEnd('/') + "/", it).trimEnd('/') + "/" })
-                    .distinctBy { android.net.Uri.decode(it).trimEnd('/') }
+                // BitChord Audio: a folder that was moved is looked for by its name and used
+                // where it is now (see [movedFolder]). The Mac app's clean library (/Biblioteca)
+                // is never listed nor written to: the phone leaves it alone until it is finished.
+                val known = musicRootsFromLastListing().map { movedRoots[it] ?: it }
                 if (known.isEmpty()) {
                     TrackLog.w(TAG, "WebDAV: not listing ${f.url} — it is the whole drive")
                     emptyList()
@@ -326,6 +367,9 @@ object WebDavRepository {
             WebDavClient.listLibrary(folder.url, username, password, maxFiles = 50_000)
                 .onFailure { TrackLog.w(TAG, "WebDAV: listing ${folder.url} failed: ${it.message}") }
                 .getOrNull()?.let { folder to it }
+                ?: movedFolder(folder.url, username, password)?.let { now ->
+                    WebDavClient.listLibrary(now, username, password, maxFiles = 50_000).getOrNull()?.let { folder.copy(url = now) to it }
+                }
                 ?: repaired(folder, username, password)?.let { fixed ->
                     WebDavClient.listLibrary(fixed.url, username, password, maxFiles = 50_000).getOrNull()?.let { fixed to it }
                 }
