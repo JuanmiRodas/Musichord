@@ -537,8 +537,10 @@ object MusicVideoEngine {
                 val busy = recent.count { it.text }
                 val dense = recent.sumOf { it.density.toDouble() }.toFloat() / recent.size
                 val looks = com.music.bitchord.data.video.VideoMode.Looks(
-                    barTop = known?.barTop?.takeIf { tops.size < 6 } ?: tops.sorted()[tops.size / 2],
-                    barBottom = known?.barBottom?.takeIf { bottoms.size < 6 } ?: bottoms.sorted()[bottoms.size / 2],
+                    // Bars: what is black in every frame (the least seen), not the usual — a dark
+                    // scene read as bars zoomed into pictures that have none. Kept once known.
+                    barTop = known?.barTop ?: if (tops.size < 6) 0f else tops.minOrNull() ?: 0f,
+                    barBottom = known?.barBottom ?: if (bottoms.size < 6) 0f else bottoms.minOrNull() ?: 0f,
                     busyBottom = busy * 3 >= recent.size,
                     textLevel = ((busy.toFloat() / recent.size) * (dense / 0.04f)).coerceIn(0f, 1f),
                 )

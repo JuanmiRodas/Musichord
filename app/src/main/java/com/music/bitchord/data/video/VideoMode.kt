@@ -171,12 +171,12 @@ object VideoMode {
 
     /** Measured once per video, kept (and backed up with the rest of video mode). */
     // Kept with four fields; an older three-field reading is measured again (it has no text level).
-    fun looksOf(key: String): Looks? = prefs?.getString("looks:$key", null)?.split(',')?.takeIf { it.size == 4 }?.let {
+    fun looksOf(key: String): Looks? = prefs?.getString("looks2:$key", null)?.split(',')?.takeIf { it.size == 4 }?.let {
         Looks(it[0].toFloatOrNull() ?: 0f, it[1].toFloatOrNull() ?: 0f, it[2] == "1", it[3].toFloatOrNull() ?: 0f)
     }
 
     fun saveLooks(key: String, looks: Looks) {
-        prefs?.edit()?.putString("looks:$key", "${looks.barTop},${looks.barBottom},${if (looks.busyBottom) 1 else 0},${looks.textLevel}")?.apply()
+        prefs?.edit()?.putString("looks2:$key", "${looks.barTop},${looks.barBottom},${if (looks.busyBottom) 1 else 0},${looks.textLevel}")?.apply()
         // BitChord Audio: to pCloud within seconds, so a reinstall finds it (see CloudBackup).
         com.music.bitchord.data.CloudBackup.soon("bitchord_video_mode")
         TrackLog.d(TAG, "video $key looks: bars ${"%.2f".format(looks.barTop)}/${"%.2f".format(looks.barBottom)}, text at the bottom: ${looks.busyBottom} (level ${"%.2f".format(looks.textLevel)})")
