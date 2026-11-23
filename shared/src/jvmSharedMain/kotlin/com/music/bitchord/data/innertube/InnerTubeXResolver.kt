@@ -320,17 +320,26 @@ object InnerTubeXResolver {
         innerTube.cookie = Innertube.cookie
         innerTube.visitorData = Innertube.ensureVisitorData()
         innerTube.locale = YouTubeLocale(gl = Innertube.currentRegion, hl = Innertube.currentLanguage)
-        val stream = extractor.extract(
+        suspend fun ask(extra: Set<String>) = extractor.extract(
             videoId = videoId,
             hints = ContentHints(
                 isAgeRestricted = true.takeIf { ageRestricted },
                 wantVideo = true,
                 maxVideoHeight = maxHeight,
             ).withStreamCapabilities(allowHls = false, allowSabr = false, allowBoundedRange = true),
-            excludedClients = excludedFor(videoId) + skipClients,
+            excludedClients = excludedFor(videoId) + skipClients + extra,
             audioQuality = AudioQuality.LOW,
             clientPlaybackNonce = generateClientPlaybackNonce(),
-        ) ?: return null
+        )
+        // BitChord Audio: the embedded web player is asked first and, on this phone, fails
+        // slowly every time (two 9 s timeouts in the log) before the visionOS client answers
+        // — 20 s for a picture. Once a picture has come through another client, the embedded
+        // one is left out of the first ask (and asked after, if nothing else answers).
+        val skipSlow = !ageRestricted && lastVideoProfile != null && lastVideoProfile?.startsWith("WEB_EMBEDDED") != true
+        val stream = (if (skipSlow) runCatching { ask(SLOW_VIDEO_CLIENTS) }.getOrNull() else null)
+            ?: ask(emptySet())
+            ?: return null
+        stream.profileId?.let { lastVideoProfile = it }
         // A live broadcast's video-only URL is a window that ends in seconds,
         // like its audio one; no picture beats a frozen one.
         val url = stream.videoUrl?.takeUnless(StreamResolver::isLiveUrl) ?: return null
@@ -364,6 +373,16 @@ object InnerTubeXResolver {
      * acts on for audio, minus the exclusion — the picture keeps its own, so a
      * video-only refusal doesn't bench a client the audio is fine on.
      */
+    /** The client the last picture came through. */
+    @Volatile private var lastVideoProfile: String? = null
+
+    /** The embedded web player's profiles, as InnerTubeX names its profiles (CLIENT[_n_n]__po|nopo). */
+    private val SLOW_VIDEO_CLIENTS = setOf(
+        "WEB_EMBEDDED_PLAYER__po", "WEB_EMBEDDED_PLAYER__nopo",
+        "WEB_EMBEDDED_PLAYER_0_1__po", "WEB_EMBEDDED_PLAYER_0_1__nopo",
+        "WEB_EMBEDDED_PLAYER_SABR__po", "WEB_EMBEDDED_PLAYER_SABR__nopo",
+    )
+
     fun onVideoRefused() {
         scope.launch { runCatching { cipherService.refreshAfterStreamRejection() } }
     }
