@@ -799,7 +799,7 @@ fun SettingsScreen(
             row(missingTitle, "pcloud", "backup", "upload", "subir", "missing", "falta") {
                 val b by com.music.bitchord.data.webdav.PhoneBackup.state.collectAsStateWithLifecycle()
                 SettingsRow(
-                    icon = androidx.compose.material.icons.Icons.Rounded.CloudUpload,
+                    icon = androidx.compose.material.icons.Icons.Rounded.FileUpload,
                     title = missingTitle,
                     subtitle = stringResource(R.string.phone_backup_missing_subtitle),
                     onClick = { if (!b.running) com.music.bitchord.data.webdav.PhoneBackup.uploadMissing() },
