@@ -224,23 +224,33 @@ internal fun rememberLastWaveLook(enabled: Boolean, artworkUrl: String?, playing
     val colors = rememberArtworkColors(artworkUrl).colors
     // LastWave's own picks: Palette's vibrant, light vibrant and dark vibrant swatches.
     val context = coil3.compose.LocalPlatformContext.current
-    var swatches by remember(artworkUrl) { androidx.compose.runtime.mutableStateOf<List<Color?>>(listOf(null, null, null)) }
+    // Kept until the next picture's are read, so the colours ease from one to the other.
+    var swatches by remember { androidx.compose.runtime.mutableStateOf<List<Color?>>(listOf(null, null, null)) }
     LaunchedEffect(artworkUrl) {
         val url = artworkUrl ?: return@LaunchedEffect
         val bitmap = runCatching { loadArtworkPaletteBitmap(context, url) }.getOrNull() ?: return@LaunchedEffect
         swatches = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { lastWaveSwatches(bitmap) }
     }
-    return remember(colors, swatches) {
-        val c0 = swatches[0] ?: colors.getOrElse(0) { Color(0xFF6A7FDB) }
-        val c1 = swatches[1] ?: lerp(colors.getOrElse(2) { c0 }, c0, 0.42f)
-        val c2 = swatches[2] ?: lerp(colors.getOrElse(1) { c0 }, c0, 0.25f)
+    val c0 = swatches[0] ?: colors.getOrElse(0) { Color(0xFF6A7FDB) }
+    val c1 = swatches[1] ?: lerp(colors.getOrElse(2) { c0 }, c0, 0.42f)
+    val c2 = swatches[2] ?: lerp(colors.getOrElse(1) { c0 }, c0, 0.25f)
+    // BitChord Audio: every colour eases to the new picture's (cover ⇄ video), never jumps.
+    val ease = androidx.compose.animation.core.tween<Color>(1_100, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+    val p by androidx.compose.animation.animateColorAsState(c0.ensureLuminous(0.38f), ease, label = "lwPrimary")
+    val s by androidx.compose.animation.animateColorAsState(c1.ensureLuminous(0.32f), ease, label = "lwSecondary")
+    val t by androidx.compose.animation.animateColorAsState(c2.ensureLuminous(0.28f), ease, label = "lwTertiary")
+    val d0 by androidx.compose.animation.animateColorAsState(deepen(c0), ease, label = "lwDeep0")
+    val d1 by androidx.compose.animation.animateColorAsState(deepen(c1), ease, label = "lwDeep1")
+    val d2 by androidx.compose.animation.animateColorAsState(deepen(c2), ease, label = "lwDeep2")
+    val pale = colors.isNotEmpty() && colors.take(3).map { it.luminance() }.average() > 0.55
+    return remember(p, s, t, d0, d1, d2, pale) {
         LastWaveLook(
-            primary = c0.ensureLuminous(0.38f),
-            secondary = c1.ensureLuminous(0.32f),
-            tertiary = c2.ensureLuminous(0.28f),
-            deep = listOf(c0, c1, c2).map { deepen(it) },
+            primary = p,
+            secondary = s,
+            tertiary = t,
+            deep = listOf(d0, d1, d2),
             motion = motion,
-            paleTop = colors.isNotEmpty() && colors.take(3).map { it.luminance() }.average() > 0.55,
+            paleTop = pale,
         )
     }
 }

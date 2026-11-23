@@ -40,6 +40,9 @@ object LyricsQuality {
         // Japanese copy, however well this one is timed.
         if (japaneseSong && text.none { CrossScript.hasJapanese(it.text) } && !isRomaji(text)) s -= TRANSLATION_PENALTY
         if (timed && durationMs > 0 && text.maxOf { it.timeMs } > durationMs + 15_000) s -= 1_500
+        // BitChord Audio: lyrics with accented letters and apostrophes set apart ("coraz ó n",
+        // "I ' m" — how KuGou and QQ write Latin text): below a line-timed copy written right.
+        if (text.count { SPACED.containsMatchIn(it.text) } >= 2) s -= 1_200
         if (text.size < 6) s -= 500
         s += min(text.size, 60)
         return s
@@ -60,6 +63,8 @@ object LyricsQuality {
             else -> 0
         }
     }
+
+    private val SPACED = Regex("\\p{L} [áéíóúàèìòùÁÉÍÓÚ] \\p{L}|\\p{L} ' (s|t|m|re|ve|ll|d)\\b")
 
     private val SYLLABLES = Regex("""^(?:(?:[kgsztdnhbpmyrwfjvc]|sh|ch|ts|ky|gy|ny|hy|by|py|my|ry|j)?[aiueoāīūēō]+|n|m(?=[bpm])|[kstpc](?=[kstpc]))+$""")
 

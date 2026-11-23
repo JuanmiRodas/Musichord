@@ -2504,7 +2504,10 @@ fun NowPlayingScreen(
     val frost = if (frostOff) null else PlayerPlatform.host.rememberPlayerFrost()
     // BitChord Audio: the LastWave-style player, when chosen in Settings.
     val lastWaveOn by PlayerSettings.lastWavePlayer.collectAsStateWithLifecycle()
-    val lastWaveLook = rememberLastWaveLook(lastWaveOn, remoteArt ?: song.thumbnailUrl, isPlaying)
+    // BitChord Audio: with the video on, the waves and buttons take the video's colours
+    // (its thumbnail), easing over from the cover's and back when it goes off.
+    val lastWaveArt = if (videoOverlay && videoThumb != song.thumbnailUrl) videoThumb else remoteArt ?: song.thumbnailUrl
+    val lastWaveLook = rememberLastWaveLook(lastWaveOn, lastWaveArt, isPlaying)
     // LastWave's glass refracts the player's backdrop, recorded as it is drawn.
     val lastWaveBackdrop = if (lastWaveLook != null) rememberLastWaveBackdrop() else null
     CompositionLocalProvider(LocalLastWave provides lastWaveLook, LocalLastWaveBackdrop provides lastWaveBackdrop) {

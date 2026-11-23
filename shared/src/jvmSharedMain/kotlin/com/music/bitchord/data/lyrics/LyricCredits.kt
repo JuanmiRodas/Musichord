@@ -42,52 +42,113 @@ object LyricCredits {
         return false
     }
 
-    // ---- BitChord Audio: accents kept whole ----
+    // ---- BitChord Audio: words kept whole ----
+    //
+    // Found in the saved lyrics (the KuGou/QQ ones): every letter outside plain ASCII is
+    // set apart with spaces, as those services do with Chinese characters — "qui é n eres",
+    // "El ú ltimo soplo de mi coraz ó n", "I ' m". Where the space was really a word break
+    // is lost, so it is worked out from the language: a lone accented vowel joins the piece
+    // before it unless that is a word of its own ("El", "que") and the piece after can't
+    // start a word ("ltimo", "ste"); it joins the piece after when that can't stand alone
+    // ("n", "s", "r") or carries on a vowel ("d í a" → "día"). An apostrophe between two
+    // letters closes up ("I ' m" → "I'm").
 
-    private val ACCENTED = Regex("^[áíóúÁÍÓÚñÑüÜ]$")
-    private val SANDWICH = Regex("(\\p{L}) ([áíóúñüÁÍÓÚÑÜ]) (\\p{L})")
-    private val WORD_END = Regex("(\\p{L}) ([áíóú])(?=[\\s,.!?;:)]|$)")
     private val LONE_MARK = Regex("\\s+(\\p{M})")
+    private val LONE = Regex("(\\p{L}+) ([áéíóúàèìòùâêîôûñüÁÉÍÓÚÀÈÌÒÙÑÜ]) (\\p{L}+)")
+    private val LONE_END = Regex("(\\p{L}+) ([áéíóúñÁÉÍÓÚÑ])(?=[\\s,.!?;:)\\]\"»]|$)")
+    private val APOSTROPHE = Regex("(\\p{L}) ?(['’]) ?(s|t|m|re|ve|ll|d|n|S|T|M|RE|VE|LL|D)\\b")
+    private val APOSTROPHE_N = Regex("(\\p{L}n) ?(['’]) ?(t)\\b")
+    private val WORDS = setOf(
+        "a", "ahora", "al", "algo", "alguien", "alma", "amor", "antes", "aquel", "aquella", "aunque", "bien", "boca", "cada", "casa", "cielo", "como", "con", "corazon", "cosa", "cosas", "cual", "cuando", "da", "de", "decir", "dejar", "del", "desde", "despues", "di", "dia", "dice", "dime", "donde", "dos", "doy", "e", "el", "ella", "ellas", "ellos", "en", "entre", "eres", "es", "esa", "esas", "ese", "eso", "esos", "esta", "estamos", "estas", "este", "estos", "estoy", "fin", "fue", "fui", "gente", "ha", "haber", "hace", "hacer", "hacia", "han", "has", "hasta", "hay", "he", "hora", "hoy", "jamas", "la", "las", "le", "les", "llegar", "lo", "los", "luego", "luna", "mal", "mano", "manos", "mar", "mas", "me", "mejor", "menos", "mi", "mia", "mientras", "mil", "mio", "mirar", "mis", "misma", "mismo", "mucha", "mucho", "muchos", "mundo", "muy", "nada", "nadie", "ni", "no", "noche", "nos", "nosotros", "nunca", "o", "ojos", "os", "otra", "otras", "otro", "otros", "para", "pasar", "paso", "pensar", "peor", "pero", "piel", "poca", "poco", "por", "porque", "puede", "pueden", "puedo", "que", "quedar", "quien", "quieres", "quiero", "saber", "sabes", "se", "seguir", "sentir", "ser", "sera", "seras", "si", "siempre", "sin", "sobre", "sol", "sola", "solo", "somos", "son", "soy", "su", "sus", "suya", "suyo", "tambien", "tan", "tanto", "te", "tener", "tengo", "tiempo", "tiene", "tienes", "toda", "todas", "todo", "todos", "tres", "tu", "tus", "tuya", "tuyo", "u", "un", "una", "unas", "unos", "usted", "ustedes", "va", "vamos", "van", "vas", "veces", "ver", "ves", "vez", "vida", "volver", "vosotros", "voy", "voz", "y", "ya", "yo",
+    )
+    private val START_PAIRS = setOf("bl", "br", "cl", "cr", "dr", "fl", "fr", "gl", "gr", "pl", "pr", "tr", "ch", "ll", "qu", "gu", "ps", "tl")
+    private fun isVowel(c: Char) = c.lowercaseChar() in "aeiouáéíóúü"
+    private val ENCLITIC = Regex("(me|te|se|lo|la|le|nos|los|las|les)$", RegexOption.IGNORE_CASE)
 
-    /**
-     * A line with its letters as one: composed (NFC — "o" and its accent as one "ó", which
-     * some lyrics send apart, so the accent was drawn as a letter of its own or not at all),
-     * and a word a source cut at an accented letter ("coraz ó n") joined again — a lone
-     * accented letter between two pieces of a word is never a word of its own.
-     */
-    private fun tidy(line: LyricLine): LyricLine {
-        val nfc = java.text.Normalizer.normalize(line.text, java.text.Normalizer.Form.NFC).replace(LONE_MARK, "$1")
-        var words = line.words.map { w ->
-            val t = java.text.Normalizer.normalize(w.text, java.text.Normalizer.Form.NFC)
-            if (t == w.text) w else w.copy(text = t, syllables = if (t.length == w.text.length) w.syllables else emptyList())
+    /** Whether [w] could be a whole Spanish word as far as its ending goes. */
+    private fun canEndWord(w: String): Boolean {
+        val l = w.lowercase()
+        if (isVowel(l.last())) return true
+        return l.last() in "dlnrszyjx" && l.length >= 2 && isVowel(l[l.length - 2])
+    }
+
+    private fun endsInTwoConsonants(w: String): Boolean =
+        w.length >= 2 && !isVowel(w.last()) && !isVowel(w[w.length - 2]) && w.last().isLetter() && w[w.length - 2].isLetter()
+
+    /** Whether [w] could be where a Spanish word begins. */
+    private fun canStartWord(w: String): Boolean {
+        val l = w.lowercase()
+        if (l.length < 2) return l == "y" || l == "a" || l == "o" || l == "e" || l == "u"
+        if (isVowel(l[0]) || isVowel(l[1])) return true
+        return l.substring(0, 2) in START_PAIRS
+    }
+
+    private fun fixSpacing(text: String): String {
+        var t = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFC).replace(LONE_MARK, "$1")
+        repeat(3) {
+            t = LONE.replace(t) { m ->
+                val (l, v, r) = m.destructured
+                val lw = l.lowercase() in WORDS
+                val rw = r.lowercase() in WORDS
+                val wordable = lw || (l.length >= 3 && canEndWord(l))
+                // "s é d ó nde": a piece followed by another lone accent begins the next word.
+                val next = t.substring(m.range.last + 1).take(2)
+                val beforeAccent = next.length == 2 && next[0] == ' ' && next[1] in "áéíóúÁÉÍÓÚ"
+                val (joinLeft, joinRight) = when {
+                    beforeAccent && r.length <= 2 -> true to false
+                    // "coraz ó n", "m á s", "C ó mo": a tail that is no word ends this one.
+                    r.length <= 2 && !rw -> true to true
+                    // "d í a", "hab í a", "fr í o": a vowel after the accent, the same word.
+                    isVowel(r[0]) && r.length <= 3 && !lw &&
+                        (!rw || (v.lowercase() in setOf("í", "ú") && r[0].lowercaseChar() in "ao")) -> true to true
+                    // "ú ltimo", "á ngel", "é ste": the accent begins the next word — after
+                    // a word ("El", "del", "que"), else it is the middle of one ("Cu á nto").
+                    !canStartWord(r) -> !wordable to true
+                    // "m í rame", "s í gueme": a pronoun on the end of a verb.
+                    l.length <= 2 && !lw && !rw && r.length <= 6 && ENCLITIC.containsMatchIn(r) -> true to true
+                    // "t ú nel", "p é talo": a single consonant before can't be a word.
+                    !rw && r.length >= 3 && !lw && l.length == 1 && l.lowercase() != "y" && !isVowel(r[0]) -> true to true
+                    // "Ser á demasiado", "lleg ó nuestra", "As í estamos": the accent ends a word.
+                    else -> true to false
+                }
+                (if (joinLeft) l + v else "$l $v") + (if (joinRight) r else " $r")
+            }
         }
-        // Words: an accented letter alone glued to its neighbours, timing spanning them.
-        if (words.size >= 2 && words.any { ACCENTED.matches(it.text) }) {
-            val out = mutableListOf<LyricWord>()
-            var i = 0
-            while (i < words.size) {
-                val w = words[i]
-                if (ACCENTED.matches(w.text) && out.isNotEmpty() && out.last().text.last().isLetter()) {
-                    val prev = out.removeAt(out.lastIndex)
-                    var merged = prev.copy(text = prev.text + w.text, endMs = w.endMs, syllables = emptyList())
-                    val next = words.getOrNull(i + 1)
-                    if (next != null && next.text.first().isLetter() && next.text.length <= 3) {
-                        merged = merged.copy(text = merged.text + next.text, endMs = next.endMs)
-                        i++
-                    }
-                    out += merged
-                } else out += w
+        t = LONE_END.replace(t) { m -> if (m.groupValues[1].lowercase() in WORDS && m.groupValues[2].lowercase() !in setOf("á", "é", "í", "ó", "ú")) m.value else m.groupValues[1] + m.groupValues[2] }
+        t = APOSTROPHE_N.replace(t) { m -> m.groupValues[1] + m.groupValues[2] + m.groupValues[3] }
+        t = APOSTROPHE.replace(t) { m -> m.groupValues[1] + m.groupValues[2] + m.groupValues[3] }
+        return t
+    }
+
+    /** [words] regrouped to the words of [text] (each word of the text made of whole timed words). */
+    private fun regroup(words: List<LyricWord>, text: String): List<LyricWord>? {
+        val tokens = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val out = ArrayList<LyricWord>()
+        var i = 0
+        for (tok in tokens) {
+            if (i >= words.size) return null
+            var built = ""
+            val first = words[i]
+            var last = first
+            while (i < words.size && built.length < tok.length) {
+                val w = java.text.Normalizer.normalize(words[i].text, java.text.Normalizer.Form.NFC).replace(" ", "")
+                built += w
+                last = words[i]
                 i++
             }
-            words = out
+            if (built != tok) return null
+            out += if (first === last) first.copy(text = tok, syllables = if (first.text == tok) first.syllables else emptyList())
+            else LyricWord(first.startMs, last.endMs, tok)
         }
-        var text = nfc
-        // "coraz ó n", "aqu í": a lone á í ó ú ñ ü inside or at the end of a word is part of it
-        // (é and à left alone: words of their own in Portuguese, Italian, French).
-        repeat(2) { text = SANDWICH.replace(text) { m -> m.groupValues[1] + m.groupValues[2] + m.groupValues[3] } }
-        text = WORD_END.replace(text) { m -> m.groupValues[1] + m.groupValues[2] }
-        if (words.isNotEmpty() && words.size != line.words.size) {
-            text = words.joinToString(" ") { it.text }
+        return out.takeIf { i == words.size }
+    }
+
+    private fun tidy(line: LyricLine): LyricLine {
+        val text = fixSpacing(line.text)
+        val words = when {
+            line.words.isEmpty() -> line.words
+            text == line.text -> line.words
+            else -> regroup(line.words, text) ?: emptyList()
         }
         val background = line.background?.let { tidy(it) }
         return if (text == line.text && words == line.words && background == line.background) line
