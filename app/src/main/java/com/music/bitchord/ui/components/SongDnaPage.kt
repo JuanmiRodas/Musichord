@@ -155,6 +155,14 @@ fun SongDnaPage(
         }
     }
 
+    // BitChord Audio: nothing said about the song by any source — looked up on the web
+    // (Genius's note, the Wikipedia articles that name it), with a spinner meanwhile.
+    var researched by remember(song.videoId) { mutableStateOf<SongDna.Dna?>(null) }
+    val needsResearch = !loading && dna != null && dna!!.facts.isEmpty() && "web research" !in dna!!.sources
+    LaunchedEffect(song.videoId, needsResearch) {
+        if (needsResearch) researched = runCatching { SongDna.research(song) }.getOrNull()
+    }
+
     val top = people.lastOrNull()
     if (top != null) {
         PersonPage(
@@ -195,7 +203,19 @@ fun SongDnaPage(
             }
         }
 
-        val d = dna
+        val d0 = dna
+        val d = researched?.takeIf { it.key == d0?.key } ?: d0
+        if (needsResearch && researched == null) {
+            item("researching") {
+                SectionCard(stringResource(R.string.song_dna_about), badge = null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(14.dp), color = Dim, strokeWidth = 1.75.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.song_dna_researching), color = Dim, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
         // ── About ──
         if (d != null && d.facts.isNotEmpty()) {
             items(d.facts) { f ->

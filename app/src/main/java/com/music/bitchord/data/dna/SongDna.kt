@@ -230,6 +230,25 @@ object SongDna {
         }
     }
 
+    /**
+     * BitChord Audio: a song nobody had anything to say about, looked up on the web
+     * ([SongResearch]) and its findings kept with its DNA. Asked once per song (an empty
+     * answer is kept too: no facts and the "researched" source).
+     */
+    suspend fun research(song: Song): Dna? {
+        val key = keyOf(song)
+        val d = cache[key] ?: return null
+        if (d.facts.isNotEmpty() || RESEARCHED in d.sources) return d
+        val found = runCatching { SongResearch.find(song.title, song.artist) }.getOrDefault(emptyList())
+        val updated = d.copy(facts = d.facts + found, sources = d.sources + RESEARCHED)
+        cache[key] = updated
+        _changes.value++
+        scheduleSave()
+        return updated
+    }
+
+    private const val RESEARCHED = "web research"
+
     /** What is already known for [song], without asking anyone. */
     fun cached(song: Song): Dna? = cache[keyOf(song)]
 
