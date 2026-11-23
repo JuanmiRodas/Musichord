@@ -64,6 +64,11 @@ object PhoneBackup {
         app = context.applicationContext
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         _on.value = prefs?.getBoolean(KEY_ON, true) ?: true
+        // Once: what was counted as backed up without going up (another format, a "match" in
+        // the library) is checked again — files already in pCloud are only looked at, not resent.
+        if (prefs?.getBoolean("mirror_all_v2", false) != true) {
+            prefs?.edit()?.remove(KEY_SENT)?.putBoolean("mirror_all_v2", true)?.apply()
+        }
         _state.value = State(sent = sent().size)
         scope.launch {
             combine(AppSettings.meteredConnection, _on, Downloads.saved) { metered, on, saved -> Triple(metered, on, saved.size) }
@@ -177,11 +182,11 @@ object PhoneBackup {
                         remaining--
                         continue
                     }
-                    // BitChord Audio: the library is MP3 320 only — no AAC, m4a, opus or webm goes up;
-                    // and a song your library already has is not copied again.
-                    if (!LibraryQuality.isKeepable(place.name) || WebDavConfig.isWebDavId(s.videoId) ||
-                        OwnFileMatcher.matches(s.title, s.artist, null, s.albumName).isNotEmpty()
-                    ) {
+                    // BitChord Audio: a mirror of the phone — every file goes up as it is (m4a, opus and
+                    // webm too: the Mac's library takes them from here as they are). Skipping files
+                    // "the library already has" (matched by title, often another album's or an older
+                    // version) left whole albums with a few songs in pCloud.
+                    if (WebDavConfig.isWebDavId(s.videoId)) {
                         markSent(listOf(key(s)))
                         remaining--
                         continue

@@ -256,7 +256,9 @@ object WebDavRepository {
         }
         val top = "${java.net.URI(WebDavConfig.normalizeUrl(AppSettings.webdavUrl.value)).let { "${it.scheme}://${it.host}" }}/"
         return counts.filter { (k, n) ->
-            n >= 20 && !k.equals("Music", true) && !k.startsWith("Music/", true) && !k.startsWith("Playlists", true)
+            n >= 20 && !k.equals("Music", true) && !k.startsWith("Music/", true) && !k.startsWith("Playlists", true) &&
+                // Inside the Mac's library: listed whole from its top instead.
+                LIBRARY_ROOTS.none { r -> k.equals(r, true) || k.startsWith("$r/", true) }
         }.keys.sorted().map { top + it + "/" }
     }
 
@@ -287,6 +289,9 @@ object WebDavRepository {
         return inMemory ?: saved().orEmpty()
     }
 
+    /** BitChord Audio: the Mac app's clean library, at the top of pCloud. */
+    private val LIBRARY_ROOTS = listOf("Biblioteca")
+
     suspend fun getSongs(): List<Song> = withContext(Dispatchers.IO) {
         val url = AppSettings.webdavUrl.value
         if (!WebDavConfig.isConfigured(url)) return@withContext emptyList()
@@ -304,7 +309,11 @@ object WebDavRepository {
             // address — 404s, songs that wouldn't play, download or show a cover).
             .flatMap { f ->
                 if (!isServerRoot(f.url)) return@flatMap listOf(f)
-                val known = musicRootsFromLastListing()
+                // BitChord Audio: plus the clean library the Mac app builds ("/Biblioteca", see
+                // LIBRARY_LINK.md): when the old folders go (Música was emptied into it), the
+                // library is found there instead of every listing failing with 404.
+                val known = (musicRootsFromLastListing() + LIBRARY_ROOTS.map { WebDavClient.joinUrl(f.url.trimEnd('/') + "/", it).trimEnd('/') + "/" })
+                    .distinctBy { android.net.Uri.decode(it).trimEnd('/') }
                 if (known.isEmpty()) {
                     TrackLog.w(TAG, "WebDAV: not listing ${f.url} — it is the whole drive")
                     emptyList()
