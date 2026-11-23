@@ -100,6 +100,7 @@ object WebDavUploads {
         }
 
         val queue = songs.filter { isUploadable(it) }
+        val reasons = HashMap<String, Int>()
         var uploaded = 0
         var skipped = 0
         var failed = 0
@@ -146,10 +147,18 @@ object WebDavUploads {
                 onFailure = {
                     set(song.videoId, TrackState.Failed(it.message ?: "Upload failed"))
                     failed++
+                    // BitChord Audio: why, so a batch of failures can be read in the log.
+                    val why = (it.message ?: it.javaClass.simpleName).take(160)
+                    reasons[why] = (reasons[why] ?: 0) + 1
+                    if (failed <= 5) com.music.bitchord.data.TrackLog.w("BitChord", "upload: '${song.title}' failed: $why")
                 },
             )
         }
         val summary = Summary(uploaded, skipped, failed)
+        if (reasons.isNotEmpty()) com.music.bitchord.data.TrackLog.w(
+            "BitChord",
+            "upload: $failed failed — " + reasons.entries.sortedByDescending { it.value }.take(5).joinToString(" · ") { "${it.value}× ${it.key}" },
+        )
         // Replaces the progress row in the shade with the batch result.
         WebDavUploadNotifications.postDone(appContext, summary)
         // The library page lists the server, so a batch that landed while it
