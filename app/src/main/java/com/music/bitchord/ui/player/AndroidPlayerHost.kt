@@ -225,6 +225,15 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override val videoModeOriginalAudio: StateFlow<Boolean> get() = com.music.bitchord.data.video.VideoMode.originalAudio
     override val videoShadeLevel: StateFlow<Int> get() = com.music.bitchord.data.video.VideoMode.shadeLevel
     override fun cycleVideoShade() = com.music.bitchord.data.video.VideoMode.cycleShade()
+    override fun videoThumbFor(mediaId: String): String? {
+        val ref = com.music.bitchord.data.video.VideoMode.cached(mediaId)
+        val id = when {
+            ref?.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE -> ref.id
+            ref == null && com.music.bitchord.data.LocalLikes.isYouTubeId(mediaId) -> mediaId
+            else -> return null
+        }
+        return "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+    }
     override fun autoVideoShade() = com.music.bitchord.data.video.VideoMode.setShadeLevel(0)
     override fun setVideoModeOriginalAudio(on: Boolean) = com.music.bitchord.data.video.VideoMode.setOriginalAudio(on)
 

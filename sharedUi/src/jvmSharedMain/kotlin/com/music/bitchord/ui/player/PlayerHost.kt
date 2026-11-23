@@ -166,6 +166,9 @@ interface PlayerHost {
     /** BitChord Audio: the video lyrics' shade set by hand — 0 automatic, 1–5 light to dark. */
     val videoShadeLevel: StateFlow<Int> get() = NoShade
     fun cycleVideoShade() {}
+
+    /** BitChord Audio: the thumbnail of the video video mode shows for [mediaId], when it has one. */
+    fun videoThumbFor(mediaId: String): String? = null
     fun autoVideoShade() {}
     fun setVideoModeOriginalAudio(on: Boolean) = Unit
 

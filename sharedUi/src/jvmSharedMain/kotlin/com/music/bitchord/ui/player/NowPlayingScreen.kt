@@ -1099,8 +1099,10 @@ fun NowPlayingScreen(
     // BitChord Audio: edge to edge, the player goes to OLED black around the picture and its
     // controls take the video's most present colour, washed out — both easing in and out.
     val shownVideoId by PlayerPlatform.host.videoModeShownVideoId.collectAsStateWithLifecycle()
-    val videoThumb = shownVideoId?.takeIf { Regex("^[A-Za-z0-9_-]{11}$").matches(it) }
-        ?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
+    // BitChord Audio: the video's own thumbnail — the shown id is the song's, so the video
+    // it plays is asked for (a song of your files has no YouTube id of its own).
+    val videoThumb = shownVideoId?.let { PlayerPlatform.host.videoThumbFor(it) }
+        ?: shownVideoId?.takeIf { Regex("^[A-Za-z0-9_-]{11}$").matches(it) }?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
         ?: song.thumbnailUrl
     val videoMain = rememberArtworkColors(videoThumb.takeIf { videoEdge }).colors.firstOrNull() ?: Color.White
     val videoWash by androidx.compose.animation.animateColorAsState(
