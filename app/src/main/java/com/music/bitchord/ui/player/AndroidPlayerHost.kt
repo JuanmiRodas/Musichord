@@ -228,7 +228,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     override fun videoThumbFor(mediaId: String): String? {
         val ref = com.music.bitchord.data.video.VideoMode.cached(mediaId)
         val id = when {
-            ref?.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE -> ref.id
+            ref?.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE -> ref!!.id
             ref == null && com.music.bitchord.data.LocalLikes.isYouTubeId(mediaId) -> mediaId
             else -> return null
         }
