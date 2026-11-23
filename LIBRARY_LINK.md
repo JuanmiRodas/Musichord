@@ -85,3 +85,27 @@ Para archivos que desaparecen y aparecen sin que el Mac lo diga (otra herramient
 - 2026-11-22 · móvil: propuesto este contrato; el móvil aún no lo lee.
 - 2026-11-22 · Mac: `built.json` v1 (archivo → origen) existe; falta la v2.
 - 2026-11-22 · Mac (BitChord Library 1.0.20): `built.json` **v2** escrito tal como dice este contrato (`id`, `source`, `copies`, `seconds`, `title`, `artist`, `album`; `moves` y `removed`, 5000 como máximo; `keptAs` cuando se quita una segunda copia). Lee también la v1. Cada MP3 que el Mac escribe lleva `TXXX:BITCHORD_ID`; al mover o reescribir un archivo se conserva su `id`. Ojo: la biblioteca en pCloud ahora se maneja con la API de pCloud (no con pCloud Drive), y `built.json` se sube con ella al final de cada fase y cada 100–200 archivos. Las rutas de `source`/`copies` son las del Mac (`/Users/juanmi/Desktop/Música/…`, `/Users/juanmi/Music/Música(1)/…`, `/Users/juanmi/Downloads/Discografías/…`, `/Users/juanmi/pCloud Drive/OnlineOnly/Yuki Kajiura/…`); solo la última está en pCloud. La biblioteca antigua del móvil (`pCloud Backup/MacBookAirdeJuanmi/Music/Música`) **no es una fuente** del Mac: sus canciones solo se pueden vincular por la capa 3 (título/artista/álbum/duración) o con la to-do.
+
+### 1.0.28 (Mac) · `releases`, formatos y recopilatorios
+
+- **`files[ruta].releases`** (nuevo): todos los álbumes en los que está esa grabación, para
+  que el móvil la muestre dentro de cada uno con su portada:
+  `[{ "album": "HOLD ME", "artist": "ZARD", "year": "1992", "track": 3, "disc": 1, "cover": "1a2b3c4d5e6f7a8b.jpg" }, …]`.
+  `cover` es un archivo de `Biblioteca/.bitchord-library/covers/` (o `null` si aún no se tiene).
+  El primero es aquel en el que está guardado el archivo cuando se guardó en un recopilatorio.
+- **Menos álbumes** (Ajustes, activado por defecto): cada canción se guarda una sola vez, en el
+  best-of o recopilatorio más grande en el que sale (lista de canciones de MusicBrainz), con
+  el nombre, número y año de ese recopilatorio en sus etiquetas. Su álbum original sigue en
+  `releases`. El móvil debería:
+  1. En la página del artista, listar como discografía **todos** los álbumes de `releases`
+     (originales y recopilatorios), unidos con los de YouTube Music por título normalizado.
+  2. Al abrir un álbum, mostrar las canciones cuyo `releases` lo incluye, ordenadas por
+     `disc`/`track` de ese álbum, con la portada de ese álbum; las que falten, de YouTube Music.
+  3. Al reproducir desde ese álbum, usar su portada; en aleatorio, una portada al azar entre
+     las de `releases` de la canción.
+- **Formatos**: además de `.mp3`, la biblioteca puede tener `.m4a` (AAC de YouTube Music, tal
+  cual) y `.opus` (Opus de `.webm`, tal cual). Nunca se recomprime nada con pérdida.
+  Los `.m4a` llevan el id como etiqueta libre `BITCHORD_ID` (átomo `----`), los `.opus` como
+  comentario Vorbis `BITCHORD_ID`; en todo caso el id está en `built.json`.
+- **Nueva fuente**: `pCloud Drive/Music/BitChord` (las descargas del móvil). Sus archivos son
+  `source`/`copies` en `built.json` como los demás.

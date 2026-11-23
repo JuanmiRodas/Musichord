@@ -39,7 +39,11 @@ object Store {
             extra = o.optJSONArray("extra")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: Settings().extra,
             phoneTodo = o.optString("phoneTodo").ifBlank { Settings().phoneTodo },
         )
-    }.getOrDefault(Settings()).let { s -> s.copy(root = Paths.resolve(s.root), extra = s.extra.map { Paths.resolve(Sources.moved(it)) }, phoneTodo = Paths.resolve(s.phoneTodo)) }
+    }.getOrDefault(Settings()).let { s ->
+        // A source added to the app later (the phone's downloads) is read too, unless the user had it already.
+        val extra = s.extra.map { Paths.resolve(Sources.moved(it)) }.let { e -> e + Sources.load().map { it.path }.filter { p -> e.none { Words.nfc(it) == Words.nfc(p) } && p.contains("/Music/BitChord") } }
+        s.copy(root = Paths.resolve(s.root), extra = extra, phoneTodo = Paths.resolve(s.phoneTodo))
+    }
 
     fun save(s: Settings) {
         settingsFile.writeText(JSONObject().put("v", 2).put("root", s.root).put("extra", JSONArray(s.extra)).put("phoneTodo", s.phoneTodo).toString(2))
@@ -254,8 +258,8 @@ object Audit {
     fun issues(t: Track, duplicates: Set<String>): List<Issue> = buildList {
         when {
             t.lossless -> add(Issue.LOSSLESS)
-            t.codec != "mp3" -> add(Issue.FORBIDDEN_FORMAT)
-            t.kbps < 315 -> add(Issue.LOW_BITRATE)
+            t.codec != "mp3" && !(Builder.Formats.native && t.codec in setOf("aac", "opus")) -> add(Issue.FORBIDDEN_FORMAT)
+            t.codec == "mp3" && t.kbps < 315 -> add(Issue.LOW_BITRATE)
             t.fake320 == true -> add(Issue.FAKE_320)
         }
         if (!t.hasCover) add(Issue.NO_COVER)

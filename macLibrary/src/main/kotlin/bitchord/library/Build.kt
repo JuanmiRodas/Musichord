@@ -71,6 +71,7 @@ data class Source(
                 Source("Escritorio · Música", "$home/Documents/Backup desktop/Música"),
                 Source("Música(1)", "$home/Music/Música(1)"),
                 Source("Discografías", "$home/Downloads/Discografías"),
+                Source("BitChord (descargas del móvil)", "$home/pCloud Drive/Music/BitChord"),
                 Source(
                     name = "Yuki Kajiura (carpeta compartida)",
                     path = "$home/pCloud Drive/OnlineOnly/Yuki Kajiura",
@@ -115,7 +116,9 @@ object Sources {
             val a = JSONArray(file.readText())
             (0 until a.length()).map { Source.from(a.getJSONObject(it)) }
         }.getOrElse { Source.defaults().also(::save) }
-        val fixed = list.map { s -> if (!File(Paths.resolve(s.path)).exists() && moved(s.path) != s.path) s.copy(path = moved(s.path)) else s }
+        var fixed = list.map { s -> if (!File(Paths.resolve(s.path)).exists() && moved(s.path) != s.path) s.copy(path = moved(s.path)) else s }
+        // Sources added after the list was saved: the phone's downloads (YouTube Music) since 1.0.28.
+        Source.defaults().filter { d -> d.name.startsWith("BitChord") && fixed.none { Words.nfc(it.path) == Words.nfc(d.path) } }.forEach { fixed = fixed + it }
         if (fixed != list) runCatching { save(fixed) }
         return fixed.map { it.copy(path = Paths.resolve(it.path)) }
     }
@@ -137,6 +140,9 @@ class Covers(root: String) {
     private val folders = db.optJSONObject("folders") ?: JSONObject().also { db.put("folders", it) }
     private val songs = db.optJSONObject("songs") ?: JSONObject().also { db.put("songs", it) }
 
+    /** The picture already taken for an album folder, without looking (null: not looked at or none). */
+    @Synchronized fun known(folder: String): String? = folders.optString(folder).ifBlank { null }
+
     /** The picture of an album folder: its cover image file, else the first embedded picture. */
     @Synchronized fun forFolder(folder: String): File? {
         if (folders.has(folder)) return folders.optString(folder).ifBlank { null }?.let { File(dir, it) }?.takeIf { it.isFile }
@@ -144,7 +150,7 @@ class Covers(root: String) {
         val image = f.listFiles()?.filter { it.isFile && it.extension.lowercase() in setOf("jpg", "jpeg", "png") }
             ?.sortedBy { n -> listOf("cover", "folder", "front", "albumart").indexOfFirst { n.name.lowercase().startsWith(it) }.let { if (it < 0) 9 else it } }
             ?.firstOrNull { !it.name.lowercase().contains("small") && !it.name.lowercase().contains("back") }
-        val tmp = File(dir, ".tmp-" + System.nanoTime() + ".jpg")
+        val tmp = File(dir, ".tmp-" + java.util.UUID.randomUUID() + ".jpg")
         val ok = if (image != null) runCatching { image.copyTo(tmp, overwrite = true); true }.getOrDefault(false) else {
             val audio = f.listFiles()?.filter { it.extension.lowercase() in setOf("mp3", "flac", "m4a") }?.sorted()?.firstOrNull()
             audio != null && Tools.run(Tools.ffmpeg, "-v", "error", "-y", "-i", audio.path, "-an", "-map", "0:v?", "-c:v", "copy", "-frames:v", "1", "-f", "image2", tmp.path, timeoutSec = 60).first == 0 && tmp.length() > 0

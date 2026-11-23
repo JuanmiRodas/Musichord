@@ -20,7 +20,7 @@ class Manifest(root: String) {
     data class Entry(val id: String, val source: String, val copies: List<String> = emptyList(), val seconds: Double? = null,
                      val title: String? = null, val artist: String? = null, val album: String? = null,
                      /** The version of the tags the app wrote into the file (0: never written by it — moved only). */
-                     val written: Int = 0, val cover: String? = null)
+                     val written: Int = 0, val cover: String? = null, val releases: List<Builder.Release> = emptyList())
 
     companion object {
         /** Raised when the tags the app writes change: every file written with an older one is written again. */
@@ -63,7 +63,7 @@ class Manifest(root: String) {
         val old = entries[rel]
         val id = keepId ?: old?.id ?: java.util.UUID.randomUUID().toString()
         entries[rel] = Entry(id, source, item.copies.map { Words.nfc(it) }.filter { it != source }, item.track.seconds, item.title, item.artist, item.album,
-            written ?: old?.written ?: 0, cover ?: old?.cover)
+            written ?: old?.written ?: 0, cover ?: old?.cover, item.releases)
         return id
     }
 
@@ -85,12 +85,20 @@ class Manifest(root: String) {
         while (removed.size > 5000) removed.removeAt(0)
     }
 
+    /** The cover file (in `.bitchord-library/covers/`) of an album's source folder, when known. */
+    @Volatile var coverOf: ((String) -> String?)? = null
+
     @Synchronized fun json(): String = JSONObject().put("version", 2).put("updated", System.currentTimeMillis())
         .put("files", JSONObject().apply {
             entries.forEach { (k, e) ->
                 put(k, JSONObject().put("id", e.id).put("source", e.source).put("copies", JSONArray(e.copies)).put("seconds", e.seconds ?: JSONObject.NULL)
                     .put("title", e.title ?: JSONObject.NULL).put("artist", e.artist ?: JSONObject.NULL).put("album", e.album ?: JSONObject.NULL)
-                    .put("written", e.written).put("cover", e.cover ?: JSONObject.NULL))
+                    .put("written", e.written).put("cover", e.cover ?: JSONObject.NULL)
+                    // The albums it is on (LIBRARY_LINK.md): the phone lists the song in each, with that album's cover.
+                    .put("releases", JSONArray(e.releases.map { r ->
+                        JSONObject().put("album", r.album).put("artist", r.artist).put("year", r.year ?: JSONObject.NULL).put("track", r.no ?: JSONObject.NULL)
+                            .put("disc", r.disc ?: JSONObject.NULL).put("cover", coverOf?.invoke(r.folder) ?: JSONObject.NULL)
+                    })))
             }
         })
         .put("moves", JSONArray(moves)).put("removed", JSONArray(removed)).toString()
@@ -184,6 +192,17 @@ object Engine {
         runCatching { File(Live.dir, "plan-overview.txt").writeText(Builder.overview(plan, root)) }
         val manifest = Manifest(root)
         val covers = Covers(root)
+        manifest.coverOf = { f -> covers.known(f) }
+        // The cover of every album a song is on (its original album, the best-of it is kept in…), so the phone can
+        // show each album with its own picture: taken once per album folder, for at most five minutes per build.
+        run {
+            val folders = plan.copy.filter { it.releases.size > 1 }.flatMap { i -> i.releases.map { it.folder } }.distinct().filter { covers.known(it) == null }
+            val until = System.currentTimeMillis() + 5 * 60_000
+            Live.phase = "portadas de cada álbum"; Live.total = folders.size; Live.done.set(0)
+            for (f in folders) { if (Live.stop || System.currentTimeMillis() > until) break; Live.current = f; Live.done.incrementAndGet(); Live.write(); runCatching { covers.forFolder(f) } }
+            runCatching { covers.save() }
+            Live.total = 0; Live.done.set(0)
+        }
         fun rel(p: String) = Words.nfc(p.removePrefix(root).trimStart('/'))
         val lib: Lib = if (PCloud.isDrive(root)) PCloudLib.open(root) ?: run {
             val msg = "La biblioteca está en pCloud Drive: inicia sesión en pCloud en Ajustes para construirla (la app trabaja con pCloud directamente)"
@@ -196,7 +215,7 @@ object Engine {
         val known = tracks.associateBy { Words.nfc(it.path) }
         val temp = File(System.getProperty("user.home"), "Music/.bitchord-staging").apply { mkdirs() }
         // built.json goes into the library through the same way as the songs (pCloud's API there).
-        val publish: (File) -> Unit = { f -> val t = File(temp, "built-" + System.nanoTime() + ".json"); f.copyTo(t, true); lib.put(t, ".bitchord-library/built.json"); t.delete() }
+        val publish: (File) -> Unit = { f -> val t = File(temp, "built-" + java.util.UUID.randomUUID() + ".json"); f.copyTo(t, true); lib.put(t, ".bitchord-library/built.json"); t.delete() }
 
         // What the library holds now.
         Live.phase = "mirando lo que ya hay (${lib.name})"
@@ -267,8 +286,19 @@ object Engine {
                 // Still taken by a file no song of the plan holds (a pCloud "(1)" copy, an old duplicate with the
                 // same name): that file goes, and this one takes its place.
                 val occupant = present.values.firstOrNull { it.rel.equals(target, ignoreCase = true) || Words.nfc(it.rel) == Words.nfc(target) }
-                if (occupant == null || held.values.any { it.rel == occupant.rel } || lib.delete(occupant) != null) { Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue }
-                manifest.remove(occupant.rel, cur.rel); Live.deleted.incrementAndGet(); ops.log("app", "removed ${occupant.rel} (its place is for ${cur.rel})")
+                val holder = occupant?.let { o -> held.entries.firstOrNull { it.value.rel == o.rel } }
+                if (occupant != null && holder != null) {
+                    // Two songs in each other's place (A where B goes, B where A goes): B steps aside first.
+                    val aside = target.substringBeforeLast('/', "") .let { if (it.isEmpty()) "" else "$it/" } + ".aparte-" + java.util.UUID.randomUUID() + "." + target.substringAfterLast('.')
+                    val hi = plan.copy.firstOrNull { it.target == holder.key }
+                    if (hi == null || lib.move(occupant, aside) != null) { Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue }
+                    manifest.move(occupant.rel, aside, hi)
+                    held[holder.key] = occupant.copy(rel = aside, actual = aside)
+                    ops.log("app", "moved ${occupant.rel} aside (its place is for ${cur.rel})")
+                } else {
+                    if (occupant == null || lib.delete(occupant) != null) { Live.error("sitio ocupado: $target"); Live.done.incrementAndGet(); continue }
+                    manifest.remove(occupant.rel, cur.rel); Live.deleted.incrementAndGet(); ops.log("app", "removed ${occupant.rel} (its place is for ${cur.rel})")
+                }
             }
             stuck = 0
             val err = lib.move(cur, target)
@@ -308,7 +338,7 @@ object Engine {
             if (Live.stop) return@submit
             val target = rel(i.target)
             Live.current = target
-            val tmp = File(temp, System.nanoTime().toString() + ".mp3")
+            val tmp = File(temp, java.util.UUID.randomUUID().toString() + "." + target.substringAfterLast('.'))
             val id = manifest.id(target) ?: java.util.UUID.randomUUID().toString()
             val chosenCover = CoverChoice.approvedFor(root, i)
             Builder.copy(i.copy(target = tmp.path), covers, id = id, coverFile = chosenCover).onSuccess {
@@ -340,7 +370,7 @@ object Engine {
 
     /** A file the app just wrote, as the index will know it. */
     private fun libraryTrack(i: Builder.Item, f: File, size: Long) = i.track.copy(
-        path = f.path, size = size, modified = System.currentTimeMillis(), codec = "mp3",
+        path = f.path, size = size, modified = System.currentTimeMillis(), codec = if (i.track.lossless) "mp3" else i.track.codec,
         kbps = if (i.track.lossless) 320 else i.track.kbps, hasCover = true,
         tags = mapOf("title" to i.title, "artist" to i.artist, "album" to i.album, "album_artist" to i.albumArtist) +
             listOfNotNull(i.year?.let { "date" to it }, i.trackNo?.let { "track" to it.toString() }),

@@ -44,6 +44,20 @@ object Words {
      * "Fantôme", "Malmö" or "¡Viva!" stay: a repair must keep every plain letter where it was
      * and give East Asian text.
      */
+    private fun sameLetters(decoded: String, s: String): Boolean {
+        val all = s.filter { it.code < 0x80 && it.isLetterOrDigit() }
+        if (decoded == all) return true
+        // Only for text that is mostly garbled ("Canción María" read as Big5 would lose letters too).
+        if (s.count { it.code in 0x80..0xFF } < 6) return false
+        var j = 0
+        for ((i, c) in s.withIndex()) {
+            if (c.code >= 0x80 || !c.isLetterOrDigit()) continue
+            if (j < decoded.length && decoded[j] == c) { j++; continue }
+            if (i == 0 || s[i - 1].code !in 0x80..0xFF) return false
+        }
+        return j == decoded.length
+    }
+
     fun fix(s0: String): String {
         val s = nfc(s0).replace('\u0000', ' ').trim()
         if (s.count { it.code in 0x80..0xFF } < 2) return s
@@ -55,7 +69,9 @@ object Words {
                     .decode(ByteBuffer.wrap(bytes)).toString()
             }.getOrNull() ?: continue
             // Plain letters and digits stay where they were (punctuation may be half of a character).
-            if (d.filter { it.code < 0x80 && it.isLetterOrDigit() } != ascii.filter { it.isLetterOrDigit() }) continue
+            // Plain letters and digits stay where they were; in Big5, GBK or Shift-JIS a letter right after an
+            // accented one may be the second half of a character ("¤é¥»ªZ¹DÀ]" is 日本武道館).
+            if (!sameLetters(d.filter { it.code < 0x80 && it.isLetterOrDigit() }, s)) continue
             if (d.count { CJK_ONLY.containsMatchIn(it.toString()) } < 2 && !Regex("[～〜・「」『』]").containsMatchIn(d)) continue
             if (HALF_KANA.containsMatchIn(d) || !EAST.containsMatchIn(d)) continue
             return nfc(d)

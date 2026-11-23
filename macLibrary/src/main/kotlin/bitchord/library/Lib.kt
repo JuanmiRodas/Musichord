@@ -38,7 +38,7 @@ class LocalLib(private val root: String) : Lib {
     override val name = "disco"
     private val rootFile = File(root)
     override fun list(): Map<String, LibFile> = rootFile.walkTopDown().onEnter { !it.name.startsWith(".") }
-        .filter { it.isFile && it.extension.lowercase() == "mp3" && !it.name.startsWith(".") }
+        .filter { it.isFile && it.extension.lowercase() in Builder.Formats.LIBRARY && !it.name.startsWith(".") }
         .associate { f -> val r = f.path.removePrefix(root).trimStart('/'); nfc(r) to LibFile(nfc(r), r, f.length()) }
     override fun move(from: LibFile, toRel: String): String? = runCatching {
         val to = File(rootFile, toRel); to.parentFile.mkdirs()
@@ -196,7 +196,7 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
                 if (n.startsWith(".")) continue
                 val r = if (rel.isEmpty()) n else "$rel/$n"
                 if (x.optBoolean("isfolder")) { folders.putIfAbsent(nfc(r).lowercase(), x.getLong("folderid")); walk(x, r) }
-                else if (n.lowercase().endsWith(".mp3")) files[nfc(r)] = LibFile(nfc(r), r, x.optLong("size"), x.getLong("fileid"))
+                else if (n.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) files[nfc(r)] = LibFile(nfc(r), r, x.optLong("size"), x.getLong("fileid"))
             }
         }
         walk(o, "")

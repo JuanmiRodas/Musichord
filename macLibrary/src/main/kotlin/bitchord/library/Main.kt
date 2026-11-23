@@ -699,6 +699,16 @@ private fun SettingsPane(state: LibraryState) {
         }
         Text("Las reglas de cada fuente (p. ej. qué álbumes de Yuki Kajiura se copian) están en ${File(Store.dir, "sources.json").path}", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
         OutlinedTextField(phone, { phone = it }, label = { Text("To-do del móvil (lo escribe BitChord)") }, modifier = Modifier.fillMaxWidth())
+        var native by remember { mutableStateOf(Builder.Formats.native) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(native, { native = it; Builder.Formats.native = it })
+            Text("Guardar AAC (.m4a) y Opus (.webm) tal cual, sin recomprimir. Si no, solo se copian MP3 y sin pérdida (→ MP3 320).", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+        }
+        var comps by remember { mutableStateOf(Builder.Layout.compilationsFirst) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(comps, { comps = it; Builder.Layout.compilationsFirst = it })
+            Text("Menos álbumes: cada canción se guarda una vez, en el recopilatorio o best-of más grande donde está (MusicBrainz); el móvil la sigue mostrando en su álbum original.", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+        }
         Button(onClick = {
             val s = Store.Settings(Paths.resolve(root.trim()), extra.lines().map { Paths.resolve(it.trim()) }.filter { it.isNotEmpty() }, Paths.resolve(phone.trim()))
             File(s.root).mkdirs()
