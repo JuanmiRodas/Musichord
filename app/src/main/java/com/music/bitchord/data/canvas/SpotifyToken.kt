@@ -86,6 +86,29 @@ internal object SpotifyToken {
      * see [harvestViaWebView] for why signing the request ourselves isn't
      * enough.
      */
+    @Volatile private var anonToken: String? = null
+    @Volatile private var anonExpiresAt = 0L
+
+    /**
+     * BitChord Audio: a token without signing in — the one open.spotify.com gives anyone
+     * who opens it. Enough to search the catalogue (a song's Spotify link to share); not
+     * for canvases.
+     */
+    suspend fun anonymousToken(): String? {
+        val now = System.currentTimeMillis()
+        anonToken?.let { if (now < anonExpiresAt - 30_000) return it }
+        val context = appContext ?: return null
+        return harvestMutex.withLock {
+            anonToken?.let { if (System.currentTimeMillis() < anonExpiresAt - 30_000) return@withLock it }
+            val harvested = withContext(Dispatchers.Main) { harvestViaWebView(context, null, allowAnonymous = true) }
+                ?: run { Log.w(TAG, "anonymous token harvest failed"); return@withLock null }
+            anonToken = harvested.token
+            anonExpiresAt = harvested.expiresAt
+            if (cachedClientId == null) harvested.clientId?.let { cachedClientId = it }
+            harvested.token
+        }
+    }
+
     suspend fun accessToken(): String? {
         val cookie = AppSettings.spotifySpdcToken.value
         if (cookie.isBlank()) return null
@@ -132,13 +155,15 @@ internal object SpotifyToken {
      * runs.
      */
     @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun harvestViaWebView(context: Context, cookie: String): HarvestedToken? {
+    private suspend fun harvestViaWebView(context: Context, cookie: String?, allowAnonymous: Boolean = false): HarvestedToken? {
         val deferred = CompletableDeferred<HarvestedToken?>()
 
         val cookieManager = CookieManager.getInstance().apply {
             setAcceptCookie(true)
-            setCookie("https://open.spotify.com/", "sp_dc=$cookie; Domain=.spotify.com; Path=/; Secure")
-            setCookie("https://accounts.spotify.com/", "sp_dc=$cookie; Domain=.spotify.com; Path=/; Secure")
+            if (cookie != null) {
+                setCookie("https://open.spotify.com/", "sp_dc=$cookie; Domain=.spotify.com; Path=/; Secure")
+                setCookie("https://accounts.spotify.com/", "sp_dc=$cookie; Domain=.spotify.com; Path=/; Secure")
+            }
             flush()
         }
         // The player caches its token in web storage and skips a fresh
@@ -154,7 +179,7 @@ internal object SpotifyToken {
                 settings.domStorageEnabled = true
                 settings.userAgentString = CANVAS_UA
                 cookieManager.setAcceptThirdPartyCookies(this, true)
-                addJavascriptInterface(TokenBridge(deferred), BRIDGE_NAME)
+                addJavascriptInterface(TokenBridge(deferred, allowAnonymous), BRIDGE_NAME)
                 webChromeClient = QuietWebChromeClient()
 
                 webViewClient = object : WebViewClient() {
@@ -187,7 +212,7 @@ internal object SpotifyToken {
     }
 
     /** Receives raw `/api/token` response bodies from the hooked page. */
-    private class TokenBridge(private val deferred: CompletableDeferred<HarvestedToken?>) {
+    private class TokenBridge(private val deferred: CompletableDeferred<HarvestedToken?>, private val allowAnonymous: Boolean = false) {
         @JavascriptInterface
         fun onTokenPayload(payload: String?) {
             if (payload.isNullOrBlank() || deferred.isCompleted) return
@@ -199,7 +224,7 @@ internal object SpotifyToken {
                 // The player also mints an anonymous token before the cookie
                 // takes effect; that one can't read canvases, so keep waiting
                 // for the logged-in one.
-                if (token.isNullOrBlank() || anonymous) return
+                if (token.isNullOrBlank() || (anonymous && !allowAnonymous)) return
                 val expiresAt = root["accessTokenExpirationTimestampMs"]?.jsonPrimitive?.contentOrNull
                     ?.toLongOrNull()?.takeIf { it > System.currentTimeMillis() }
                     ?: (System.currentTimeMillis() + DEFAULT_TOKEN_LIFETIME_MS)

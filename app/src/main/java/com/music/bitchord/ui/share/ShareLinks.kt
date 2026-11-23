@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit
  * one, otherwise from song.link (Odesli), which maps a YouTube Music link to the others.
  */
 object ShareLinks {
-    data class Links(val spotify: String?, val youTubeMusic: String?, val youTube: String?)
+    data class Links(val spotify: String?, val youTubeMusic: String?, val youTube: String?, val pcloud: String? = null)
 
     /** The song whose links sheet is up (a long press on Share). */
     val sheet = MutableStateFlow<Song?>(null)
@@ -56,7 +56,26 @@ object ShareLinks {
         val artist = song.artist.split(',').first().trim()
         var spotify = runCatching { com.music.bitchord.data.canvas.SpotifyCanvas.trackUrl(song.title, artist, song.albumName) }.getOrNull()
         if (spotify == null && ytMusic != null) spotify = odesliSpotify(ytMusic)
-        Links(spotify, ytMusic, youTube).also { if (spotify != null) known[song.videoId] = it }
+        val pcloud = pcloudLink(song)
+        Links(spotify, ytMusic, youTube, pcloud).also { if (spotify != null || pcloud != null) known[song.videoId] = it }
+    }
+
+    /**
+     * A public pCloud link to your file of the song — the one it plays from, or the best
+     * match in your library — for a song that is nowhere else (or to send the file itself).
+     */
+    private fun pcloudLink(song: Song): String? {
+        val id = song.videoId.takeIf { com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(it) }
+            ?: runCatching { com.music.bitchord.data.covers.CoverSources.filesOf(song).firstOrNull()?.videoId }.getOrNull()
+            ?: return null
+        val url = com.music.bitchord.data.webdav.WebDavConfig.fileUrlOf(id) ?: return null
+        return runCatching {
+            client.newCall(Request.Builder().url(url).method("PUBLINK", null).build()).execute().use { r ->
+                val body = r.body?.string()?.trim()
+                if (r.isSuccessful && body != null && body.startsWith("http")) body
+                else { TrackLog.w("Share", "pCloud link: HTTP ${r.code} ${body?.take(80)}"); null }
+            }
+        }.onFailure { TrackLog.w("Share", "pCloud link failed: ${it.message}") }.getOrNull()
     }
 
     private fun odesliSpotify(url: String): String? = runCatching {
@@ -96,7 +115,7 @@ object ShareLinks {
         Toast.makeText(app, R.string.share_finding, Toast.LENGTH_SHORT).show()
         scope.launch {
             val links = of(song)
-            val url = links.spotify ?: links.youTubeMusic ?: links.youTube
+            val url = links.spotify ?: links.youTubeMusic ?: links.youTube ?: links.pcloud
             if (url == null) {
                 Toast.makeText(app, R.string.share_no_link, Toast.LENGTH_SHORT).show()
                 return@launch

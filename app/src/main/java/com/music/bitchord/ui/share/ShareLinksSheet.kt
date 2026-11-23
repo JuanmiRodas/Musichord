@@ -53,7 +53,7 @@ import com.music.bitchord.data.model.Song
 fun ShareLinksSheet(song: Song, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var links by remember(song.videoId) { mutableStateOf<ShareLinks.Links?>(null) }
-    LaunchedEffect(song.videoId) { links = runCatching { ShareLinks.of(song) }.getOrNull() ?: ShareLinks.Links(null, null, null) }
+    LaunchedEffect(song.videoId) { links = runCatching { ShareLinks.of(song) }.getOrNull() ?: ShareLinks.Links(null, null, null, null) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -97,6 +97,11 @@ fun ShareLinksSheet(song: Song, onDismiss: () -> Unit) {
             LinkRow("YouTube Music", Color(0xFFFF0033), loaded?.youTubeMusic, loaded == null, song)
             Spacer(Modifier.height(8.dp))
             LinkRow("YouTube", Color(0xFFFF0000), loaded?.youTube, loaded == null, song)
+            // Your own file, through pCloud — shown when the song is one of your files.
+            if (loaded == null || loaded.pcloud != null) {
+                Spacer(Modifier.height(8.dp))
+                LinkRow("pCloud", Color(0xFF17BED0), loaded?.pcloud, loaded == null, song)
+            }
         }
     }
 }

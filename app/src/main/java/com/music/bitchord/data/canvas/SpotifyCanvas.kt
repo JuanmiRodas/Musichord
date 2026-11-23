@@ -63,13 +63,18 @@ object SpotifyCanvas {
 
     private data class TrackHit(val uri: String, val title: String, val artist: String, val album: String?)
 
-    private fun disabled(): Boolean = AppSettings.disableSpotifyCanvas.value
+    /** A search for a share link: not stopped by canvases being turned off. */
+    @Volatile private var sharing = false
+    private fun disabled(): Boolean = !sharing && AppSettings.disableSpotifyCanvas.value
 
     /** BitChord Audio: the song's page on Spotify (open.spotify.com/track/…), when signed in to Spotify. */
     suspend fun trackUrl(title: String, artist: String, album: String?): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val token = SpotifyToken.accessToken() ?: return@withContext null
-        val hit = runCatching { searchViaPathfinder(title, artist, album, token) ?: searchViaRest(title, artist, album, token) }.getOrNull()
-            ?: return@withContext null
+        // Signed in or not: open.spotify.com's anonymous token searches as well.
+        val token = SpotifyToken.accessToken() ?: SpotifyToken.anonymousToken() ?: return@withContext null
+        sharing = true
+        val hit = try {
+            runCatching { searchViaPathfinder(title, artist, album, token) ?: searchViaRest(title, artist, album, token) }.getOrNull()
+        } finally { sharing = false } ?: return@withContext null
         hit.uri.substringAfter("spotify:track:", "").takeIf { it.isNotBlank() }?.let { "https://open.spotify.com/track/$it" }
     }
 

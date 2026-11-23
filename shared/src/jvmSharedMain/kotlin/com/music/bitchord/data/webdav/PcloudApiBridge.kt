@@ -98,7 +98,7 @@ object PcloudApiBridge {
     fun answer(chain: Interceptor.Chain, request: Request): Response? {
         if (!isPcloudHost(request.url.host)) return null
         val method = request.method.uppercase()
-        if (method != "PROPFIND" && method != "GET" && method != "HEAD") return null
+        if (method != "PROPFIND" && method != "GET" && method != "HEAD" && method != "PUBLINK") return null
         oauthToken?.takeIf { it.isNotBlank() }?.let { bearer ->
             lastError = null
             val api = oauthApi ?: apiHost(request.url.host)
@@ -106,6 +106,7 @@ object PcloudApiBridge {
             return runCatching {
                 when (method) {
                     "PROPFIND" -> propfind(chain, request, api, "", path, bearer)
+                    "PUBLINK" -> publink(chain, request, api, "", path, bearer)
                     else -> download(chain, request, api, "", path, bearer)
                 }
             }.onFailure { lastError = it.message }.getOrNull()
@@ -124,6 +125,7 @@ object PcloudApiBridge {
         return runCatching {
             when (method) {
                 "PROPFIND" -> propfind(chain, request, api, signed, path)
+                "PUBLINK" -> publink(chain, request, api, signed, path)
                 else -> download(chain, request, api, signed, path)
             }
         }.onFailure { lastError = it.message }.getOrNull()
@@ -286,6 +288,23 @@ object PcloudApiBridge {
     /** The path as given, then in the other Unicode form (a Mac's "Música" vs the precomposed one). */
     private fun forms(path: String): List<String> =
         listOf(path, Normalizer.normalize(path, Normalizer.Form.NFC), Normalizer.normalize(path, Normalizer.Form.NFD)).distinct()
+
+    /**
+     * BitChord Audio: a public link to a file (pCloud's "share a link"), for sharing a song
+     * that is nowhere else. Asked as a made-up PUBLINK request on the file's WebDAV address;
+     * answered with the link as plain text. The same file gives the same link each time.
+     */
+    private fun publink(chain: Interceptor.Chain, request: Request, api: String, auth: String, path: String, bearer: String? = null): Response? {
+        for (p in forms(path)) {
+            val result = call(chain, "https://$api/getfilepublink?" + authParam(auth, bearer) + "&path=" + enc(p)) ?: continue
+            checkToken(result)
+            val code = result["result"]?.jsonPrimitive?.intOrNull ?: -1
+            if (code != 0) { lastError = "pCloud link refused ($code: ${result["error"]?.jsonPrimitive?.content})"; continue }
+            val link = result["link"]?.jsonPrimitive?.content ?: continue
+            return synthetic(request, 200, "OK", link, "text/plain", null)
+        }
+        return synthetic(request, 404, "Not Found", lastError.orEmpty(), "text/plain", null)
+    }
 
     // ---- PROPFIND ------------------------------------------------------------------------
 
