@@ -2643,7 +2643,6 @@ private fun BitChordApp(
         }
     }
     // Lit quick buttons: the song saved on the phone, the sleep timer running.
-    val savedDownloads by com.music.bitchord.download.Downloads.saved.collectAsStateWithLifecycle()
     val sleepDeadline by com.music.bitchord.playback.SleepTimer.deadline.collectAsStateWithLifecycle()
     val sleepAfterTrack by com.music.bitchord.playback.SleepTimer.afterTrack.collectAsStateWithLifecycle()
     LaunchedEffect(player.song?.videoId, savedDownloads, sleepDeadline, sleepAfterTrack) {
