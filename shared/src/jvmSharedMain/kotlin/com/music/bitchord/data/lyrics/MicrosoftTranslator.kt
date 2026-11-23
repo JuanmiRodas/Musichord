@@ -35,9 +35,18 @@ object MicrosoftTranslator {
         return runCatching {
             client.newCall(
                 Request.Builder().url("https://edge.microsoft.com/translate/auth")
-                    .header("User-Agent", UA).build(),
-            ).execute().use { r -> if (r.isSuccessful) r.body?.string()?.trim()?.takeIf { it.count { c -> c == '.' } == 2 } else null }
-        }.getOrNull()?.also { token = it; tokenAt = now }
+                    .header("User-Agent", UA)
+                    .header("Accept", "*/*")
+                    .build(),
+            ).execute().use { r ->
+                val body = r.body?.string()?.trim()
+                if (!r.isSuccessful || body.isNullOrEmpty() || body.length < 40) {
+                    TrackLog.w("LyricsTranslation", "Microsoft token: HTTP ${r.code} '${body?.take(60)}'")
+                    null
+                } else body.trim('"')
+            }
+        }.onFailure { TrackLog.w("LyricsTranslation", "Microsoft token failed: ${it.javaClass.simpleName} ${it.message}") }
+            .getOrNull()?.also { token = it; tokenAt = now }
     }
 
     /** Microsoft's names for a few languages that differ from the BCP-47 tags the app keeps. */
@@ -73,7 +82,7 @@ object MicrosoftTranslator {
         val auth = freshToken() ?: run { TrackLog.w("LyricsTranslation", "Microsoft translator: no token"); return null }
         val body = buildJsonArray { texts.forEach { add(buildJsonObject { put("Text", JsonPrimitive(it)) }) } }.toString()
         val url = buildString {
-            append("https://api-edge.cognitivetranslator.com/translate?api-version=3.0&to=").append(msLanguage(target))
+            append("https://api-edge.cognitive.microsofttranslator.com/translate?api-version=3.0&to=").append(msLanguage(target))
             if (!from.isNullOrBlank()) append("&from=").append(msLanguage(from))
         }
         return runCatching {

@@ -2619,15 +2619,9 @@ private fun BitChordApp(
                     viewModel.loadPlaylists()
                     playlistTarget = song
                 }
-                "share" -> context.startActivity(
-                    Intent.createChooser(
-                        Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, "https://music.youtube.com/watch?v=${song.videoId}")
-                        },
-                        song.title,
-                    ),
-                )
+                // BitChord Audio: straight to Spotify's link (held: every link, in a sheet).
+                "share" -> com.music.bitchord.ui.share.ShareLinks.shareSpotify(context, song)
+                "share_links" -> com.music.bitchord.ui.share.ShareLinks.sheet.value = song
                 "sleep" -> {
                     val timer = com.music.bitchord.playback.SleepTimer
                     if (timer.isRunning) {
@@ -6853,6 +6847,9 @@ private fun BitChordAudioDialogs(viewModel: MainViewModel, controller: MediaCont
             onDismiss = { com.music.bitchord.ui.components.CoverPicker.close() },
         )
     }
+    // BitChord Audio: a song's links to share (a long press on Share).
+    val shareSheetSong by com.music.bitchord.ui.share.ShareLinks.sheet.collectAsStateWithLifecycle()
+    shareSheetSong?.let { s -> com.music.bitchord.ui.share.ShareLinksSheet(s, onDismiss = { com.music.bitchord.ui.share.ShareLinks.sheet.value = null }) }
     // BitChord Audio: the player's buttons, chosen from a long press on its ⋯.
     val quickEditorOpen by com.music.bitchord.ui.player.QuickActionBridge.editorOpen.collectAsStateWithLifecycle()
     if (quickEditorOpen) {

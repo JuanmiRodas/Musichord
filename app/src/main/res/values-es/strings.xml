@@ -2139,4 +2139,10 @@
     <string name="qa_info">Info de la canción</string>
     <string name="cover_no_alternatives">No hay otras portadas para este álbum</string>
     <string name="cover_cycled">Portada %1$d de %2$d</string>
+    <string name="share_link_copied">Enlace copiado</string>
+    <string name="share_finding">Buscando el enlace de Spotify…</string>
+    <string name="share_no_link">No hay enlace para esta canción</string>
+    <string name="share_no_spotify">No está en Spotify: se comparte YouTube Music</string>
+    <string name="share_links_title">Compartir</string>
+    <string name="share_not_found">No encontrado</string>
 </resources>

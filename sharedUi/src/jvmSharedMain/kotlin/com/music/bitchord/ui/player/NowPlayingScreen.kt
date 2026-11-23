@@ -5475,6 +5475,7 @@ fun NowPlayingScreen(
                                             // Kept as liked, left out of what's recommended (and future mixes).
                                             PlayerQuickAction.STAR -> { { PlayerPlatform.host.runQuickAction(PlayerQuickAction.DONT_RECOMMEND.id, song) } }
                                             PlayerQuickAction.ALBUM, PlayerQuickAction.COVER -> { { PlayerPlatform.host.chooseCover(song) } }
+                                            PlayerQuickAction.SHARE -> { { PlayerPlatform.host.runQuickAction("share_links", song) } }
                                             else -> null
                                         },
                                         onClick = {

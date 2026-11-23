@@ -65,6 +65,14 @@ object SpotifyCanvas {
 
     private fun disabled(): Boolean = AppSettings.disableSpotifyCanvas.value
 
+    /** BitChord Audio: the song's page on Spotify (open.spotify.com/track/…), when signed in to Spotify. */
+    suspend fun trackUrl(title: String, artist: String, album: String?): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val token = SpotifyToken.accessToken() ?: return@withContext null
+        val hit = runCatching { searchViaPathfinder(title, artist, album, token) ?: searchViaRest(title, artist, album, token) }.getOrNull()
+            ?: return@withContext null
+        hit.uri.substringAfter("spotify:track:", "").takeIf { it.isNotBlank() }?.let { "https://open.spotify.com/track/$it" }
+    }
+
     suspend fun search(title: String, artist: String, album: String?): CanvasArtwork? {
         if (disabled()) return null
         val token = SpotifyToken.accessToken()

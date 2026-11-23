@@ -420,7 +420,12 @@ object LyricsTranslation {
         if (ms != null && ms.first.size == batch.slots.size && ms.first.none { it.isBlank() }) {
             return BatchAnswer(ms.first, ms.second, batch.payload.length)
         }
-        com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation unavailable for ${batch.slots.size} lines (Google and Microsoft both failed)")
+        val other = FallbackTranslators.translate(batch.slots.map { it.text }, target)
+        if (other != null && other.first.size == batch.slots.size) {
+            // No language named (MyMemory): the source is taken to differ from the target.
+            return BatchAnswer(other.first, other.second.ifBlank { "und" }, batch.payload.length)
+        }
+        com.music.bitchord.data.TrackLog.w("LyricsTranslation", "translation unavailable for ${batch.slots.size} lines (every translator failed)")
         return null
     }
 

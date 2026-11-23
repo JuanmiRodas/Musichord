@@ -2120,4 +2120,10 @@
     <string name="qa_info">Song info</string>
     <string name="cover_no_alternatives">No other covers found for this album</string>
     <string name="cover_cycled">Cover %1$d of %2$d</string>
+    <string name="share_link_copied">Link copied</string>
+    <string name="share_finding">Finding the Spotify link…</string>
+    <string name="share_no_link">No link found for this song</string>
+    <string name="share_no_spotify">Not found on Spotify: sharing YouTube Music</string>
+    <string name="share_links_title">Share</string>
+    <string name="share_not_found">Not found</string>
 </resources>
