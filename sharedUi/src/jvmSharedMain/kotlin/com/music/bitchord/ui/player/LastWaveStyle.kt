@@ -144,7 +144,8 @@ class WaveMotion internal constructor() {
             } else {
                 IDLE_LEVEL[i]
             }
-            val lifted = ((target - slow[i] * 0.75f) / (1f - slow[i] * 0.75f)).coerceIn(0f, 1f).let { it * it * (1.6f - 0.6f * it) }
+            // The band's level, its quiet part pressed down so the hits stand out.
+            val lifted = target.coerceIn(0f, 1f).let { it * it * (1.5f - 0.5f * it) }
             val rate = if (lifted > envelope[i]) ATTACK[i] else RELEASE[i]
             envelope[i] += (lifted - envelope[i]) * (1f - exp(-dt * rate))
         }
@@ -171,7 +172,7 @@ class WaveMotion internal constructor() {
         val RESPONSE = floatArrayOf(6f, 8f, 10f)
         const val SLOW_RESPONSE = 0.7f
         /** LastWave's periods, 2.4 s, 1.8 s and 1.3 s, as radians per second. */
-        val SPEED = floatArrayOf(1.9f, 3.4f, 6.2f)
+        val SPEED = floatArrayOf(2.618f, 1.9f, 4.833f)
         const val BEAT_DECAY_S = 0.22f
         const val HISTORY_HZ = 60f
         const val HISTORY = 180
@@ -353,7 +354,7 @@ internal fun DrawScope.drawLastWaveTrack(
     val primary = look.primary
     val baseline = listOf(primary.shiftTonal(0.20f, 0.90f), primary.shiftTonal(-0.05f, 1.15f))
     if (thumbX > 0f) {
-        val leftEase = minOf(14.dp.toPx(), thumbX * 0.3f)
+        val leftEase = minOf(16.dp.toPx(), thumbX * 0.3f)
         val rightEase = minOf(40.dp.toPx(), thumbX * 0.45f)
         val step = 1.5.dp.toPx()
         val calm = 1f - flatten
@@ -368,58 +369,67 @@ internal fun DrawScope.drawLastWaveTrack(
             while (x < thumbX) {
                 val envelope = smootherstep(if (leftEase > 0f) x / leftEase else 1f) *
                     smootherstep(if (rightEase > 0f) (thumbX - x) / rightEase else 1f)
+                // LastWave's rolling sine is the shape; the band only swells and settles it,
+                // a hit entering at the left and travelling to the thumb.
                 val energy = motion.past(i, x / thumbX * span)
                 val carrier = 0.5f + 0.5f * sin(x * k - motion.phase[i])
-                val lift = (0.06f + 0.94f * energy) * carrier * maxAmp * calm + 1.2.dp.toPx() * flatten * carrier
+                val lift = (0.38f + 0.62f * energy) * carrier * maxAmp * calm + 1.2.dp.toPx() * flatten * carrier
                 path.lineTo(x, topY - lift * envelope)
                 x += step
             }
             path.lineTo(thumbX, topY)
         }
         val activeWidth = thumbX.coerceAtLeast(1f)
-        val colors = arrayOf(primary, look.secondary, look.tertiary)
-        val cores = floatArrayOf(1.6f, 1.3f, 1.0f)
-        clipRect(left = -half - 6.dp.toPx(), right = thumbX + half + 6.dp.toPx()) {
-            // The played track's glow, then the waves back to front as light: a wide faint
-            // halo, a softer band and a bright core, added onto what is behind.
-            drawLine(primary.copy(alpha = 0.14f), Offset(0f, centerY), Offset(thumbX, centerY), trackPx + 4.dp.toPx(), StrokeCap.Round)
+        val tertiary = look.tertiary
+        val secondary = look.secondary
+        // LastWave's own layer colours: front the artwork's main colour, then its two others.
+        val layers = arrayOf(
+            listOf(baseline[0].copy(alpha = 0.95f), baseline[1].copy(alpha = 0.88f)),
+            listOf(secondary.shiftTonal(-0.08f, 1.15f).copy(alpha = 0.72f), secondary.shiftTonal(0.18f, 0.85f).copy(alpha = 0.62f)),
+            listOf(tertiary.shiftTonal(0.18f, 0.85f).copy(alpha = 0.50f), tertiary.shiftTonal(-0.06f, 1.15f).copy(alpha = 0.40f)),
+        )
+        val strokes = floatArrayOf(2.0f, 1.5f, 1.3f)
+        // Tall waves rise above the bar's box (behind the text above); nothing cuts them off.
+        val far = size.height * 4f
+        clipRect(left = -half - 6.dp.toPx(), top = -far, right = thumbX + half + 6.dp.toPx(), bottom = size.height + far) {
+            drawLine(primary.copy(alpha = 0.12f), Offset(0f, centerY), Offset(thumbX, centerY), trackPx + 4.dp.toPx(), StrokeCap.Round)
             for (i in 2 downTo 0) {
-                val c = colors[i]
                 val path = paths.waves[i]
-                drawPath(path, c.copy(alpha = 0.06f), style = Stroke(5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = BlendMode.Plus)
-                drawPath(path, c.copy(alpha = 0.17f), style = Stroke(2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = BlendMode.Plus)
+                drawPath(path, layers[i][1].copy(alpha = 0.10f), style = Stroke(4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 drawPath(
                     path,
-                    Brush.horizontalGradient(
-                        listOf(lerp(c, Color.White, 0.55f).copy(alpha = 0.95f), lerp(c, Color.White, 0.25f).copy(alpha = 0.85f)),
-                        0f, activeWidth,
-                    ),
-                    style = Stroke(cores[i].dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                    Brush.horizontalGradient(layers[i], 0f, activeWidth),
+                    style = Stroke(strokes[i].dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                 )
             }
         }
-        clipRect(left = -half, right = thumbX + half) {
+        clipRect(left = -half, top = -far, right = thumbX + half, bottom = size.height + far) {
             drawLine(Brush.horizontalGradient(baseline, 0f, activeWidth), Offset(0f, centerY), Offset(thumbX, centerY), trackPx, StrokeCap.Round)
         }
     }
 
     if (showThumb) {
-                // The thumb keeps to the one part of the song the tap follows (see BandTap).
+        // The thumb pulses with the drums and bass (see BandTap): a beat on each hit,
+        // breathing with the bass between them.
         val kick = motion.beat
+        val bass = motion.past(0, 0f)
         val thumbColor = primary.shiftTonal(0.06f, 1.05f)
-        val radius = 7.5.dp.toPx() * (1f + 0.24f * kick)
-        val center = Offset(thumbX, centerY)
-        drawCircle(thumbColor.copy(alpha = 0.30f + 0.25f * kick), radius + (3.5f + 3f * kick).dp.toPx(), center)
+        val radius = 7.5.dp.toPx() * (1f + 0.10f * bass + 0.30f * kick)
+        val halo = radius + (3.5f + 3.5f * kick).dp.toPx()
+        // Kept inside the bar's ends, so the edges never cut it in half.
+        val cx = thumbX.coerceIn(minOf(halo, width / 2f), maxOf(width - halo, width / 2f))
+        val center = Offset(cx, centerY)
+        drawCircle(thumbColor.copy(alpha = 0.30f + 0.30f * kick), halo, center)
         drawCircle(thumbColor, radius, center)
         drawCircle(Color.White.copy(alpha = 0.55f + 0.3f * kick), radius, center, style = Stroke(1.2.dp.toPx()))
     }
 }
 
 /** Front to back: drums and bass, voice, highs. */
-private val WAVE_AMP_DP = floatArrayOf(24f, 16f, 10f)
-private val WAVE_LENGTH_DP = floatArrayOf(190f, 115f, 62f)
+private val WAVE_AMP_DP = floatArrayOf(22f, 17f, 12f)
+private val WAVE_LENGTH_DP = floatArrayOf(160f, 125f, 95f)
 /** How long a sound takes to roll from the left to the thumb, seconds. */
-private val WAVE_SPAN_S = floatArrayOf(1.3f, 2.2f, 0.8f)
+private val WAVE_SPAN_S = floatArrayOf(1.2f, 2.0f, 0.9f)
 
 private fun smootherstep(t: Float): Float {
     val c = t.coerceIn(0f, 1f)

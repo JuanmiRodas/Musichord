@@ -106,6 +106,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import org.jetbrains.compose.resources.stringResource
@@ -252,7 +253,9 @@ internal fun PlayerScrubber(
     val reduceAnimation by PlayerSettings.reduceAnimation.collectAsStateWithLifecycle()
     // One clock for the bar and the "Mixing" label, so they breathe on the same beat.
     val mixPulse = rememberMixPulse({ mixBlend.value }, enabled = !reduceAnimation)
-    Column(Modifier.fillMaxWidth()) {
+    val lastWave = LocalLastWave.current != null
+    // BitChord Audio: LastWave's waves can rise above the bar — drawn behind what is above.
+    Column(Modifier.fillMaxWidth().then(if (lastWave) Modifier.zIndex(-1f) else Modifier)) {
         val ink = sliderInk()
         ThinSlider(
             value = shown,
@@ -277,12 +280,13 @@ internal fun PlayerScrubber(
         ) {
             // Dodged like the bottom row's glyphs — see [SCRUBBER_LABELS_DODGED].
             val chrome = LocalPlayerChrome.current
-            val dodged = chrome && SCRUBBER_LABELS_DODGED
-            val timeColor = if (dodged) brightRowInk() else chromeWhite(0.55f)
+            // LastWave: plain white, never blended with the thumb passing over it.
+            val dodged = chrome && SCRUBBER_LABELS_DODGED && !lastWave
+            val timeColor = if (lastWave) Color.White.copy(alpha = 0.6f) else if (dodged) brightRowInk() else chromeWhite(0.55f)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .then(if (dodged) Modifier.brightRowChrome(true) else Modifier.additiveChrome(chrome)),
+                    .then(if (lastWave) Modifier else if (dodged) Modifier.brightRowChrome(true) else Modifier.additiveChrome(chrome)),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(

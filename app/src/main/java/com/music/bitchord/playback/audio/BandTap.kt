@@ -131,7 +131,8 @@ internal class BandTap {
             fluxMean[k] += (flux - fluxMean[k]) * 0.02f
             fluxVar[k] += ((flux - fluxMean[k]) * (flux - fluxMean[k]) - fluxVar[k]) * 0.02f
             val threshold = fluxMean[k] + 1.6f * sqrt(fluxVar[k])
-            val since = at - lastOnset[k]
+            // (Never hit yet counts as long ago: at − MIN_VALUE overflowed, and no onset was ever taken.)
+            val since = if (lastOnset[k] == Long.MIN_VALUE) Long.MAX_VALUE else at - lastOnset[k]
             if (flux > threshold && flux > peak[k] * 0.04f && since > MIN_ONSET_GAP_US) {
                 if (lastOnset[k] != Long.MIN_VALUE && since < 2_000_000L) {
                     gaps[k][gapHead[k]] = since.toFloat()
@@ -139,7 +140,9 @@ internal class BandTap {
                     if (gapCount[k] < GAPS) gapCount[k]++
                 }
                 lastOnset[k] = at
-                if (k == lead) beat = true
+                // The thumb's pulse: the drums and bass first; another band only while
+                // the bass has had no hit for a few seconds (and then the steadiest one).
+                if (k == 0 || (k == lead && (lastOnset[0] == Long.MIN_VALUE || at - lastOnset[0] > 3_000_000L))) beat = true
             }
         }
         if (at - lastChoice > CHOOSE_EVERY_US) {
