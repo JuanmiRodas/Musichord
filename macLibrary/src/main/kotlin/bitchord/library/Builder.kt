@@ -186,7 +186,7 @@ object Builder {
                 // A Japanese name is in Japanese (not "L'Arc乣en乣Ciel", a Latin name misread).
                 val east = all.filter { CJK.containsMatchIn(it.key) && it.key.count { c -> c in 'A'..'Z' || c in 'a'..'z' } < 3 }.maxByOrNull { it.value }?.key
                 val roma = if (lat == null && east != null) Romaji.of(east) else null
-                when { lat != null && east != null -> "$lat ($east)"; lat != null -> lat; roma != null -> "$roma ($east)"; else -> east ?: Words.nfc(name).trim() }
+                when { lat != null && east != null && Words.plain(lat) !in LATIN_ONLY -> "$lat ($east)"; lat != null -> lat; roma != null -> "$roma ($east)"; else -> east ?: Words.nfc(name).trim() }
             }
         }
         fun group(name: String): String = pkey(name).let { if (it.isEmpty()) "" else find(it) }
@@ -313,6 +313,9 @@ object Builder {
             else -> "Inglés"
         }
     }
+
+    /** Names kept in Latin letters only, without their Japanese spelling after them. */
+    private val LATIN_ONLY = setOf("larcenciel")
 
     private val COMPILATION = Regex("(?iu)\\b(best|greatest|hits|singles?|collection|anthology|complete|the very)\\b|ベスト|コレクション|シングルズ")
 
@@ -918,7 +921,8 @@ object Builder {
         val albumYear = placedDrafts.groupBy { it.folder.lowercase() to albumKey(it.album) }.mapValues { (_, l) ->
             l.mapNotNull { it.p.chosen.id.year ?: it.p.best.id.year }.groupingBy { it }.eachCount().entries.maxWithOrNull(compareBy({ it.value }, { it.key }))?.key
                 // No copy says the year: the one MusicBrainz gives for that album (looked up before planning).
-                ?: l.firstOrNull()?.let { d -> AlbumYears.of(d.albumArtist.ifBlank { d.p.best.id.artist }, d.album) }
+                ?: l.firstOrNull()?.let { d -> AlbumYears.of(d.albumArtist.ifBlank { d.p.best.id.artist }, d.album)
+                    ?: Spotify.checked(d.albumArtist.ifBlank { d.p.best.id.artist }, d.album)?.optString("year")?.ifBlank { null } }
         }
         placedDrafts.groupBy { it.folder.lowercase() to albumKey(it.album) }.forEach { (k, l) ->
             if (k.second.isNotEmpty() && albumYear[k] == null && l.size >= 3) l.first().let { d -> yearless += (d.albumArtist.ifBlank { d.p.best.id.artist }) to d.album }
@@ -981,6 +985,23 @@ object Builder {
         appendLine("Sin álbum: ${plan.copy.count { it.album.isBlank() }} · sin artista: ${plan.copy.count { it.artist.isBlank() }} · sin identificar: ${rel.count { it.startsWith("Sin identificar/") }}")
         appendLine("Álbumes solo en japonés aún sin nombre latino: ${plan.japaneseAlbums.size}")
         appendLine("No se copian ${plan.skipped.size}: " + plan.skipped.groupingBy { it.second.substringBefore(":") }.eachCount().entries.sortedByDescending { it.value }.joinToString { "${it.value} ${it.key}" })
+        if (Spotify.ready) {
+            // Albums against Spotify (Japan's catalogue, then Spain's): not there, another year, more songs here than it has.
+            val albums = plan.copy.filter { it.album.isNotBlank() }.groupBy { (it.albumArtist.ifBlank { it.artist }) to it.album }.filter { it.value.size >= 3 }
+            val notFound = ArrayList<String>(); val otherYear = ArrayList<String>(); val more = ArrayList<String>()
+            albums.forEach { (k, l) ->
+                val c = Spotify.checked(k.first, k.second) ?: return@forEach
+                if (!c.optBoolean("found")) { notFound += "${k.first} — ${k.second}"; return@forEach }
+                val y = c.optString("year"); val mine = l.first().year
+                if (y.isNotBlank() && mine != null && y != mine) otherYear += "${k.first} — ${k.second}: aquí $mine, Spotify $y"
+                val n = c.optJSONArray("tracks")?.length() ?: 0
+                if (n in 1 until l.size) more += "${k.first} — ${k.second}: aquí ${l.size}, Spotify $n («${c.optString("name")}»)"
+            }
+            appendLine("— Spotify — ${albums.size} álbumes; no están: ${notFound.size} · otro año: ${otherYear.size} · más canciones aquí que en Spotify: ${more.size}")
+            otherYear.take(60).forEach { appendLine("  año: $it") }
+            more.take(60).forEach { appendLine("  canciones: $it") }
+            notFound.take(80).forEach { appendLine("  no está: $it") }
+        }
         appendLine("— Carpetas —")
         rel.groupBy { it.substringBefore('/') }.toSortedMap(String.CASE_INSENSITIVE_ORDER).forEach { (top, l) ->
             val subs = l.map { it.split('/') }.filter { it.size > 2 }.map { it.drop(1).dropLast(1).joinToString("/") }.groupingBy { it }.eachCount()
@@ -1012,7 +1033,11 @@ object Builder {
         }.getOrDefault(0)
         Live.total = 0; Live.done.set(0); Live.current = ""
         Live.phase = "planeando de nuevo con lo encontrado ($r nombres en romaji, $t series con openings/endings, $a álbumes)"; Live.write(force = true)
-        val found = if (Live.stop) 0 else r + t + a + c
+        // Every album folder checked on Spotify too (its year when none is known; the report lists what differs).
+        val sp = runCatching {
+            Spotify.check(plan.copy.filter { it.album.isNotBlank() }.groupBy { (it.albumArtist.ifBlank { it.artist }) to it.album }.filter { it.value.size >= 3 }.keys)
+        }.getOrDefault(0)
+        val found = if (Live.stop) 0 else r + t + a + c + sp
         if (found > 0) plan = plan(sources, tracks, targetRoot)
         return plan
     }

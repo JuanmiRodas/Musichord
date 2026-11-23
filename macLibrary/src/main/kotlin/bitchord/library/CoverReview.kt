@@ -191,6 +191,11 @@ object CoverReview {
                     if (found.isNotEmpty()) break
                 }
             }
+            // Spotify (Japan's catalogue, then Spain's): the same album with as many songs or more.
+            if (album.isNotBlank()) Spotify.checked(artist, album)?.takeIf { it.optBoolean("found") && it.optString("cover").isNotBlank() }?.let { c ->
+                val n = c.optJSONArray("tracks")?.length() ?: 0
+                found += Candidate("Spotify", c.getString("cover"), if (n >= items.size) 94 else 80, c.optString("name"), null)
+            }
             if (album.isNotBlank()) {
                 found += runCatching { deezer(album, artist, items.size) }.getOrDefault(emptyList())
                 if (found.none { it.confidence >= 90 }) found += runCatching { itunes("${artist.substringBefore(" (")} $album", "album", album, artist, items.size) }.getOrDefault(emptyList())

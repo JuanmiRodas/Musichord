@@ -131,3 +131,6 @@ Para archivos que desaparecen y aparecen sin que el Mac lo diga (otra herramient
 - **Hack**: la saga .hack (anime y juegos) es una colección («Hack»), con sus bandas sonoras.
 - **Remixes**: los álbumes de remixes, trance, orquesta u orgel de un artista van en
   `<Artista>/Remixes/…`, como `Directos`.
+- **1.0.32**: «L'Arc~en~Ciel» sin el nombre japonés detrás. Comprobación con Spotify (catálogo de
+  Japón y luego de España) si se ponen Client ID/secret en Ajustes: año que falte, portada
+  propuesta y, en el informe, los álbumes que Spotify no tiene, con otro año o con menos canciones.

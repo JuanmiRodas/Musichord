@@ -704,6 +704,20 @@ private fun SettingsPane(state: LibraryState) {
             Checkbox(native, { native = it; Builder.Formats.native = it })
             Text("Guardar AAC (.m4a) y Opus (.webm) tal cual, sin recomprimir. Si no, solo se copian MP3 y sin pérdida (→ MP3 320).", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
         }
+        // Spotify: a second check of the albums (Client ID and secret of a free app at developer.spotify.com).
+        var spId by remember { mutableStateOf(Spotify.saved()?.first.orEmpty()) }
+        var spSecret by remember { mutableStateOf(Spotify.saved()?.second.orEmpty()) }
+        var spState by remember { mutableStateOf(if (Spotify.ready) "guardado" else "") }
+        Text("Spotify (para comprobar álbumes): crea una app gratis en developer.spotify.com → Dashboard → Create app (Redirect URI: https://localhost, Web API) y copia aquí su Client ID y Client secret.", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(spId, { spId = it }, label = { Text("Spotify Client ID") }, singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(spSecret, { spSecret = it }, label = { Text("Spotify Client secret") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = {
+                Spotify.save(spId, spSecret); spState = "comprobando…"
+                Thread { spState = if (Spotify.test()) "funciona ✓" else "Spotify no lo aceptó" }.start()
+            }) { Text("Guardar y comprobar") }
+            Text(spState, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+        }
         var comps by remember { mutableStateOf(Builder.Layout.compilationsFirst) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(comps, { comps = it; Builder.Layout.compilationsFirst = it })
