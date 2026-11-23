@@ -72,6 +72,7 @@ data class Source(
                 Source("Música(1)", "$home/Music/Música(1)"),
                 Source("Discografías", "$home/Downloads/Discografías"),
                 Source("BitChord (descargas del móvil)", "$home/pCloud Drive/Music/BitChord"),
+                Source("Sobrantes de la Biblioteca", "$home/pCloud Drive/Sobrantes de la Biblioteca"),
                 Source(
                     name = "Yuki Kajiura (carpeta compartida)",
                     path = "$home/pCloud Drive/OnlineOnly/Yuki Kajiura",
@@ -118,7 +119,7 @@ object Sources {
         }.getOrElse { Source.defaults().also(::save) }
         var fixed = list.map { s -> if (!File(Paths.resolve(s.path)).exists() && moved(s.path) != s.path) s.copy(path = moved(s.path)) else s }
         // Sources added after the list was saved: the phone's downloads (YouTube Music) since 1.0.28.
-        Source.defaults().filter { d -> d.name.startsWith("BitChord") && fixed.none { Words.nfc(it.path) == Words.nfc(d.path) } }.forEach { fixed = fixed + it }
+        Source.defaults().filter { d -> (d.name.startsWith("BitChord") || d.name.startsWith("Sobrantes")) && fixed.none { Words.nfc(it.path) == Words.nfc(d.path) } }.forEach { fixed = fixed + it }
         if (fixed != list) runCatching { save(fixed) }
         return fixed.map { it.copy(path = Paths.resolve(it.path)) }
     }

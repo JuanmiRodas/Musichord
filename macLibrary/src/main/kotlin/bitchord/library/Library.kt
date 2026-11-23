@@ -41,7 +41,7 @@ object Store {
         )
     }.getOrDefault(Settings()).let { s ->
         // A source added to the app later (the phone's downloads) is read too, unless the user had it already.
-        val extra = s.extra.map { Paths.resolve(Sources.moved(it)) }.let { e -> e + Sources.load().map { it.path }.filter { p -> e.none { Words.nfc(it) == Words.nfc(p) } && p.contains("/Music/BitChord") } }
+        val extra = s.extra.map { Paths.resolve(Sources.moved(it)) }.let { e -> e + Sources.load().map { it.path }.filter { p -> e.none { Words.nfc(it) == Words.nfc(p) } && (p.contains("/Music/BitChord") || p.contains("/Sobrantes de la Biblioteca")) } }
         s.copy(root = Paths.resolve(s.root), extra = extra, phoneTodo = Paths.resolve(s.phoneTodo))
     }
 

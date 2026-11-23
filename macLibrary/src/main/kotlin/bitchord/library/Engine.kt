@@ -183,7 +183,7 @@ object Live {
  * are left where they are and listed. Sources are only read.
  */
 object Engine {
-    /** Beside the library: second copies of songs it holds, found in it but not made by the app. */
+    /** Beside the library (and one more source): files found in it that the app didn't make. */
     const val SPARE_FOLDER = "Sobrantes de la Biblioteca"
 
     fun build(sources: List<Source>, tracks: List<Track>, root: String, workers: Int = 3): String {
@@ -242,7 +242,6 @@ object Engine {
         val byLength = plan.copy.filter { it.target !in held }.groupBy { ((it.track.seconds ?: 0.0) * 2).toInt() }
         val unknown = ArrayList<String>()
         val spare = ArrayList<LibFile>()
-        val byLengthAll = plan.copy.groupBy { ((it.track.seconds ?: 0.0) * 2).toInt() }
         for (f in leftovers) {
             val t = lib.local(f)?.let { Scanner.get(it.path) }
             val s = t?.seconds
@@ -251,16 +250,15 @@ object Engine {
                 .filter { it.target !in held && kotlin.math.abs((it.track.seconds ?: 0.0) - s) < 1.0 && Words.plain(it.title).let { w -> w.length >= 2 && name.contains(w) } }
                 .distinctBy { it.target }.singleOrNull()
             if (match != null) { held[match.target] = f; manifest.adopt(f.rel, Words.nfc(match.track.path)); continue }
-            // A second copy of a song the library already holds (an old "(1)" folder, a copy made before): set aside,
-            // beside the library, not deleted.
-            val dup = if (s == null) null else (-1..1).flatMap { byLengthAll[(s * 2).toInt() + it].orEmpty() }
-                .firstOrNull { it.target in held && kotlin.math.abs((it.track.seconds ?: 0.0) - s) < 1.5 && Words.plain(it.title).let { w -> w.length >= 2 && name.contains(w) } }
-            if (dup != null) spare += f else unknown += f.rel
+            spare += f
         }
-        for (f in spare) {
+        // Files in the library the app didn't make and can't place ("Pokémon(1)/…", a soundtrack under the wrong name):
+        // out to a folder beside it that is one more source, so the next build puts each where it belongs (a second
+        // copy of a song already here is simply left there, to delete when you like).
+        if (spare.size <= 2000) for (f in spare) {
             val e = lib.moveOut(f, SPARE_FOLDER + "/" + f.rel)
-            if (e == null) ops.log("app", "set aside ${f.rel} (a second copy) → $SPARE_FOLDER") else unknown += f.rel
-        }
+            if (e == null) ops.log("app", "set aside ${f.rel} → $SPARE_FOLDER (placed by the next build)") else unknown += f.rel
+        } else spare.forEach { unknown += it.rel }
         Live.unmatched = unknown
         if (unknown.isNotEmpty()) ops.log("app", "library: ${unknown.size} files not made by the app and matching no song (left where they are): ${unknown.take(5)}")
         if (unwanted.size > 50 && plan.copy.size < present.size) { ops.log("app", "build: plan smaller than the library (sources not read?) — nothing removed"); unwanted.clear() }
@@ -383,6 +381,21 @@ object Engine {
         pool.shutdown()
         while (!pool.awaitTermination(2, TimeUnit.SECONDS)) Live.write()
         manifest.save(publish); covers.save(); Scanner.saveIndex()
+        // What would be better at 320 (AAC under 290 kbps, MP3 under 320, false 320s, Opus): a list for the phone,
+        // which can download those songs at 320 into Music/BitChord — the next build swaps them in by itself.
+        runCatching {
+            val want = plan.copy.filter { i -> val t = i.track
+                !t.lossless && (t.codec == "aac" && t.bitrate < 290 || t.codec == "opus" || t.codec == "mp3" && (t.kbps < 315 || t.fake320 == true)) }
+            val arr = org.json.JSONArray(want.map { i ->
+                org.json.JSONObject().put("file", rel(i.target)).put("title", i.title).put("artist", i.artist).put("album", i.album).put("year", i.year ?: org.json.JSONObject.NULL)
+                    .put("seconds", i.track.seconds ?: org.json.JSONObject.NULL).put("have", (i.track.codec ?: "?") + " " + i.track.bitrate + (if (i.track.fake320 == true) " (falso 320)" else ""))
+                    .put("id", manifest.id(rel(i.target)) ?: org.json.JSONObject.NULL)
+            })
+            val t = File(temp, "wanted-" + java.util.UUID.randomUUID() + ".json")
+            t.writeText(org.json.JSONObject().put("updated", System.currentTimeMillis()).put("songs", arr).toString())
+            lib.put(t, ".bitchord-library/wanted-320.json"); t.delete()
+            ops.log("app", "wanted-320.json: ${want.size} songs better at 320")
+        }
         // 4. Empty folders go.
         if (!Live.stop) { Live.phase = "quitando carpetas vacías"; Live.write(force = true); runCatching { lib.tidy() } }
         val summary = (if (Live.stop) "Parado" else "Terminado") +

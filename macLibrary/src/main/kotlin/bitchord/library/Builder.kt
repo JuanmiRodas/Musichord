@@ -96,6 +96,10 @@ object Builder {
         "My-HiME" to listOf("my hime", "mai hime", "舞 hime", "舞hime", "my otome", "mai otome", "舞 乙hime"),
         "Madoka Magica" to listOf("madoka magica", "mahou shoujo madoka magica", "mahou shoujo madoka magika", "puella magi madoka magica", "魔法少女まどか マギカ", "魔法少女まどかマギカ"),
         "Sword Art Online" to listOf("sword art online", "ソードアート オンライン", "ソードアートオンライン"),
+        // The .hack saga (anime and games): its soundtracks by every composer together.
+        "Hack" to listOf("hack sign", "hack gu", "hack g u", "hack roots", "hack dusk", "hack liminality", "hack quantum", "hack the world", "hack infection",
+            "hack mutation", "hack outbreak", "hack quarantine", "hack zero", "hack link", "hack cell", "hack extra", "hack expansion", "hack legend of the twilight",
+            "hack conglomerate", "hack gu trilogy", "tasogare no udewa densetsu", "黄昏の腕輪伝説"),
     )
     /** Names too common to look for inside other names ("Toki no Tsubasa" is ZARD's, not Tsubasa Chronicle). */
     private val EXACT_ONLY = setOf("tsubasa", "ツバサ", "doremi")
@@ -190,6 +194,7 @@ object Builder {
 
     private val GRAB_BAG = Regex("(?iu)^(vari[oa]s|various( artists)?|va|musique|m[uú]sica.*|music|otros.*|other.*|misc.*|comercial|rock|pop|nueva.*|mix.*|random|singles?|descargad.*|anime|animes|anime y japonadas|openings?|endings?|openings, endings.*|colaboraciones|mp3|videojuegos?|games?|juegos?|series|películas|peliculas|movies|bso|ost|espa[ñn]ol|spanish|english|ingl[eé]s|j-?pop|k-?pop|classical|cl[aá]sica|pop( .*)?|rock( .*)?|jazz|dance|electr[oó]nica?|latino?|indie|metal|chill.*|lounge|[0-9]{2}s|años [0-9]{2}|other artists|otros artistas|varios artistas|.*fandubs?.*|.*\\ben espa[ñn]a\\b.*|.*latinas?|.*\\bmix \\d+)$")
 
+    private val REMIX = Regex("(?iu)\\b(remix(es)?|rmx|re-?mix(ed)?|mix|mega ?mix|non-stop|trance|eurobeat|orchestra|orchestral|orgel|music ?box|classical|classics|meets classics)\\b|ayu-?mi-?x|ayu-ro|リミックス|オルゴール")
     private val LIVE = Regex("(?i)\\blive\\b|concert|\\btour\\b|countdown|unplugged|コンサート|ライブ|ライヴ|\\ben directo\\b|en vivo|武道館|budokan|\\bdome\\b|arena")
     private val OST = Regex("(?i)soundtrack|sountrack|\\bost\\b|o\\.s\\.t|\\bbgm\\b|original score|music collection|音楽集|サウンドトラック|サントラ|交響詩|orgel|オルゴール|piano fantasia|brass|ブラス|music fantasy|image ?album|イメージアルバム|sound ?track|sound & song|合唱組曲")
     private val DRAMA = Regex("(?i)drama|ドラマ|radio|ラジオ|chapter\\.?\\s*\\d")
@@ -871,6 +876,8 @@ object Builder {
                 p.homeKind == 2 && DRAMA.containsMatchIn(id.album) -> "Doramas"
                 p.homeKind == 2 && OST.containsMatchIn(id.album) -> "Bandas sonoras"
                 p.homeKind != 2 && LIVE.containsMatchIn(id.album) && !folder.endsWith("Directos") -> "Directos"
+                // Remix, trance, orchestra and music-box albums apart from the studio ones (Ayumi Hamasaki's ayu-mi-x…).
+                p.homeKind != 2 && REMIX.containsMatchIn(id.album) && !folder.endsWith("Remixes") -> "Remixes"
                 else -> null
             }
             if (sub != null) folder = "$folder/$sub"

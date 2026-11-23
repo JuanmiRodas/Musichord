@@ -116,3 +116,18 @@ Para archivos que desaparecen y aparecen sin que el Mac lo diga (otra herramient
 - **«Otros artistas»** se divide por tipo: `Otros artistas/<JPOP|Español|Inglés|Francés|80s en España|Clásica y bandas sonoras>/<Artista>/…`.
 - **Nueva fuente**: `pCloud Drive/Music/BitChord` (las descargas del móvil). Sus archivos son
   `source`/`copies` en `built.json` como los demás.
+
+### 1.0.31 (Mac) · `wanted-320.json`, sobrantes, .hack, remixes
+
+- **`Biblioteca/.bitchord-library/wanted-320.json`** (nuevo, al final de cada construcción):
+  `{ "updated": …, "songs": [{ "file": "Amaral/…/01 - ….m4a", "id": "…", "title": "…", "artist": "…",
+  "album": "…", "year": "2019", "seconds": 241.3, "have": "aac 256" }, …] }` — canciones que
+  estarían mejor a 320 (AAC < 290 kbps, MP3 < 320, falsos 320, Opus). **El móvil** debería
+  descargarlas en 320 con su búsqueda estricta de siempre a `pCloud Drive/Music/BitChord`
+  (como cualquier descarga); la siguiente construcción del Mac las cambia sola (mismo `id`).
+- **Sobrantes**: lo que hay en la biblioteca y no hizo la app se mueve a
+  `pCloud Drive/Sobrantes de la Biblioteca`, que es una fuente más: la siguiente construcción
+  coloca cada canción donde toca; las que ya estaban se quedan allí para borrarlas.
+- **Hack**: la saga .hack (anime y juegos) es una colección («Hack»), con sus bandas sonoras.
+- **Remixes**: los álbumes de remixes, trance, orquesta u orgel de un artista van en
+  `<Artista>/Remixes/…`, como `Directos`.
