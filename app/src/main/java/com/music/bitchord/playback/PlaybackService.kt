@@ -1160,6 +1160,12 @@ class PlaybackService : MediaLibraryService() {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             invalidateQueueUndo()
+            // BitChord Audio: smart shuffle's turn (leave-outs, suggestions, learning).
+            player?.let { p ->
+                if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED || mediaItem?.mediaId != swappingMediaId) {
+                    runCatching { SmartShuffle.onTransition(p, mediaItem) }
+                }
+            }
             // The player this fired on, which is by definition the one the
             // session is currently pointed at.
             val exoPlayer = player ?: return
@@ -3587,6 +3593,15 @@ class PlaybackService : MediaLibraryService() {
 
     private fun toggleShuffleFromSession() {
         crossfade?.cancelAutoMixVisual()
+        // BitChord Audio: shuffle → smart shuffle → in order, as on Spotify.
+        val shuffledNow = boundedEditState.desiredShuffle ?: boundedContextWindow?.isShuffleEnabled ?: QueueShuffle.enabled.value
+        if (shuffledNow && !SmartShuffle.enabled.value && !ListenTogether.state.value.inParty) {
+            SmartShuffle.suggestionLabel = getString(R.string.smart_shuffle_label)
+            SmartShuffle.setEnabled(player, true)
+            refreshCustomLayouts()
+            return
+        }
+        if (SmartShuffle.enabled.value) SmartShuffle.setEnabled(player, false)
         val window = boundedContextWindow
         if (window != null && !ListenTogether.state.value.inParty) {
             val target = !(boundedEditState.desiredShuffle ?: window.isShuffleEnabled)

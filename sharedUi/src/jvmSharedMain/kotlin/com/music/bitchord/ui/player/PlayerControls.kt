@@ -866,12 +866,21 @@ internal fun PlayerActionRow(
                     highlighted = badge.inParty,
                 )
             }
+            // BitChord Audio: a second press makes it smart (marked ✦); a third, in order.
+            val smart by PlayerPlatform.host.smartShuffle.collectAsState()
             GlassRoundButton(
                 icon = BitChordIcons.Shuffle,
-                contentDescription = stringResource(if (shuffleEnabled) Res.string.shuffle_on else Res.string.shuffle_off),
+                label = if (shuffleEnabled && smart) "✦" else null,
+                contentDescription = stringResource(
+                    when {
+                        shuffleEnabled && smart -> Res.string.smart_shuffle_on
+                        shuffleEnabled -> Res.string.shuffle_on
+                        else -> Res.string.shuffle_off
+                    },
+                ),
                 onClick = onToggleShuffle,
                 highlighted = shuffleEnabled,
-                haptic = if (shuffleEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
+                haptic = if (shuffleEnabled && smart) Haptic.ToggleOff else Haptic.ToggleOn,
             )
             AnimatedVisibility(visible = queueOpen, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {

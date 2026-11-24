@@ -2158,4 +2158,5 @@
     <string name="vk_account">Cuenta de VK (vídeos)</string>
     <string name="vk_signed_in">Sesión de VK iniciada: sus vídeos se buscan cuando YouTube no tiene. Toca para cerrar sesión</string>
     <string name="vk_signed_out">Inicia sesión en la página de VK para usar sus vídeos</string>
+    <string name="smart_shuffle_label">Aleatorio inteligente</string>
 </resources>

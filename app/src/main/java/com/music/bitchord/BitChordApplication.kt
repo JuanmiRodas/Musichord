@@ -238,6 +238,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         Downloads.init(this)
         com.music.bitchord.download.KeptPlaylists.init(this)
         com.music.bitchord.data.OwnLibrary.init(this)
+        com.music.bitchord.playback.SmartShuffle.init(this)
         com.music.bitchord.data.SongFamily.init(this)
         // BitChord Audio: the songs' DNA (credits, story, connections), kept on the phone.
         com.music.bitchord.data.dna.SongDna.init(this)

@@ -327,4 +327,5 @@
     <string name="power_f_video_ahead">Next video made ready ahead</string>
     <string name="power_f_oled_black">OLED black player</string>
     <string name="power_done">Done</string>
+    <string name="smart_shuffle_on">Smart shuffle on</string>
 </resources>

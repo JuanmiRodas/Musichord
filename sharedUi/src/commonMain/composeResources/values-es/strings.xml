@@ -245,4 +245,5 @@
     <string name="power_f_video_ahead">Preparar el vídeo siguiente</string>
     <string name="power_f_oled_black">Reproductor en negro OLED</string>
     <string name="power_done">Listo</string>
+    <string name="smart_shuffle_on">Aleatorio inteligente activado</string>
 </resources>

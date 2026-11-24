@@ -167,6 +167,9 @@ interface PlayerHost {
     val videoShadeLevel: StateFlow<Int> get() = NoShade
     fun cycleVideoShade() {}
 
+    /** BitChord Audio: shuffle's second press — smart shuffle (suggestions, leave-outs). */
+    val smartShuffle: StateFlow<Boolean> get() = NoVideoMode
+
     /** BitChord Audio: the video matched to the song again, from scratch. */
     fun resyncVideo() {}
 

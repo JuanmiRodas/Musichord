@@ -2139,4 +2139,5 @@
     <string name="vk_account">VK account (videos)</string>
     <string name="vk_signed_in">Signed in to VK: its videos are searched when YouTube has none. Tap to sign out</string>
     <string name="vk_signed_out">Sign in on the VK page to use VK videos</string>
+    <string name="smart_shuffle_label">Smart shuffle</string>
 </resources>
