@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asComposeRenderEffect
@@ -157,8 +158,12 @@ private const val ORBIT_RADIUS_MID = 0.25f
 private const val ORBIT_RADIUS_SMALL = 0.10f
 private const val ORBIT_RATE_MID = 0.045f
 private const val ORBIT_RATE_SMALL = 0.09f
-// BitChord Audio: half LastWave's flow, drawn twice as often — slower and smoother.
-private const val FLOW_SPEED = 1.25f
+// BitChord Audio: a quarter of LastWave's flow, drawn twice as often — calm and smooth.
+private const val FLOW_SPEED = 0.625f
+
+// BitChord Audio: drawn this much past every edge and cropped, so the blur never reads
+// the clamped border (the corners at the bottom flickered as the copies swept past).
+private const val OVERSCAN = 0.18f
 
 private const val SATURATION = 1.9f
 private const val BRIGHTNESS = 0.52f
@@ -292,7 +297,7 @@ actual fun LastWaveFluid(artworkUrl: String?, seedKey: String, playing: Boolean,
             last = now
         }
     }
-    Box(modifier) {
+    Box(modifier.clipToBounds()) {
         if (appear.value < 1f || current == null) fallback()
         if (current != null) {
             Box(
@@ -302,13 +307,17 @@ actual fun LastWaveFluid(artworkUrl: String?, seedKey: String, playing: Boolean,
                     .layout { measurable, constraints ->
                         val w = constraints.maxWidth
                         val h = constraints.maxHeight
-                        val sw = (w / FLUID_RENDER_SCALE).coerceAtLeast(1)
-                        val sh = (h / FLUID_RENDER_SCALE).coerceAtLeast(1)
+                        val padX = (w * OVERSCAN).toInt()
+                        val padY = (h * OVERSCAN).toInt()
+                        val ow = w + padX * 2
+                        val oh = h + padY * 2
+                        val sw = (ow / FLUID_RENDER_SCALE).coerceAtLeast(1)
+                        val sh = (oh / FLUID_RENDER_SCALE).coerceAtLeast(1)
                         val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(sw, sh))
                         layout(w, h) {
-                            placeable.placeWithLayer(0, 0) {
-                                scaleX = w.toFloat() / sw
-                                scaleY = h.toFloat() / sh
+                            placeable.placeWithLayer(-padX, -padY) {
+                                scaleX = ow.toFloat() / sw
+                                scaleY = oh.toFloat() / sh
                                 transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
                                 val sigma = fluidBlurSigma(w.toFloat(), h.toFloat()) / FLUID_RENDER_SCALE
                                 if (sigma != cachedSigma || cachedRenderEffect == null) {

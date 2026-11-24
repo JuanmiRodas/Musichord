@@ -155,7 +155,7 @@ class WaveMotion internal constructor() {
             head = (head + 1) % HISTORY
             for (i in 0..2) history[i][head] = envelope[i]
         }
-        drift += dt * (0.7f + 0.5f * energy / 3f)
+        drift += dt * (0.35f + 0.25f * energy / 3f)
         val beatAt = AudioBands.beatAt
         if (fresh && beatAt != beatSeen) {
             beatSeen = beatAt
