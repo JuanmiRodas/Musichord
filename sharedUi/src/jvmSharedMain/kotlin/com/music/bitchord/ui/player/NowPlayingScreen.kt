@@ -2515,8 +2515,14 @@ fun NowPlayingScreen(
     // LastWave's glass refracts the player's backdrop, recorded as it is drawn.
     // BitChord Audio: battery saving — the liquid glass off (the plain glass stays).
     val glassAllowed = PowerSaving.on.collectAsState().value[PowerSaving.Feature.LIQUID_GLASS.id] != false
-    val lastWaveBackdrop = if (lastWaveLook != null && glassAllowed) rememberLastWaveBackdrop() else null
-    CompositionLocalProvider(LocalLastWave provides lastWaveLook, LocalLastWaveBackdrop provides lastWaveBackdrop) {
+    // BitChord Audio: the glass fades to the plain smoke (and back) instead of switching.
+    val glassAmount by animateFloatAsState(
+        targetValue = if (glassAllowed) 1f else 0f,
+        animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+        label = "glassAmount",
+    )
+    val lastWaveBackdrop = if (lastWaveLook != null && (glassAllowed || glassAmount > 0f)) rememberLastWaveBackdrop() else null
+    CompositionLocalProvider(LocalLastWave provides lastWaveLook, LocalLastWaveBackdrop provides lastWaveBackdrop, LocalGlassAmount provides glassAmount) {
     FrostedPlayerFrame(
         modifier = modifier,
         // Off where a music video is the backdrop: it can go bright under the
@@ -3119,9 +3125,13 @@ fun NowPlayingScreen(
                         )
                         // BitChord Audio: battery saving — a still background, or OLED black.
                         val power by PowerSaving.on.collectAsState()
-                        if (power[PowerSaving.Feature.OLED_BLACK.id] == true) {
-                            Box(Modifier.fillMaxSize().background(Color.Black))
-                        } else LastWaveBackdrop(
+                        // OLED black fades in over the colours, and out again.
+                        val oled by animateFloatAsState(
+                            targetValue = if (power[PowerSaving.Feature.OLED_BLACK.id] == true) 1f else 0f,
+                            animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+                            label = "oledBlack",
+                        )
+                        if (oled < 1f) LastWaveBackdrop(
                             look = look,
                             artworkUrl = remoteArt ?: song.thumbnailUrl,
                             seedKey = song.videoId,
@@ -3129,6 +3139,7 @@ fun NowPlayingScreen(
                             alpha = { backdropAlpha },
                             modifier = Modifier.fillMaxSize(),
                         )
+                        if (oled > 0f) Box(Modifier.fillMaxSize().graphicsLayer { alpha = oled }.background(Color.Black))
                     }
                 }
                 // BitChord Audio: video mode dims the player around the picture —
@@ -4912,6 +4923,8 @@ fun NowPlayingScreen(
                                     // little taller than the row; they overflow evenly around the
                                     // cover's centre instead of being cut off at the bottom.
                                     .wrapContentHeight(unbounded = true)
+                                    // BitChord Audio: a hair up — capitals sit lower in their line than descenders do.
+                                    .offset(y = if (compactHeader) 0.dp else (-1).dp)
                                     // Scaling the already measured type is a draw-only
                                     // operation. Animating fontSize forced both marquee
                                     // texts through shaping and measurement every frame.
@@ -4955,6 +4968,7 @@ fun NowPlayingScreen(
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontSize = 20.sp,
                                                 lineHeight = if (compactHeader || song.albumName.isNullOrBlank()) 24.sp else 22.sp,
+                                                lineHeightStyle = SongInfoTrim,
                                             ),
                                             color = Color.White,
                                             enabled = scrolling,
@@ -4979,6 +4993,7 @@ fun NowPlayingScreen(
                                                 fontWeight = FontWeight.W500,
                                                 fontSize = if (compactHeader) 20.sp else 16.sp,
                                                 lineHeight = if (compactHeader) 24.sp else 18.sp,
+                                                lineHeightStyle = SongInfoTrim,
                                             ),
                                             color = artistColor,
                                             enabled = scrolling,
@@ -4993,7 +5008,7 @@ fun NowPlayingScreen(
                                         if (!compactHeader && album != null) {
                                             MarqueeText(
                                                 text = remember(album, song.artist) { com.music.bitchord.data.names.DisplayNames.album(album, song.artist) },
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 15.sp),
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 15.sp, lineHeightStyle = SongInfoTrim),
                                                 color = chromeWhite(0.4f),
                                                 enabled = scrolling,
                                                 modifier = Modifier.opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
@@ -5791,3 +5806,14 @@ private fun LyricSizeChip(label: String, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
+
+
+/**
+ * BitChord Audio: the song's title, artist and album trimmed to their lines' own height and
+ * centred in them, so the block sits in the middle of the cover beside it (the font's room
+ * for accents above the first line used to push it down).
+ */
+private val SongInfoTrim = androidx.compose.ui.text.style.LineHeightStyle(
+    androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+    androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+)

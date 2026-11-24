@@ -1200,12 +1200,21 @@ internal fun CircleGlyph(
             label = "playerMenuGlyph",
         ) { glyph ->
             if (glyph is String) {
+                // BitChord Audio: in the lyrics' own type, extra bold, trimmed to its ink so it sits centred.
                 Text(
                     glyph,
                     color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = (17 * (size / 34.dp)).sp,
-                    modifier = Modifier.semantics { this.contentDescription = contentDescription },
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = ((if (glyph.all { it.code < 128 }) 21 else 17) * (size / 34.dp)).sp,
+                        lineHeight = ((if (glyph.all { it.code < 128 }) 21 else 17) * (size / 34.dp)).sp,
+                        lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                            androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                            androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+                        ),
+                    ),
+                    modifier = Modifier.semantics { this.contentDescription = contentDescription }
+                        .offset(y = if (glyph.all { it.code < 128 }) (-1).dp else 0.dp),
                 )
             } else {
                 Icon(
@@ -2911,18 +2920,37 @@ private fun LastWaveTransport(
  * pictures off; also the waves and liquid glass; also OLED black; back to all), a long
  * press opens each switch on its own.
  */
+/** A horizontal battery with round ends, [fill] of it charged (0–1), as one vector the button tints. */
+private fun batteryGlyph(fill: Float): ImageVector {
+    fun rr(x: Float, y: Float, w: Float, h: Float, r: Float) =
+        "M${x + r},$y H${x + w - r} A$r,$r 0 0 1 ${x + w},${y + r} V${y + h - r} A$r,$r 0 0 1 ${x + w - r},${y + h} " +
+            "H${x + r} A$r,$r 0 0 1 $x,${y + h - r} V${y + r} A$r,$r 0 0 1 ${x + r},$y Z "
+    val inner = 11.6f * fill.coerceIn(0f, 1f)
+    val path = rr(1.5f, 6.5f, 19f, 11f, 4f) + rr(3.2f, 8.2f, 15.6f, 7.6f, 2.6f) +
+        (if (inner > 0.4f) rr(5f, 10f, inner, 4f, minOf(2f, inner / 2f)) else "") +
+        rr(21.4f, 10f, 1.6f, 4f, 0.8f)
+    return ImageVector.Builder("battery", 24.dp, 24.dp, 24f, 24f)
+        .addPath(
+            pathData = androidx.compose.ui.graphics.vector.addPathNodes(path),
+            pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd,
+            fill = androidx.compose.ui.graphics.SolidColor(Color.Black),
+        )
+        .build()
+}
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun BatteryButton() {
     val level by PowerSaving.level.collectAsState()
     val on by PowerSaving.on.collectAsState()
     var menu by remember { mutableStateOf(false) }
-    val icon = when (level) {
-        0 -> Icons.Rounded.BatteryFull
-        1 -> Icons.Rounded.Battery5Bar
-        2 -> Icons.Rounded.Battery3Bar
-        else -> Icons.Rounded.BatterySaver
-    }
+    // BitChord Audio: a rounded battery lying down, its charge easing to the level's.
+    val fill by animateFloatAsState(
+        targetValue = when (level) { 0 -> 1f; 1 -> 0.66f; 2 -> 0.4f; else -> 0.16f },
+        animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing),
+        label = "batteryFill",
+    )
+    val icon = remember((fill * 40).toInt()) { batteryGlyph((fill * 40).toInt() / 40f) }
     val label = stringResource(
         when (level) {
             0 -> Res.string.power_level_0

@@ -108,13 +108,23 @@ fun ThinSlider(
     wave: Boolean = false,
 ) {
     var dragging by remember { mutableStateOf(false) }
-    val look = if (wave) LocalLastWave.current else null
+    // BitChord Audio: waves turned off (battery saving) settle flat rather than vanish, and
+    // rise again when turned back on; a bar that never had them stays a plain bar.
+    var hadWaves by remember { mutableStateOf(false) }
+    if (wave && !hadWaves) hadWaves = true
+    val look = if (wave || hadWaves) LocalLastWave.current else null
     val wavePaths = remember { WavePaths() }
-    val waveFlatten by animateFloatAsState(
+    val wavesOff by animateFloatAsState(
+        targetValue = if (wave) 0f else 1f,
+        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+        label = "wavesOff",
+    )
+    val dragFlatten by animateFloatAsState(
         targetValue = if (dragging) 1f else 0f,
         animationSpec = tween(durationMillis = 180),
         label = "waveFlatten",
     )
+    val waveFlatten = maxOf(dragFlatten, wavesOff)
     val height by animateDpAsState(
         targetValue = if (dragging) activeHeight else idleHeight,
         animationSpec = spring(

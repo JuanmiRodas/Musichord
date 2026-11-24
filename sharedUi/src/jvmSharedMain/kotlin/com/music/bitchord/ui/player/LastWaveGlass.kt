@@ -43,6 +43,9 @@ expect fun lastWaveSwatches(bitmap: ImageBitmap): List<Color?>
 
 val LocalLastWaveBackdrop = staticCompositionLocalOf<Any?> { null }
 
+/** BitChord Audio: how much of the glass shows (1) against the plain smoke (0), while it fades. */
+val LocalGlassAmount = androidx.compose.runtime.compositionLocalOf { 1f }
+
 /** LastWave's liquidGlassContainerColor: a translucent colour stays, an opaque one gives way to the glass. */
 @Composable
 internal fun lastWaveContainerColor(color: Color, backdrop: Any? = LocalLastWaveBackdrop.current): Color =
@@ -79,8 +82,10 @@ internal fun LastWaveGlassSurface(
         interactionSource = interactionSource,
         enabled = enabled,
     ) {
+        val glass = LocalGlassAmount.current
         Box(
-            modifier = Modifier.fillMaxSize().lastWaveLiquidGlass(backdrop, shape, interactive),
+            modifier = Modifier.fillMaxSize().lastWaveLiquidGlass(backdrop, shape, interactive)
+                .then(if (glass < 1f && lastWaveGlassActive(backdrop)) Modifier.background(color.copy(alpha = color.alpha * (1f - glass))) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             content()
@@ -101,8 +106,10 @@ internal fun Modifier.lastWaveButton(shape: Shape, active: Boolean = false): Mod
     val backdrop = LocalLastWaveBackdrop.current
     val veil = if (active) Color.White.copy(alpha = 0.30f) else LastWaveVeil
     val clipped = this.clip(shape)
+    val glass = LocalGlassAmount.current
     return if (lastWaveGlassActive(backdrop)) {
         clipped.then(Modifier.background(veil)).lastWaveLiquidGlass(backdrop, shape)
+            .then(if (glass < 1f) Modifier.background(Color.Black.copy(alpha = 0.30f * (1f - glass))).background(veil.copy(alpha = veil.alpha * (1f - glass))) else Modifier)
     } else {
         clipped.then(Modifier.background(Color.Black.copy(alpha = 0.30f)).background(veil))
     }
