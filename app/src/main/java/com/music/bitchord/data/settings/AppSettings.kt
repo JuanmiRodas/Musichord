@@ -1167,6 +1167,16 @@ object AppSettings {
         prefs.getString(KEY_QUICK_ACTIONS, null)?.let { saved ->
             playerQuickActions.value = saved.split(',').filter { it.isNotBlank() }
         }
+        // BitChord Audio: the Spotify canvas button, put in once (it hides while the video is on).
+        if (!prefs.getBoolean("quick_canvas_added", false)) {
+            val now = playerQuickActions.value
+            if ("canvas" !in now && now.size < 8) {
+                val ids = now + "canvas"
+                playerQuickActions.value = ids
+                prefs.edit().putString(KEY_QUICK_ACTIONS, ids.joinToString(",")).apply()
+            }
+            prefs.edit().putBoolean("quick_canvas_added", true).apply()
+        }
         showListenTogetherButton.value = prefs.getBoolean(KEY_LISTEN_TOGETHER_BUTTON, false)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
         onboardingComplete.value = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false)

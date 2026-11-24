@@ -2150,4 +2150,9 @@
     <string name="video_shade_level">Sombra %1$d de 5</string>
     <string name="video_resync">Sincronizando de nuevo el vídeo con la canción…</string>
     <string name="song_dna_researching">Buscando información de la canción en la web…</string>
+    <string name="qa_canvas">Canvas de Spotify</string>
+    <string name="canvas_spotify_off">Canvas de Spotify apagado: se usan las otras portadas animadas</string>
+    <string name="canvas_spotify_on">Canvas de Spotify encendido</string>
+    <string name="canvas_all_off">Portadas animadas apagadas</string>
+    <string name="canvas_all_on">Portadas animadas encendidas</string>
 </resources>

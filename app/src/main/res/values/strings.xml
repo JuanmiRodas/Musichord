@@ -2131,4 +2131,9 @@
     <string name="video_shade_level">Shade %1$d of 5</string>
     <string name="video_resync">Matching the video to the song again…</string>
     <string name="song_dna_researching">Looking for this song on the web…</string>
+    <string name="qa_canvas">Spotify canvas</string>
+    <string name="canvas_spotify_off">Spotify canvas off: the other animated covers</string>
+    <string name="canvas_spotify_on">Spotify canvas on</string>
+    <string name="canvas_all_off">Animated covers off</string>
+    <string name="canvas_all_on">Animated covers on</string>
 </resources>

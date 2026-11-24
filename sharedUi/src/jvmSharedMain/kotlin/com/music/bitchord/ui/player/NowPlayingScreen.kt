@@ -5444,7 +5444,12 @@ fun NowPlayingScreen(
                         BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
                             // BitChord Audio: the video's own buttons only while the video is on —
                             // coming and going with a soft bounce, the rest gliding to make room.
-                            fun showsNow(a: PlayerQuickAction) = (a != PlayerQuickAction.VIDEO_AUDIO && a != PlayerQuickAction.SHADE) || videoModeOn
+                            // The canvas button the other way round: hidden while the video is on.
+                            fun showsNow(a: PlayerQuickAction) = when (a) {
+                                PlayerQuickAction.VIDEO_AUDIO, PlayerQuickAction.SHADE -> videoModeOn
+                                PlayerQuickAction.CANVAS -> !videoModeOn
+                                else -> true
+                            }
                             val count = quick.count(::showsNow) + 1
                             val gap = 12.dp
                             val bounce = androidx.compose.animation.core.spring<androidx.compose.ui.unit.Dp>(dampingRatio = 0.62f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow)
@@ -5506,6 +5511,8 @@ fun NowPlayingScreen(
                                             // The video's sound held: the video matched to the song again. Shade held: automatic.
                                             PlayerQuickAction.VIDEO_AUDIO -> { { PlayerPlatform.host.resyncVideo() } }
                                             PlayerQuickAction.SHADE -> { { PlayerPlatform.host.autoVideoShade() } }
+                                            // Held: every animated cover off (or on again).
+                                            PlayerQuickAction.CANVAS -> { { PlayerPlatform.host.runQuickAction("canvas_all", song) } }
                                             else -> null
                                         },
                                         onClick = {

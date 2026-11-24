@@ -7,6 +7,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Gradient
+import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
@@ -47,6 +48,7 @@ enum class PlayerQuickAction(val id: String, val label: String, val icon: ImageV
     COVER("cover", "Change the cover", Icons.Rounded.Image),
     INFO("info", "Song info", Icons.Rounded.Info),
     SHADE("shade", "Lyrics shade on the video", Icons.Rounded.Gradient),
+    CANVAS("canvas", "Spotify canvas", Icons.Rounded.Animation),
     ;
 
     companion object {

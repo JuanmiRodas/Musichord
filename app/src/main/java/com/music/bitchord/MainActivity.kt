@@ -2651,6 +2651,18 @@ private fun BitChordApp(
                 // BitChord Audio: straight to Spotify's link (held: every link, in a sheet).
                 "share" -> com.music.bitchord.ui.share.ShareLinks.shareSpotify(context, song)
                 "share_links" -> com.music.bitchord.ui.share.ShareLinks.sheet.value = song
+                // BitChord Audio: Spotify's canvas on/off (the other animated covers stay); held:
+                // every animated cover off, or on again.
+                "canvas" -> {
+                    val off = !AppSettings.disableSpotifyCanvas.value
+                    AppSettings.setDisableSpotifyCanvas(off)
+                    Toast.makeText(context, if (off) R.string.canvas_spotify_off else R.string.canvas_spotify_on, Toast.LENGTH_SHORT).show()
+                }
+                "canvas_all" -> {
+                    val on = !AppSettings.animatedCanvas.value
+                    AppSettings.setAnimatedCanvas(on)
+                    Toast.makeText(context, if (on) R.string.canvas_all_on else R.string.canvas_all_off, Toast.LENGTH_SHORT).show()
+                }
                 "sleep" -> {
                     val timer = com.music.bitchord.playback.SleepTimer
                     if (timer.isRunning) {
@@ -2668,8 +2680,11 @@ private fun BitChordApp(
     // Lit quick buttons: the song saved on the phone, the sleep timer running.
     val sleepDeadline by com.music.bitchord.playback.SleepTimer.deadline.collectAsStateWithLifecycle()
     val sleepAfterTrack by com.music.bitchord.playback.SleepTimer.afterTrack.collectAsStateWithLifecycle()
-    LaunchedEffect(player.song?.videoId, savedDownloads, sleepDeadline, sleepAfterTrack) {
+    val canvasAnimated by AppSettings.animatedCanvas.collectAsStateWithLifecycle()
+    val spotifyCanvasOff by AppSettings.disableSpotifyCanvas.collectAsStateWithLifecycle()
+    LaunchedEffect(player.song?.videoId, savedDownloads, sleepDeadline, sleepAfterTrack, canvasAnimated, spotifyCanvasOff) {
         com.music.bitchord.ui.player.PlayerQuickActionState.lit.value = buildSet {
+            if (canvasAnimated && !spotifyCanvasOff) add("canvas")
             if (player.song?.videoId in savedDownloads) add("download")
             if (sleepDeadline != null || sleepAfterTrack) add("sleep")
         }

@@ -72,6 +72,7 @@ fun PlayerQuickAction.title(): String = stringResource(
         PlayerQuickAction.COVER -> R.string.qa_cover
         PlayerQuickAction.INFO -> R.string.qa_info
         PlayerQuickAction.SHADE -> R.string.qa_shade
+        PlayerQuickAction.CANVAS -> R.string.qa_canvas
     },
 )
 
