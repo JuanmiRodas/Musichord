@@ -183,7 +183,7 @@ object VkVideo {
                     }
                     loadUrl(url)
                 }
-                val page = view
+                val page = view ?: return@withContext null
                 var result: T? = null
                 withTimeoutOrNull(timeoutMs) {
                     var last: T? = null
