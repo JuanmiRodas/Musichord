@@ -158,7 +158,7 @@ object VkVideo {
         requests: MutableList<String>? = null, hook: String? = null, parse: (String) -> T?,
     ): T? {
         val ctx = appContext ?: return null
-        return withContext(Dispatchers.Main) {
+        return withContext<T?>(Dispatchers.Main) {
             var view: WebView? = null
             try {
                 view = WebView(ctx).apply {
@@ -183,7 +183,7 @@ object VkVideo {
                     }
                     loadUrl(url)
                 }
-                withTimeoutOrNull(timeoutMs) {
+                withTimeoutOrNull<T>(timeoutMs) {
                     var last: T? = null
                     var same = 0
                     while (true) {
