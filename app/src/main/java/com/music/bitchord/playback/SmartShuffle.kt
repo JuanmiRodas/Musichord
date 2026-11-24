@@ -52,6 +52,8 @@ object SmartShuffle {
     /** Songs between suggestions: 3 (they're welcome) to 8 (they're skipped). */
     private var gap = 4f
     private var sinceSuggestion = 0
+    /** The next move is smart shuffle's own skip, not something you picked. */
+    @Volatile private var skipping = false
     private const val AHEAD = 6
     private val inserted = LinkedHashSet<String>()
     private val _suggested = MutableStateFlow<Set<String>>(emptySet())
@@ -147,7 +149,7 @@ object SmartShuffle {
     // ---- The queue moving on -------------------------------------------------------------
 
     /** The player moved to [item]: what smart shuffle does about it. */
-    fun onTransition(player: Player, item: MediaItem?) {
+    fun onTransition(player: Player, item: MediaItem?, why: Int = Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
         val previous = current
         val heardFor = System.currentTimeMillis() - currentSince
         current = item
@@ -170,14 +172,21 @@ object SmartShuffle {
         }
         val song = item.toSong()
         // Left out: skipped straight on.
+        // Played on purpose (picked in the queue or the list) or one of your liked songs:
+        // a soundtrack or an instrumental of yours plays — the leave-outs are for the rest.
+        val chosen = !skipping && (why == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK || why == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+        skipping = false
+        val liked = LocalLikes.liked.value.containsKey(song.videoId) ||
+            song.playbackSourceId?.let { id -> id in LikedMusicCache.IDS || id == "liked" } == true
         val reason = when {
             isSuggestion(item) -> null
-            excluded(song) -> "soundtrack/instrumental"
-            versionKey(song) in heard -> "another version already heard"
+            !chosen && !liked && excluded(song) -> "soundtrack/instrumental"
+            !chosen && versionKey(song) in heard -> "another version already heard"
             else -> null
         }
         if (reason != null && player.hasNextMediaItem()) {
             TrackLog.d(TAG, "skipping '${song.title}' ($reason)")
+            skipping = true
             scope.launch { player.seekToNextMediaItem() }
             return
         }

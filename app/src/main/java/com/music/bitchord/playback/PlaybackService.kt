@@ -1163,7 +1163,7 @@ class PlaybackService : MediaLibraryService() {
             // BitChord Audio: smart shuffle's turn (leave-outs, suggestions, learning).
             player?.let { p ->
                 if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED || mediaItem?.mediaId != swappingMediaId) {
-                    runCatching { SmartShuffle.onTransition(p, mediaItem) }
+                    runCatching { SmartShuffle.onTransition(p, mediaItem, reason) }
                 }
             }
             // The player this fired on, which is by definition the one the
