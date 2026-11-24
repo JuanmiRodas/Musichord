@@ -1048,6 +1048,8 @@ object MusicVideoEngine {
     fun prewarm(ref: com.music.bitchord.data.video.VideoRef) {
         if (ref.site != com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) return
         if (AppSettings.meteredConnection.value == true) return
+        // BitChord Audio: battery saving — nothing made ready ahead.
+        if (!com.music.bitchord.ui.player.PowerSaving.videoAhead) return
         val ctx = appContext ?: return
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
         if (pm?.isPowerSaveMode == true) return

@@ -415,7 +415,8 @@ class PrecisionAudioSink(
             // Process normalized Float32 samples through custom DSP chain
             dspChain.process(audioBlock)
             // BitChord Audio: the LastWave player's bands, read here and handed over when heard.
-            if (AudioBands.wanted && isAudible()) bandTap.analyze(audioBlock, loopBlockUs)
+            // BitChord Audio: battery saving — no sound analysis when the waves don't need it.
+            if (AudioBands.wanted && com.music.bitchord.ui.player.PowerSaving.soundAnalysis && isAudible()) bandTap.analyze(audioBlock, loopBlockUs)
 
             // Encode processed samples to target PCM output buffer (Float32 or PCM16)
             outputByteBuffer.clear()
@@ -505,7 +506,7 @@ class PrecisionAudioSink(
         // The delegate counts any silence the loop mix inserted, and none of the
         // frames it dropped; the player is told the track's own position.
         val position = delegatePosition - delegateOffsetUs
-        if (AudioBands.wanted && isAudible()) bandTap.publish(position)
+        if (AudioBands.wanted && com.music.bitchord.ui.player.PowerSaving.soundAnalysis && isAudible()) bandTap.publish(position)
         val processed = processedEndUs
         if (processed != C.TIME_UNSET) {
             dspChain.transition.leadUs = (processed - position).coerceAtLeast(0L)

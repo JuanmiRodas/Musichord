@@ -2268,7 +2268,7 @@ class PlaybackService : MediaLibraryService() {
             // Canvas resolution is independent of still-art extraction and decoding.
             launch {
                 if (allowsAutoMixArtwork(coverGeneration) &&
-                    AppSettings.animatedCanvas.value &&
+                    AppSettings.canvasShown.value &&
                     (AppSettings.meteredConnection.value != true || AppSettings.canvasOverCellular.value)
                 ) {
                     // The repository handles provider settings and caches both hits and settled misses.

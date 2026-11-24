@@ -24,7 +24,7 @@ object AndroidAppUiHost : AppUiHost {
     }
 
     override suspend fun releaseMotion(album: String, artist: String): CanvasArtwork? {
-        if (!AppSettings.animatedCanvas.value || album.isBlank() || artist.isBlank()) return null
+        if (!AppSettings.canvasShown.value || album.isBlank() || artist.isBlank()) return null
         return CanvasRepository.canvasForAlbum(album, artist)
     }
 
@@ -35,7 +35,7 @@ object AndroidAppUiHost : AppUiHost {
      * fetched only when that lookup hasn't settled already.
      */
     override suspend fun artistMotion(browseId: String, artistName: String): CanvasArtwork? {
-        if (!AppSettings.animatedCanvas.value) return null
+        if (!AppSettings.canvasShown.value) return null
         val art = AppleArtistArtRepository.artFor(browseId, artistName) {
             YtMusicRepository.artistLanding(browseId).getOrNull()?.let(AppleCatalogue::titlesOf).orEmpty()
         }

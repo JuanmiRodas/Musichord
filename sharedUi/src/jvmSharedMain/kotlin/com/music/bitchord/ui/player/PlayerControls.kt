@@ -37,6 +37,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.BatterySaver
+import androidx.compose.material.icons.rounded.Battery3Bar
+import androidx.compose.material.icons.rounded.Battery5Bar
+import androidx.compose.material.icons.rounded.BatteryFull
 
 import org.jetbrains.compose.resources.DrawableResource
 import androidx.compose.animation.animateContentSize
@@ -103,6 +107,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -273,7 +278,8 @@ internal fun PlayerScrubber(
             activeColor = ink?.active ?: Color.White.copy(alpha = 0.92f),
             inactiveColor = ink?.inactive ?: Color.White.copy(alpha = 0.26f),
             markerColor = ink?.marker ?: Color.White.copy(alpha = 0.5f),
-            wave = true,
+            // BitChord Audio: battery saving — a plain bar.
+            wave = PowerSaving.on.collectAsState().value[PowerSaving.Feature.WAVES.id] != false,
         )
         Box(
             modifier = Modifier
@@ -896,6 +902,10 @@ internal fun PlayerActionRow(
                 highlighted = queueOpen,
                 haptic = if (queueOpen) Haptic.Tap else Haptic.Expand,
             )
+            // BitChord Audio: battery saving — out of the way while the queue's two are up.
+            AnimatedVisibility(visible = !queueOpen, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
+                BatteryButton()
+            }
         }
         return
     }
@@ -2888,8 +2898,87 @@ private fun LastWaveTransport(
  * interaction source, handed to the control's clickable so the press is the control's.
  */
 @Composable
+/**
+ * BitChord Audio: the battery button — a tap steps through the saving levels (moving
+ * pictures off; also the waves and liquid glass; also OLED black; back to all), a long
+ * press opens each switch on its own.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun BatteryButton() {
+    val level by PowerSaving.level.collectAsState()
+    val on by PowerSaving.on.collectAsState()
+    var menu by remember { mutableStateOf(false) }
+    val icon = when (level) {
+        0 -> Icons.Rounded.BatteryFull
+        1 -> Icons.Rounded.Battery5Bar
+        2 -> Icons.Rounded.Battery3Bar
+        else -> Icons.Rounded.BatterySaver
+    }
+    val label = stringResource(
+        when (level) {
+            0 -> Res.string.power_level_0
+            1 -> Res.string.power_level_1
+            2 -> Res.string.power_level_2
+            else -> Res.string.power_level_3
+        },
+    )
+    GlassRoundButton(
+        icon = icon,
+        contentDescription = label,
+        onClick = {
+            PowerSaving.cycle()
+        },
+        onLongClick = { menu = true },
+        highlighted = level > 0,
+    )
+    if (menu) {
+        androidx.compose.material3.ModalBottomSheet(onDismissRequest = { menu = false }) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+                Text(stringResource(Res.string.power_saving), style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(Res.string.power_menu_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                for (f in PowerSaving.Feature.entries) {
+                    val name = stringResource(
+                        when (f) {
+                            PowerSaving.Feature.ANIMATED_COVERS -> Res.string.power_f_animated_covers
+                            PowerSaving.Feature.BACKGROUND_MOTION -> Res.string.power_f_background_motion
+                            PowerSaving.Feature.LYRICS_EFFECTS -> Res.string.power_f_lyrics_effects
+                            PowerSaving.Feature.UI_ANIMATIONS -> Res.string.power_f_ui_animations
+                            PowerSaving.Feature.WAVES -> Res.string.power_f_waves
+                            PowerSaving.Feature.LIQUID_GLASS -> Res.string.power_f_liquid_glass
+                            PowerSaving.Feature.SOUND_ANALYSIS -> Res.string.power_f_sound_analysis
+                            PowerSaving.Feature.VIDEO_AHEAD -> Res.string.power_f_video_ahead
+                            PowerSaving.Feature.OLED_BLACK -> Res.string.power_f_oled_black
+                        },
+                    )
+                    val checked = on[f.id] ?: (f != PowerSaving.Feature.OLED_BLACK)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { PowerSaving.set(f, !checked) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                        androidx.compose.material3.Switch(checked = checked, onCheckedChange = { PowerSaving.set(f, it) })
+                    }
+                }
+            }
+        }
+    }
+}
+
 internal fun lastWavePressScale(interaction: MutableInteractionSource, pressedScale: Float = 0.88f): Float {
     val pressed by interaction.collectIsPressedAsState()
+    // BitChord Audio: battery saving — no bounce.
+    val power by PowerSaving.on.collectAsState()
+    if (power[PowerSaving.Feature.UI_ANIMATIONS.id] == false) return 1f
     val scale by animateFloatAsState(
         if (pressed) pressedScale else 1f,
         spring(dampingRatio = 0.8f, stiffness = 650f),

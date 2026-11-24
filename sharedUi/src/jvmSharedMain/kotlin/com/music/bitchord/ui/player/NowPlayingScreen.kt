@@ -95,6 +95,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -2512,7 +2513,9 @@ fun NowPlayingScreen(
     val lastWaveArt = if (videoOverlay && videoThumb != song.thumbnailUrl) videoThumb else remoteArt ?: song.thumbnailUrl
     val lastWaveLook = rememberLastWaveLook(lastWaveOn, lastWaveArt, isPlaying)
     // LastWave's glass refracts the player's backdrop, recorded as it is drawn.
-    val lastWaveBackdrop = if (lastWaveLook != null) rememberLastWaveBackdrop() else null
+    // BitChord Audio: battery saving — the liquid glass off (the plain glass stays).
+    val glassAllowed = PowerSaving.on.collectAsState().value[PowerSaving.Feature.LIQUID_GLASS.id] != false
+    val lastWaveBackdrop = if (lastWaveLook != null && glassAllowed) rememberLastWaveBackdrop() else null
     CompositionLocalProvider(LocalLastWave provides lastWaveLook, LocalLastWaveBackdrop provides lastWaveBackdrop) {
     FrostedPlayerFrame(
         modifier = modifier,
@@ -3114,11 +3117,15 @@ fun NowPlayingScreen(
                             animationSpec = tween(durationMillis = 600),
                             label = "lastWaveBackdrop",
                         )
-                        LastWaveBackdrop(
+                        // BitChord Audio: battery saving — a still background, or OLED black.
+                        val power by PowerSaving.on.collectAsState()
+                        if (power[PowerSaving.Feature.OLED_BLACK.id] == true) {
+                            Box(Modifier.fillMaxSize().background(Color.Black))
+                        } else LastWaveBackdrop(
                             look = look,
                             artworkUrl = remoteArt ?: song.thumbnailUrl,
                             seedKey = song.videoId,
-                            playing = isPlaying,
+                            playing = isPlaying && power[PowerSaving.Feature.BACKGROUND_MOTION.id] != false,
                             alpha = { backdropAlpha },
                             modifier = Modifier.fillMaxSize(),
                         )

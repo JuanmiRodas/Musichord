@@ -77,7 +77,8 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
 
     override val settings: PlayerSettingsSource = object : PlayerSettingsSource {
-        override val animatedCanvas get() = AppSettings.animatedCanvas
+        // BitChord Audio: animated covers also off while the battery button says so.
+        override val animatedCanvas get() = AppSettings.canvasShown
         override val audioQualityCellular get() = AppSettings.audioQualityCellular
         override val audioQualityWifi get() = AppSettings.audioQualityWifi
         override val canvasOverCellular get() = AppSettings.canvasOverCellular

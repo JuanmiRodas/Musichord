@@ -229,4 +229,20 @@
     <string name="queue_add_all_to_playlist">Añadir todas a la lista</string>
     <string name="mixes_yours">Tus mixes</string>
     <string name="mixes_none">Aún no hay mixes. Sigue escuchando y YouTube Music creará algunos para ti.</string>
+    <string name="power_saving">Ahorro de batería</string>
+    <string name="power_level_0">Ahorro de batería desactivado</string>
+    <string name="power_level_1">Ahorro 1: sin animaciones</string>
+    <string name="power_level_2">Ahorro 2: sin ondas ni cristal líquido</string>
+    <string name="power_level_3">Ahorro 3: negro OLED</string>
+    <string name="power_menu_hint">Toca el botón para pasar por los niveles; aquí, cada cosa por separado.</string>
+    <string name="power_f_animated_covers">Portadas animadas (canvas)</string>
+    <string name="power_f_background_motion">Fondo en movimiento</string>
+    <string name="power_f_lyrics_effects">Elevación y brillo de la letra</string>
+    <string name="power_f_ui_animations">Rebote de los botones</string>
+    <string name="power_f_waves">Ondas de la línea de tiempo</string>
+    <string name="power_f_liquid_glass">Cristal líquido</string>
+    <string name="power_f_sound_analysis">Análisis del sonido (ondas, ritmo)</string>
+    <string name="power_f_video_ahead">Preparar el vídeo siguiente</string>
+    <string name="power_f_oled_black">Reproductor en negro OLED</string>
+    <string name="power_done">Listo</string>
 </resources>

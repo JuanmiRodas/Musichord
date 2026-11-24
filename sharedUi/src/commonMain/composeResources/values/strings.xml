@@ -311,4 +311,20 @@
     <string name="queue_download">Download</string>
     <string name="queue_selection_remove">Remove</string>
     <string name="queue_add_all_to_playlist">Add all to playlist</string>
+    <string name="power_saving">Battery saving</string>
+    <string name="power_level_0">Battery saving off</string>
+    <string name="power_level_1">Battery saving 1: no moving pictures</string>
+    <string name="power_level_2">Battery saving 2: no waves or liquid glass</string>
+    <string name="power_level_3">Battery saving 3: OLED black</string>
+    <string name="power_menu_hint">Tap the button to step through the levels; here, each one on its own.</string>
+    <string name="power_f_animated_covers">Animated covers (canvas)</string>
+    <string name="power_f_background_motion">Moving background</string>
+    <string name="power_f_lyrics_effects">Lyrics lift and glow</string>
+    <string name="power_f_ui_animations">Button bounce</string>
+    <string name="power_f_waves">Timeline waves</string>
+    <string name="power_f_liquid_glass">Liquid glass</string>
+    <string name="power_f_sound_analysis">Sound analysis (waves, beat)</string>
+    <string name="power_f_video_ahead">Next video made ready ahead</string>
+    <string name="power_f_oled_black">OLED black player</string>
+    <string name="power_done">Done</string>
 </resources>

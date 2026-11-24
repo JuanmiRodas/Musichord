@@ -1,5 +1,6 @@
 package com.music.bitchord.data.settings
 
+import kotlinx.coroutines.flow.stateIn
 import com.music.bitchord.data.webdav.update
 import com.music.bitchord.ui.components.VideoThumbnails
 import android.content.Context
@@ -868,6 +869,17 @@ object AppSettings {
     val listenBrainzEnabled = MutableStateFlow(false)
     val listenBrainzToken = MutableStateFlow("")
     val listenBrainzPrimaryArtistOnly = MutableStateFlow(false)
+    /** BitChord Audio: animated covers shown — the setting, and the battery button not saying otherwise. */
+    val canvasShown: kotlinx.coroutines.flow.StateFlow<Boolean> by lazy {
+        kotlinx.coroutines.flow.combine(animatedCanvas, com.music.bitchord.ui.player.PowerSaving.on) { a, p ->
+            a && p[com.music.bitchord.ui.player.PowerSaving.Feature.ANIMATED_COVERS.id] != false
+        }.stateIn(
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default),
+            kotlinx.coroutines.flow.SharingStarted.Eagerly,
+            animatedCanvas.value,
+        )
+    }
+
     val spotifySpdcToken = MutableStateFlow("")
 
     // ── Discord Rich Presence ───────────────────────────────────────────
@@ -1227,6 +1239,16 @@ object AppSettings {
             reduceDynamicBlur.value = false
         }
         animatedCanvas.value = prefs.getBoolean(KEY_ANIMATED_CANVAS, true)
+        // BitChord Audio: the battery button's level and switches, kept between runs.
+        runCatching {
+            val on = prefs.getString("power_saving_on", null)?.split(',')?.filter { it.contains('=') }
+                ?.associate { it.substringBefore('=') to (it.substringAfter('=') == "1") }.orEmpty()
+            com.music.bitchord.ui.player.PowerSaving.restore(prefs.getInt("power_saving_level", 0), on)
+        }
+        com.music.bitchord.ui.player.PowerSaving.store = { level, on ->
+            prefs.edit().putInt("power_saving_level", level)
+                .putString("power_saving_on", on.entries.joinToString(",") { "${it.key}=${if (it.value) 1 else 0}" }).apply()
+        }
         canvasOverCellular.value = prefs.getBoolean(KEY_CANVAS_OVER_CELLULAR, false)
         disableSpotifyCanvas.value = prefs.getBoolean(KEY_DISABLE_SPOTIFY_CANVAS, false)
         spotifyCanvasAutoHide.value = prefs.getBoolean(KEY_SPOTIFY_CANVAS_AUTO_HIDE, true)

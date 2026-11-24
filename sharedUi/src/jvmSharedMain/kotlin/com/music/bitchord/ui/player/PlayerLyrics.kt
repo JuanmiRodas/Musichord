@@ -64,6 +64,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -830,6 +831,11 @@ private fun SweptLyricLine(
     /** What the words are set in — see [PanelVoice] for which lines differ. */
     color: Color = Color.White,
 ) {
+    // BitChord Audio: battery saving — the sweep stays, the lift and glow go.
+    val power by PowerSaving.on.collectAsState()
+    val effects = power[PowerSaving.Feature.LYRICS_EFFECTS.id] != false
+    @Suppress("NAME_SHADOWING") val rise = rise && effects
+    @Suppress("NAME_SHADOWING") val glowAlpha = if (effects) glowAlpha else 0f
     var layout by remember(line) { mutableStateOf<TextLayoutResult?>(null) }
 
     // Filled in and read back a letter at a time inside the draw lambdas, and
