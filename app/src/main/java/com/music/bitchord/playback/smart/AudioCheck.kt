@@ -411,6 +411,9 @@ object AudioCheck {
 
     // ── The fingerprint ──
 
+    /** BitChord Audio: [source]'s fingerprint (its first ~75 s), for [SameRecording] too. */
+    internal fun printOf(source: MediaDataSource): IntArray? = print(source)
+
     private fun print(source: MediaDataSource): IntArray? = try {
         val pcm = AudioDecoder.decodeDownsampled(source, 0.0, SECONDS, RATE)?.first
         pcm?.takeIf { it.samples.size > it.sampleRate * 20 }?.let { fingerprint(it.samples, it.sampleRate) }
@@ -430,6 +433,14 @@ object AudioCheck {
     }
 
     const val SAME_BELOW = 0.33
+
+    /**
+     * BitChord Audio: stricter, for replacing one file with another — at least 80 % of the
+     * bits alike. In the checks made so far the same recording lands at 0.00–0.20 and
+     * another one at 0.45–0.50, so this is the gap between them.
+     */
+    const val REPLACE_BELOW = 0.20
+    const val OTHER_ABOVE = 0.42
 
     /** 32 bits a frame: the sign of each band's energy step, against the frame before. */
     internal fun fingerprint(samples: FloatArray, rate: Double): IntArray {

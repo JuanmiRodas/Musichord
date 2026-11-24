@@ -170,11 +170,17 @@ interface PlayerHost {
     /** BitChord Audio: shuffle's second press — smart shuffle (suggestions, leave-outs). */
     val smartShuffle: StateFlow<Boolean> get() = NoVideoMode
 
+    /** BitChord Audio: the queue entries smart shuffle put there (marked in the queue). */
+    val smartSuggestions: StateFlow<Set<String>> get() = NoSuggestions
+
     /** BitChord Audio: the video matched to the song again, from scratch. */
     fun resyncVideo() {}
 
     /** BitChord Audio: the thumbnail of the video video mode shows for [mediaId], when it has one. */
     fun videoThumbFor(mediaId: String): String? = null
+
+    /** BitChord Audio: the artist's logo (url, width over height) to show instead of the name; null for none. */
+    suspend fun artistLogoFor(song: Song): Pair<String, Float>? = null
     fun autoVideoShade() {}
     fun setVideoModeOriginalAudio(on: Boolean) = Unit
 
@@ -362,6 +368,7 @@ internal fun MusicVideoSurface(
 ) = PlayerPlatform.host.MusicVideo(videoId, fit, onRenderedChanged, modifier)
 
 private val NoVideoMode = MutableStateFlow(false)
+private val NoSuggestions = MutableStateFlow<Set<String>>(emptySet())
 private val NoVideoOn = MutableStateFlow(true)
 private val NoVideoFrame = MutableStateFlow(2)
 private val NoVideoScale = MutableStateFlow(1f)

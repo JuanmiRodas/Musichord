@@ -53,6 +53,10 @@ object SmartShuffle {
     private var gap = 4f
     private var sinceSuggestion = 0
     private val inserted = LinkedHashSet<String>()
+    private val _suggested = MutableStateFlow<Set<String>>(emptySet())
+    /** The queue entries put there as suggestions (the queue marks them). */
+    val suggested: StateFlow<Set<String>> = _suggested.asStateFlow()
+    private fun published() { _suggested.value = inserted.toSet() }
     private val pool = ArrayDeque<Song>()
     private val blocked = HashSet<String>()
     private val restingArtists = HashMap<String, Int>()
@@ -96,6 +100,7 @@ object SmartShuffle {
             if (entryOf(item) in inserted) player.removeMediaItem(i)
         }
         inserted.clear()
+        published()
     }
 
     private fun entryOf(item: MediaItem): String = item.queueEntryId ?: item.mediaId
@@ -225,6 +230,7 @@ object SmartShuffle {
         val entry = UUID.randomUUID().toString()
         val song = pick.copy(queueEntryId = entry, queueTier = QueueTier.CONTEXT, radioName = suggestionLabel)
         inserted += entry
+        published()
         player.addMediaItem(idx + 1, song.toMediaItem())
         sinceSuggestion = 0
         TrackLog.d(TAG, "suggestion next: '${pick.title}' by ${pick.artist}")

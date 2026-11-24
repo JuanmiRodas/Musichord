@@ -126,9 +126,9 @@ object LibraryQuality {
                 }
                 // 3. The same recording, by ear.
                 val ber = com.music.bitchord.playback.smart.AudioCheck.berBetween(ctx, android.net.Uri.parse(current), tmp)
-                if (ber == null || ber >= com.music.bitchord.playback.smart.AudioCheck.SAME_BELOW) {
+                if (ber == null || ber > com.music.bitchord.playback.smart.AudioCheck.REPLACE_BELOW) {
                     prefs.edit().putBoolean(tried, true).apply()
-                    TrackLog.d(TAG, "download upgrade: '${s.title}' — fingerprint ${ber?.let { "%.2f".format(it) } ?: "unreadable"}, not the same recording; kept")
+                    TrackLog.d(TAG, "download upgrade: '${s.title}' — fingerprint ${ber?.let { "%.2f".format(it) } ?: "unreadable"}, under 80 % alike, not provably the same recording; kept")
                     continue
                 }
                 // 4. In place first, the old one deleted after.

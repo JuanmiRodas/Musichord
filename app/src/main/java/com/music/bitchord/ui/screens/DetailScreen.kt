@@ -614,7 +614,9 @@ fun DetailScreen(
                 ) {
             item(key = "header") {
                 if (isArtist) {
-                    ArtistHeader(page = page, palette = palette, artHeight = artHeight, appleArt = appleArt, signature = signature)
+                    var gallery by remember { mutableStateOf(false) }
+                    ArtistHeader(page = page, palette = palette, artHeight = artHeight, appleArt = appleArt, signature = signature, onOpenGallery = { gallery = true })
+                    if (gallery) com.music.bitchord.ui.components.ArtistGallerySheet(page.title, appleArt) { gallery = false }
                 } else {
                     ReleaseHeader(
                         page = page,
@@ -1511,9 +1513,14 @@ private fun ArtistHeader(
     artHeight: Dp,
     appleArt: AppleArtistArt?,
     signature: ArtistSignature?,
+    onOpenGallery: () -> Unit = {},
 ) {
     Box(Modifier.fillMaxWidth()) {
-        Spacer(Modifier.fillMaxWidth().height(artHeight + HEADER_DROP - ARTIST_HEADER_LIFT))
+        // BitChord Audio: the photo's place opens the artist's pictures.
+        Spacer(
+            Modifier.fillMaxWidth().height(artHeight + HEADER_DROP - ARTIST_HEADER_LIFT)
+                .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onOpenGallery),
+        )
         val logoUrl = appleArt?.logoUrl
         // Secondary provider: drawn only when Apple has no title logo.
         val signatureUrl = signature?.imageUrl.takeIf { logoUrl == null }

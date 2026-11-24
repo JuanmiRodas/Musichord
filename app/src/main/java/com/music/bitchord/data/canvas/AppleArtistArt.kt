@@ -1,5 +1,7 @@
 package com.music.bitchord.data.canvas
 
+import com.music.bitchord.data.settings.AppSettings
+
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.AppleCatalogue
 import com.music.bitchord.data.Http
@@ -38,10 +40,12 @@ data class AppleArtistArt(
     val accent: Int,
     /** The colour Apple fills the artist's Play button with; absent for some artists. */
     val keyColor: Int?,
+    /** BitChord Audio: false when the art is fanart.tv's (Apple has none): no Apple colours then. */
+    val keyed: Boolean = true,
 )
 
 /** Apple's colours for this artist, in the form the palette takes. */
-fun AppleArtistArt.keyColors() = ArtworkKeyColors(Color(background), Color(accent))
+fun AppleArtistArt.keyColors(): ArtworkKeyColors? = if (keyed) ArtworkKeyColors(Color(background), Color(accent)) else null
 
 /**
  * Finds [AppleArtistArt] from nothing but an artist's name.
@@ -65,6 +69,8 @@ object AppleArtistArtRepository {
     private const val CACHE_SIZE = 64
     private const val HERO_WIDTH = 1200
     private const val LOGO_WIDTH = 1000
+    /** fanart.tv's logos are all 800×310 (HD) or 400×155. */
+    private const val FANART_LOGO_ASPECT = 800f / 310f
     private const val USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -114,11 +120,32 @@ object AppleArtistArtRepository {
 
         // Null here is a network hiccup, not an answer — only a settled result
         // (including a genuine "no logo") is worth remembering.
-        val entry = withContext(Dispatchers.IO) {
+        val apple = withContext(Dispatchers.IO) {
             runCatching { lookup(artistName, key, titles) }
                 .onFailure { Log.d(TAG, "lookup failed for $artistName: $it") }
                 .getOrNull()
         } ?: return null
+        // BitChord Audio: what Apple lacks (all of it, or the logo), from fanart.tv with your key.
+        val entry = if (apple.art?.logoUrl != null || AppSettings.fanartKey.value.isBlank()) apple else {
+            val fan = runCatching { ArtistImages.fanart(artistName) }.getOrNull()
+            when {
+                fan == null -> apple
+                apple.art != null -> Entry(apple.art.copy(logoUrl = fan.logo, logoAspect = if (fan.logo != null) FANART_LOGO_ASPECT else apple.art.logoAspect))
+                (fan.background ?: fan.thumb) != null -> Entry(
+                    AppleArtistArt(
+                        heroUrl = (fan.background ?: fan.thumb)!!,
+                        logoUrl = fan.logo,
+                        logoAspect = FANART_LOGO_ASPECT,
+                        videoUrl = null,
+                        background = 0xFF000000.toInt(),
+                        accent = 0xFFFFFFFF.toInt(),
+                        keyColor = null,
+                        keyed = false,
+                    ),
+                )
+                else -> apple
+            }
+        }
         synchronized(cache) { cache[browseId] = entry }
         _updates.value++
         return entry.art

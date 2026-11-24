@@ -859,6 +859,11 @@ object AppSettings {
     val lastfmSessionKey = MutableStateFlow("")
     val lastfmApiKey = MutableStateFlow("")
     val lastfmSecret = MutableStateFlow("")
+    /** BitChord Audio: your own keys for other services (Settings › Services), kept encrypted. */
+    val discogsToken = MutableStateFlow("")
+    val fanartKey = MutableStateFlow("")
+    /** BitChord Audio: the artist's logo (Apple, fanart.tv) instead of the name in the player. */
+    val artistLogoInPlayer = MutableStateFlow(true)
     val lastfmEndpoint = MutableStateFlow("")
     val lastfmScrobbleEnabled = MutableStateFlow(false)
     val lastfmNowPlaying = MutableStateFlow(false)
@@ -1283,6 +1288,9 @@ object AppSettings {
         lastfmSessionKey.value = secret(KEY_LASTFM_SESSION_KEY)
         lastfmApiKey.value = secret(KEY_LASTFM_API_KEY).ifBlank { BuildConfig.LASTFM_API_KEY }
         lastfmSecret.value = secret(KEY_LASTFM_SECRET).ifBlank { BuildConfig.LASTFM_SECRET }
+        discogsToken.value = secret(KEY_DISCOGS_TOKEN)
+        fanartKey.value = secret(KEY_FANART_KEY)
+        artistLogoInPlayer.value = prefs.getBoolean(KEY_ARTIST_LOGO_IN_PLAYER, true)
         lastfmEndpoint.value = prefs.getString(KEY_LASTFM_ENDPOINT, "").orEmpty()
         lastfmScrobbleEnabled.value = prefs.getBoolean(KEY_LASTFM_SCROBBLE_ENABLED, false)
         lastfmNowPlaying.value = prefs.getBoolean(KEY_LASTFM_NOW_PLAYING, false) && lastfmScrobbleEnabled.value
@@ -2107,6 +2115,21 @@ object AppSettings {
         putSecret(KEY_LASTFM_SECRET, value)
     }
 
+    fun setDiscogsToken(value: String) {
+        discogsToken.value = value.trim()
+        putSecret(KEY_DISCOGS_TOKEN, value.trim())
+    }
+
+    fun setFanartKey(value: String) {
+        fanartKey.value = value.trim()
+        putSecret(KEY_FANART_KEY, value.trim())
+    }
+
+    fun setArtistLogoInPlayer(on: Boolean) {
+        artistLogoInPlayer.value = on
+        prefs.edit().putBoolean(KEY_ARTIST_LOGO_IN_PLAYER, on).apply()
+    }
+
     fun setLastfmEndpoint(value: String) {
         lastfmEndpoint.value = value
         prefs.edit().putString(KEY_LASTFM_ENDPOINT, value).apply()
@@ -2574,6 +2597,8 @@ object AppSettings {
         KEY_LISTENBRAINZ_TOKEN,
         KEY_SPOTIFY_SPDC_TOKEN,
         KEY_PAXSENIX_API_KEY,
+        KEY_DISCOGS_TOKEN,
+        KEY_FANART_KEY,
     )
 
     /**
@@ -2746,6 +2771,9 @@ object AppSettings {
     private const val KEY_LASTFM_USERNAME = "lastfm_username"
     private const val KEY_LASTFM_SESSION_KEY = "lastfm_session_key"
     private const val KEY_LASTFM_API_KEY = "lastfm_api_key"
+    private const val KEY_DISCOGS_TOKEN = "discogs_token"
+    private const val KEY_FANART_KEY = "fanart_key"
+    private const val KEY_ARTIST_LOGO_IN_PLAYER = "artist_logo_in_player"
     private const val KEY_LASTFM_SECRET = "lastfm_secret"
     private const val KEY_LASTFM_ENDPOINT = "lastfm_endpoint"
     private const val KEY_LASTFM_SCROBBLE_ENABLED = "lastfm_scrobble_enabled"

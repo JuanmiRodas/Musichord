@@ -1233,13 +1233,26 @@ private fun InlineQueueRow(
                 style = MaterialTheme.typography.titleMedium,
                 color = Color.White.copy(alpha = 0.92f),
             )
-            Text(
-                text = com.music.bitchord.data.names.DisplayNames.artist(song.artist),
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.55f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val suggestions by PlayerPlatform.host.smartSuggestions.collectAsStateWithLifecycle()
+            val suggested = song.queueEntryId?.let { it in suggestions } == true
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // BitChord Audio: a smart shuffle suggestion, marked as such.
+                if (suggested) {
+                    Text(
+                        text = "✦",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(end = 5.dp),
+                    )
+                }
+                Text(
+                    text = com.music.bitchord.data.names.DisplayNames.artist(song.artist),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         when {
             selectionChecked != null -> Spacer(Modifier.width(24.dp))

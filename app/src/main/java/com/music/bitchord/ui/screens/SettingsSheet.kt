@@ -2462,6 +2462,17 @@ fun SettingsScreen(
                     },
                 )
             }
+            val keysTitle = stringResource(R.string.service_keys_title)
+            row(keysTitle, "keys", "claves", "api", "last.fm", "lastfm", "discogs", "fanart", "token") {
+                var open by remember { mutableStateOf(false) }
+                SettingsRow(
+                    icon = SfIcons.Key,
+                    title = keysTitle,
+                    subtitle = stringResource(R.string.service_keys_subtitle),
+                    onClick = { open = true },
+                )
+                if (open) com.music.bitchord.ui.components.ServiceKeysSheet(onDismiss = { open = false })
+            }
             row(quickTitle, "buttons", "botones", "player", "reproductor", "quick") {
                 var editing by remember { mutableStateOf(false) }
                 SettingsRow(
