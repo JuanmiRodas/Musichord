@@ -2653,9 +2653,17 @@ private fun BitChordApp(
                 "share_links" -> com.music.bitchord.ui.share.ShareLinks.sheet.value = song
                 // BitChord Audio: Spotify's canvas on/off (the other animated covers stay); held:
                 // every animated cover off, or on again.
+                // BitChord Audio: three steps — Spotify's canvas (with the other animated covers
+                // behind it), then the animated covers alone (Apple, Tidal…), then none.
                 "canvas" -> {
-                    val off = !AppSettings.disableSpotifyCanvas.value
-                    AppSettings.setDisableSpotifyCanvas(off)
+                    when {
+                        !AppSettings.animatedCanvas.value -> {
+                            AppSettings.setAnimatedCanvas(true)
+                            AppSettings.setDisableSpotifyCanvas(false)
+                        }
+                        !AppSettings.disableSpotifyCanvas.value -> AppSettings.setDisableSpotifyCanvas(true)
+                        else -> AppSettings.setAnimatedCanvas(false)
+                    }
                 }
                 "canvas_all" -> {
                     val on = !AppSettings.animatedCanvas.value
@@ -2682,7 +2690,7 @@ private fun BitChordApp(
     val spotifyCanvasOff by AppSettings.disableSpotifyCanvas.collectAsStateWithLifecycle()
     LaunchedEffect(player.song?.videoId, savedDownloads, sleepDeadline, sleepAfterTrack, canvasAnimated, spotifyCanvasOff) {
         com.music.bitchord.ui.player.PlayerQuickActionState.lit.value = buildSet {
-            if (canvasAnimated && !spotifyCanvasOff) add("canvas")
+            if (canvasAnimated) add("canvas")
             if (player.song?.videoId in savedDownloads) add("download")
             if (sleepDeadline != null || sleepAfterTrack) add("sleep")
         }

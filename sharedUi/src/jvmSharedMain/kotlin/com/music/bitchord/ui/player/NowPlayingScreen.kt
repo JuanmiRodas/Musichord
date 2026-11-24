@@ -75,6 +75,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.SlowMotionVideo
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.MotionPhotosOn
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.SmartDisplay
@@ -5549,6 +5552,12 @@ fun NowPlayingScreen(
                                     CircleGlyph(
                                         icon = when (action) {
                                             PlayerQuickAction.STAR -> if (liked) BitChordIcons.StarFilled else BitChordIcons.Star
+                                            // BitChord Audio: what the cover is now — still, Spotify's canvas, or an animated cover.
+                                            PlayerQuickAction.CANVAS -> when (canvasAny?.source) {
+                                                CanvasSource.SPOTIFY -> Icons.Rounded.SlowMotionVideo
+                                                null -> Icons.Rounded.Image
+                                                else -> Icons.Rounded.MotionPhotosOn
+                                            }
                                             else -> action.icon
                                         },
                                         contentDescription = action.label,
@@ -5592,8 +5601,6 @@ fun NowPlayingScreen(
                                             // The video's sound held: the video matched to the song again. Shade held: automatic.
                                             PlayerQuickAction.VIDEO_AUDIO -> { { PlayerPlatform.host.resyncVideo() } }
                                             PlayerQuickAction.SHADE -> { { PlayerPlatform.host.autoVideoShade() } }
-                                            // Held: every animated cover off (or on again).
-                                            PlayerQuickAction.CANVAS -> { { PlayerPlatform.host.runQuickAction("canvas_all", song) } }
                                             else -> null
                                         },
                                         onClick = {

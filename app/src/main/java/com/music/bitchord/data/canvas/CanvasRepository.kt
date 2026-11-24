@@ -92,7 +92,7 @@ object CanvasRepository {
         val key = cacheKey("song|${song.videoId}", spotifyFirst, spotifyDisabled)
 
         return resolve(key, album != null) {
-            if (spotifyFirst) {
+            val got = if (spotifyFirst) {
                 firstHit(
                     { if (AppSettings.disableSpotifyCanvas.value) null else SpotifyCanvas.search(title, artist, album) },
                     { AppleMusicCanvas.search(title, artist, album) },
@@ -107,6 +107,10 @@ object CanvasRepository {
                     { if (AppSettings.disableSpotifyCanvas.value) null else SpotifyCanvas.search(title, artist, album) },
                 ) { it.matches(title, artist, album) }
             }
+            // BitChord Audio: which animated cover (if any) a song got, for the logs.
+            com.music.bitchord.data.TrackLog.d("BitChord", "animated cover for '$title' (${album ?: "no album"}): " +
+                (got?.source?.name ?: "none") + if (AppSettings.disableSpotifyCanvas.value) " [Spotify off]" else "")
+            got
         }
     }
 
