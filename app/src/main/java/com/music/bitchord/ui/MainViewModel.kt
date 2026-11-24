@@ -4064,6 +4064,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     .map(local::withCover)
                 if (mine.isNotEmpty()) pageState = UiState.Success(local.placeAmong(mine, shown))
             }
+            // BitChord Audio: a YouTube Music album with songs of it you have (pCloud, uploads,
+            // liked copies) that YouTube Music doesn't list here — not in your region, Premium
+            // only, taken down: yours are added, so the album is whole. And an album YouTube
+            // Music won't show at all is your songs of it.
+            if (resolved == BrowseType.ALBUM && browseId.startsWith("MPREb")) {
+                runCatching {
+                    val shown = (pageState as? UiState.Success)?.data.orEmpty()
+                    val artistName = shown.firstOrNull()?.artist ?: (credit ?: subtitle).substringBefore(" • ").substringBefore(",")
+                    val albumName = (name ?: title).trim()
+                    if (artistName.isNotBlank() && albumName.isNotBlank()) {
+                        val own = com.music.bitchord.data.OwnLibrary.songsBy(artistName)
+                            .filter { s -> s.albumName?.let { com.music.bitchord.data.OwnLibrary.sameAlbum(albumName, it) } == true }
+                        val missing = ArrayList<Song>()
+                        for (o in own) {
+                            if (shown.none { com.music.bitchord.data.OwnLibrary.sameSong(it, o) } &&
+                                missing.none { com.music.bitchord.data.OwnLibrary.sameSong(it, o) }
+                            ) missing += o
+                        }
+                        if (missing.isNotEmpty()) {
+                            com.music.bitchord.data.TrackLog.d("BitChord", "album '$albumName': ${missing.size} of your songs YouTube Music doesn't list here, added")
+                            pageState = UiState.Success(shown + missing)
+                        }
+                    }
+                }
+            }
             if (pageSaved != null || resolved == BrowseType.PLAYLIST || resolved == BrowseType.ALBUM) {
                 if (browseId !in LikedMusicCache.IDS && !browseId.startsWith("local:") && localPlaylist == null) {
                     (pageState as? UiState.Success)?.data?.takeIf { more == null || pageSaved == null || it.size >= pageSaved.size }?.let { songs ->
