@@ -3952,11 +3952,17 @@ fun NowPlayingScreen(
                             // on the square's slot — the frame the sleeve flies
                             // to and from the mini player, and morphs from into
                             // the 16:9 header thumbnail as the player collapses.
-                            val height = boxWidthPx / videoAspectState.value.coerceIn(1f, 2.4f)
-                            val video = Rect(
-                                offset = Offset(0f, square.center.y - height / 2f),
-                                size = Size(boxWidthPx.toFloat(), height),
-                            )
+                            // BitChord Audio: edge to edge, out to the screen's sides at the square's height.
+                            val video = if (videoEdge && playerBounds.width > 0) Rect(
+                                offset = Offset(-(playerBounds.width - boxWidthPx) / 2f, square.top),
+                                size = Size(playerBounds.width.toFloat(), side),
+                            ) else {
+                                val height = boxWidthPx / videoAspectState.value.coerceIn(1f, 2.4f)
+                                Rect(
+                                    offset = Offset(0f, square.center.y - height / 2f),
+                                    size = Size(boxWidthPx.toFloat(), height),
+                                )
+                            }
                             val thumbW = thumbWidth.roundToPx().toFloat()
                             val thumbH = THUMB_SIZE.roundToPx().toFloat()
                             val thumb = Rect(Offset(fromStart(0f, thumbW), 0f), Size(thumbW, thumbH))
@@ -4125,7 +4131,7 @@ fun NowPlayingScreen(
                                         // picture box stands in, still frame first.
                                         // The sleeve is only the collapsed header's
                                         // thumbnail, and what flies to the mini player.
-                                        (if (docking()) 1f else if (!videoMode) (if (heroAudio) 1f else ((0.2f - videoMorph) / 0.2f).coerceIn(0f, 1f)) else (p() * 2f - 1f).coerceIn(0f, 1f))
+                                        (if (docking() || heroAudio) 1f else if (!videoMode) ((0.2f - videoMorph) / 0.2f).coerceIn(0f, 1f) else (p() * 2f - 1f).coerceIn(0f, 1f))
                                 }
                                 .graphicsLayer {
                                     val shown = sleeveShown()
@@ -4548,7 +4554,9 @@ fun NowPlayingScreen(
                                     LaunchedEffect(videoRendered) {
                                         if (videoRendered) { delay(450); backdropDone = true } else backdropDone = false
                                     }
-                                    if (videoMode && (!videoRendered || !backdropDone)) {
+                                    // With the full-bleed cover, the cover itself (the sleeve, under this box)
+                                    // travels into the frame and stays under the picture: nothing drawn here.
+                                    if (videoMode && !heroAudio && (!videoRendered || !backdropDone)) {
                                         VideoLoadingBackdrop(
                                             Modifier
                                                 .fillMaxSize()
