@@ -4970,24 +4970,6 @@ fun NowPlayingScreen(
                                             // lead anywhere; the rest stay plain text.
                                             modifier = Modifier.opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
                                         )
-                                        // BitChord Audio: the artist's logo in place of the name, when there is one.
-                                        val logo by androidx.compose.runtime.produceState<Pair<String, Float>?>(null, song.videoId, song.artistId) {
-                                            value = if (compactHeader) null else runCatching { PlayerPlatform.host.artistLogoFor(song) }.getOrNull()
-                                        }
-                                        val shownLogo = logo.takeIf { !compactHeader }
-                                        if (shownLogo != null) {
-                                            coil3.compose.AsyncImage(
-                                                model = shownLogo.first,
-                                                contentDescription = shownInfo.artist,
-                                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                                                alignment = Alignment.CenterStart,
-                                                modifier = Modifier
-                                                    .padding(vertical = 3.dp)
-                                                    .height(26.dp)
-                                                    .widthIn(max = (26f * shownLogo.second.coerceIn(1f, 6f)).dp)
-                                                    .clickable { if (!PlayerPlatform.host.goToArtist(song)) onOpenArtist(song.artistId, song.artist) },
-                                            )
-                                        } else
                                         ArtistCreditsMarquee(
                                             text = shownInfo.artist,
                                             credits = remember(song.artist, song.artists, song.artistId) {

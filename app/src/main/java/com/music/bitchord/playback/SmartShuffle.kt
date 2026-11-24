@@ -52,6 +52,7 @@ object SmartShuffle {
     /** Songs between suggestions: 3 (they're welcome) to 8 (they're skipped). */
     private var gap = 4f
     private var sinceSuggestion = 0
+    private const val AHEAD = 6
     private val inserted = LinkedHashSet<String>()
     private val _suggested = MutableStateFlow<Set<String>>(emptySet())
     /** The queue entries put there as suggestions (the queue marks them). */
@@ -185,7 +186,7 @@ object SmartShuffle {
         avoidSameArtistNext(player, song)
         // A suggestion due?
         if (!isSuggestion(item)) sinceSuggestion++ else sinceSuggestion = 0
-        if (sinceSuggestion >= gap.toInt()) insertSuggestion(player, song)
+        sprinkle(player)
         if (pool.size < 3) refill(player)
     }
 
@@ -217,23 +218,39 @@ object SmartShuffle {
         }
     }
 
-    private fun insertSuggestion(player: Player, now: Song) {
-        if (pool.isEmpty()) return
+    /** Suggestions kept spread through the songs ahead, one every ~[gap] songs, [AHEAD] of them. */
+    private fun sprinkle(player: Player) {
+        if (!_enabled.value || pool.isEmpty()) return
         val idx = player.currentMediaItemIndex
-        val recent = listOfNotNull(now, player.getMediaItemAt((idx - 1).coerceAtLeast(0)).toSong())
-        val mood = recent.map(::scriptOf).groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
-        val nextArtist = if (idx + 1 < player.mediaItemCount) artistKey(player.getMediaItemAt(idx + 1).toSong()) else ""
-        val pick = pool.firstOrNull { scriptOf(it) == mood && artistKey(it) != artistKey(now) && artistKey(it) != nextArtist }
-            ?: pool.firstOrNull { artistKey(it) != artistKey(now) && artistKey(it) != nextArtist }
-            ?: return
+        if (idx < 0) return
+        val g = gap.toInt().coerceAtLeast(2)
+        var ahead = (idx + 1 until player.mediaItemCount).count { isSuggestion(player.getMediaItemAt(it)) }
+        val last = (idx + 1 until player.mediaItemCount).lastOrNull { isSuggestion(player.getMediaItemAt(it)) }
+        var at = if (last != null) last + 1 + g else idx + 1 + (g - 1 - sinceSuggestion).coerceAtLeast(0)
+        var added = 0
+        while (ahead < AHEAD && pool.isNotEmpty() && at <= player.mediaItemCount) {
+            if (!insertAt(player, at)) break
+            ahead++; added++
+            at += g + 1
+        }
+        if (added > 0) TrackLog.d(TAG, "$added suggestions spread through the queue (one every ~$g songs)")
+    }
+
+    private fun insertAt(player: Player, at: Int): Boolean {
+        val before = runCatching { player.getMediaItemAt(at - 1).toSong() }.getOrNull()
+        val after = if (at < player.mediaItemCount) runCatching { player.getMediaItemAt(at).toSong() }.getOrNull() else null
+        val mood = before?.let(::scriptOf)
+        val near = setOfNotNull(before?.let(::artistKey), after?.let(::artistKey))
+        val pick = pool.firstOrNull { scriptOf(it) == mood && artistKey(it) !in near }
+            ?: pool.firstOrNull { artistKey(it) !in near }
+            ?: return false
         pool.remove(pick)
         val entry = UUID.randomUUID().toString()
         val song = pick.copy(queueEntryId = entry, queueTier = QueueTier.CONTEXT, radioName = suggestionLabel)
         inserted += entry
         published()
-        player.addMediaItem(idx + 1, song.toMediaItem())
-        sinceSuggestion = 0
-        TrackLog.d(TAG, "suggestion next: '${pick.title}' by ${pick.artist}")
+        player.addMediaItem(at, song.toMediaItem())
+        return true
     }
 
     // ---- Where suggestions come from -------------------------------------------------------
@@ -282,6 +299,7 @@ object SmartShuffle {
             }
             found.shuffled().filter { ok(it, inList) }.distinctBy { it.videoId }.forEach { pool.addLast(it) }
             while (pool.size > 30) pool.removeFirst()
+            sprinkle(player)
             TrackLog.d(TAG, "suggestions ready: ${pool.size} (${if (liked) "liked music: Supermix, radios, artists, your files" else "radios in the list's style"})")
         }
     }

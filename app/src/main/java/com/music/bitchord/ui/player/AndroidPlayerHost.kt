@@ -232,21 +232,6 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         MusicVideoEngine.resync()
         showMessage(app.getString(com.music.bitchord.R.string.video_resync))
     }
-    override suspend fun artistLogoFor(song: Song): Pair<String, Float>? {
-        if (!com.music.bitchord.data.settings.AppSettings.artistLogoInPlayer.value) return null
-        // Only for one credited artist: a logo would hide the others.
-        if (song.artists.size > 1) return null
-        val browseId = (song.artists.firstOrNull()?.browseId ?: song.artistId)?.takeIf { it.isNotBlank() } ?: return null
-        val name = song.artists.firstOrNull()?.name ?: song.artist
-        val art = runCatching {
-            com.music.bitchord.data.canvas.AppleArtistArtRepository.artFor(browseId, name) {
-                com.music.bitchord.data.YtMusicRepository.artistLanding(browseId).getOrNull()
-                    ?.let(com.music.bitchord.data.AppleCatalogue::titlesOf).orEmpty()
-            }
-        }.getOrNull() ?: return null
-        return art.logoUrl?.let { it to art.logoAspect }
-    }
-
     override fun videoThumbFor(mediaId: String): String? {
         val ref = com.music.bitchord.data.video.VideoMode.cached(mediaId)
         val id = when {

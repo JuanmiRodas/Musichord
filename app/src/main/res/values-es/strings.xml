@@ -2164,7 +2164,7 @@
     <string name="service_keys_intro">Las claves que escribas aquí se guardan cifradas en este teléfono y nunca se comparten. Sin clave, ese servicio simplemente se salta.</string>
     <string name="service_keys_lastfm_use">Scrobbling, géneros y etiquetas. Crea una cuenta de API gratuita en last.fm/api.</string>
     <string name="service_keys_discogs_use">Datos del álbum y de recopilatorios en la información de la canción cuando MusicBrainz y VGMdb no los tienen. Token personal en discogs.com › Settings › Developers.</string>
-    <string name="service_keys_fanart_use">Fotos, logos y fondos de artista cuando Apple Music no tiene. Clave personal de fanart.tv.</string>
+    <string name="service_keys_fanart_use">Fotos, logos y fondos en la página de artista cuando Apple Music no los tiene. Clave personal de fanart.tv.</string>
     <string name="service_keys_api_key">Clave de la API</string>
     <string name="service_keys_secret">Secreto compartido</string>
     <string name="service_keys_token">Token personal</string>

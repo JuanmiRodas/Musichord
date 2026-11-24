@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -60,7 +59,6 @@ fun ServiceKeysSheet(onDismiss: () -> Unit) {
     val lastSecret by AppSettings.lastfmSecret.collectAsStateWithLifecycle()
     val discogs by AppSettings.discogsToken.collectAsStateWithLifecycle()
     val fanart by AppSettings.fanartKey.collectAsStateWithLifecycle()
-    val logo by AppSettings.artistLogoInPlayer.collectAsStateWithLifecycle()
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding(),
@@ -93,13 +91,6 @@ fun ServiceKeysSheet(onDismiss: () -> Unit) {
                 fields = listOf(Field(stringResource(R.string.service_keys_api_key), fanart) { AppSettings.setFanartKey(it) }),
                 test = { ServiceKeys.test(ServiceKeys.Service.FANART, fanart) },
             )
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.service_keys_logo_title), style = MaterialTheme.typography.bodyLarge)
-                    Text(stringResource(R.string.service_keys_logo_sub), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(checked = logo, onCheckedChange = AppSettings::setArtistLogoInPlayer)
-            }
             Spacer(Modifier.height(16.dp))
         }
     }
