@@ -128,8 +128,11 @@ object SmartShuffle {
 
     fun excluded(song: Song): Boolean {
         val album = song.albumName.orEmpty()
-        if (SOUNDTRACK.containsMatchIn(album) || SOUNDTRACK.containsMatchIn(song.title)) return true
         if (INSTRUMENTAL.containsMatchIn(song.title)) return true
+        // Sung: synced lyrics kept for it — a vocal song, even on a soundtrack or by Yuki
+        // Kajiura alone (many of hers are sung), plays.
+        if (runCatching { com.music.bitchord.data.lyrics.EditedLyrics.has(song.videoId) }.getOrDefault(false)) return false
+        if (SOUNDTRACK.containsMatchIn(album) || SOUNDTRACK.containsMatchIn(song.title)) return true
         // Yuki Kajiura alone is a score; with a singer credited it's a song.
         val artists = artistsOf(song)
         if (artists.isNotEmpty() && artists.all { KAJIURA.containsMatchIn(it) }) return true
