@@ -67,6 +67,16 @@ object SongResearch {
         return SongDna.Fact(about, "Genius", url)
     }
 
+    /** A page listing what a name may refer to — not about anything. */
+    val DISAMBIGUATION = Regex("(?i)may refer to|puede referirse|puede hacer referencia|peut désigner|pode referir|曖昧さ回避|の曖昧さ")
+
+    /** A sentence that is a list (a discography, a year after a year), not something said. */
+    private fun listLike(s: String): Boolean =
+        "===" in s || Regex("\\b(19|20)\\d\\d\\b").findAll(s).count() >= 3 || s.split(" - ").size >= 4
+
+    private val SONG_WORDS = Regex("(?i)canci[oó]n|sencillo|single|song|track|tema|chanson|曲|シングル|楽曲")
+    private const val QUOTES = "\"«“『「'‘"
+
     private val SENTENCE = Regex("""(?<=[.!?。！？])\s+""")
 
     /** The sentences of the artist's (or album's) article that name the song. */
@@ -86,10 +96,20 @@ object SongResearch {
                 ) ?: continue
                 val text = (json.parseToJsonElement(ex).jsonObject["query"]?.jsonObject?.get("pages") as? JsonObject)
                     ?.values?.firstOrNull()?.jsonObject?.get("extract")?.jsonPrimitive?.contentOrNull ?: continue
-                // The article has to be about the artist's work: it names them.
-                if (!text.contains(artist, ignoreCase = true)) continue
+                // The article has to be the artist's, or the song's or its album's (naming the
+                // artist) — not any page where the title happens to be a word ("Galerna", a label).
+                if (!text.contains(artist, ignoreCase = true) || DISAMBIGUATION.containsMatchIn(text.take(400))) continue
+                val pageKey = key(page.replace(Regex("\\s*\\(.*\\)"), ""))
+                val artistPage = pageKey == key(artist) || (key(artist).startsWith(pageKey) && pageKey.length >= 4)
+                val songPage = pageKey.contains(key(title))
+                if (!artistPage && !songPage) continue
                 val sentences = text.split(SENTENCE).map { it.trim().replace(Regex("\\s+"), " ") }
-                    .filter { it.contains(title, ignoreCase = true) && it.length in 40..600 && !it.startsWith("==") }
+                    .filter { s ->
+                        val at = s.indexOf(title, ignoreCase = true)
+                        at >= 0 && s.length in 40..600 && !s.startsWith("==") && !listLike(s) &&
+                            // In the artist's article: the title named as a song — quoted, or with "song", "single"…
+                            (songPage || (at > 0 && s[at - 1] in QUOTES) || SONG_WORDS.containsMatchIn(s))
+                    }
                     .distinct().take(4)
                 if (sentences.isEmpty()) continue
                 out += SongDna.Fact(

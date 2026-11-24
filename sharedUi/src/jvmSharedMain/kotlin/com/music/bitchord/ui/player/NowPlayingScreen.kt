@@ -5490,6 +5490,8 @@ fun NowPlayingScreen(
                                             else -> action.id in lit
                                         },
                                         enabled = action != PlayerQuickAction.VIDEO_AUDIO || videoModeOn,
+                                        // BitChord Audio: the translation shows what it does now — "A" on, "文" off.
+                                        glyphText = if (action == PlayerQuickAction.TRANSLATION) (if (translationOn) "A" else "文") else null,
                                         busy = action == PlayerQuickAction.VIDEO && videoModeOn && videoModeLooking == song.videoId,
                                         haptic = if (action == PlayerQuickAction.STAR) (if (liked) Haptic.ToggleOff else Haptic.ToggleOn) else Haptic.Tap,
                                         // BitChord Audio: a long press does the button's other half.

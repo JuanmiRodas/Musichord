@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.player
 
+import androidx.compose.ui.draw.blur
+
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.material.icons.rounded.MusicNote
@@ -382,6 +384,20 @@ internal fun VideoLoadingBackdrop(
         if (canvas != null) {
             CanvasArtworkPlayer(canvas = canvas, isPlaying = isPlaying, modifier = Modifier.fillMaxSize())
         } else if (artRequest != null) {
+            // BitChord Audio: the frame filled — the cover, blurred and dimmed, behind the
+            // whole cover, instead of black at its sides while the video loads.
+            AsyncImage(
+                model = artRequest,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(28.dp)
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(Color.Black.copy(alpha = 0.35f))
+                    },
+            )
             AsyncImage(
                 model = artRequest,
                 contentDescription = null,

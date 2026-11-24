@@ -238,16 +238,25 @@ object SongDna {
     suspend fun research(song: Song): Dna? {
         val key = keyOf(song)
         val d = cache[key] ?: return null
-        if (d.facts.isNotEmpty() || RESEARCHED in d.sources) return d
+        if (RESEARCHED in d.sources) return d
+        // Looked up by the first, looser research: what it found goes, and it is asked again.
+        val base = if (OLD_RESEARCHED in d.sources) {
+            d.copy(facts = d.facts.filterNot { it.source == "Genius" || it.source == "Wikipedia" }, sources = d.sources - OLD_RESEARCHED)
+        } else d
+        if (base.facts.any { !SongResearch.DISAMBIGUATION.containsMatchIn(it.text.take(300)) }) return base
         val found = runCatching { SongResearch.find(song.title, song.artist) }.getOrDefault(emptyList())
-        val updated = d.copy(facts = d.facts + found, sources = d.sources + RESEARCHED)
+        val updated = base.copy(
+            facts = base.facts.filterNot { SongResearch.DISAMBIGUATION.containsMatchIn(it.text.take(300)) } + found,
+            sources = base.sources + RESEARCHED,
+        )
         cache[key] = updated
         _changes.value++
         scheduleSave()
         return updated
     }
 
-    private const val RESEARCHED = "web research"
+    private const val RESEARCHED = "web research 2"
+    private const val OLD_RESEARCHED = "web research"
 
     /** What is already known for [song], without asking anyone. */
     fun cached(song: Song): Dna? = cache[keyOf(song)]
@@ -810,7 +819,9 @@ object SongDna {
         }
         val (lang, title) = page ?: return f.takeIf { it.credits.isNotEmpty() || it.genres.isNotEmpty() }
         val summary = json("https://$lang.wikipedia.org/api/rest_v1/page/summary/${enc(title.replace(' ', '_')).replace("+", "%20")}")
-        val text = summary?.optString("extract")?.takeIf { it.length > 40 }
+        // BitChord Audio: not a page listing what a name may refer to.
+        val text = summary?.takeIf { it.optString("type") != "disambiguation" }?.optString("extract")
+            ?.takeIf { it.length > 40 && !SongResearch.DISAMBIGUATION.containsMatchIn(it.take(300)) }
         val url = summary?.optJSONObject("content_urls")?.optJSONObject("mobile")?.optString("page")
             ?: "https://$lang.wikipedia.org/wiki/${enc(title.replace(' ', '_'))}"
         if (text != null) f.facts += Fact(clip(text), "Wikipedia", url)

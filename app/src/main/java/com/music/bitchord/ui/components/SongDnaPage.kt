@@ -158,7 +158,8 @@ fun SongDnaPage(
     // BitChord Audio: nothing said about the song by any source — looked up on the web
     // (Genius's note, the Wikipedia articles that name it), with a spinner meanwhile.
     var researched by remember(song.videoId) { mutableStateOf<SongDna.Dna?>(null) }
-    val needsResearch = !loading && dna != null && dna!!.facts.isEmpty() && "web research" !in dna!!.sources
+    val needsResearch = !loading && dna != null && "web research 2" !in dna!!.sources &&
+        (dna!!.facts.none { !com.music.bitchord.data.dna.SongResearch.DISAMBIGUATION.containsMatchIn(it.text.take(300)) } || "web research" in dna!!.sources)
     LaunchedEffect(song.videoId, needsResearch) {
         if (needsResearch) researched = runCatching { SongDna.research(song) }.getOrNull()
     }
@@ -217,8 +218,10 @@ fun SongDnaPage(
             }
         }
         // ── About ──
-        if (d != null && d.facts.isNotEmpty()) {
-            items(d.facts) { f ->
+        // Never a page listing what the name may refer to.
+        val facts = d?.facts.orEmpty().filterNot { com.music.bitchord.data.dna.SongResearch.DISAMBIGUATION.containsMatchIn(it.text.take(300)) }
+        if (d != null && facts.isNotEmpty()) {
+            items(facts) { f ->
                 SectionCard(stringResource(R.string.song_dna_about), badge = f.source) {
                     Expandable(f.text)
                     f.url?.let { u ->

@@ -1130,6 +1130,8 @@ internal fun CircleGlyph(
     /** BitChord Audio: smaller when many share the row. */
     size: Dp = 34.dp,
     enabled: Boolean = true,
+    /** BitChord Audio: a letter drawn in place of [icon] (the translation's "A" / "文"). */
+    glyphText: String? = null,
 ) {
     val haptics = rememberHaptics()
     val discAlpha by animateFloatAsState(
@@ -1174,16 +1176,26 @@ internal fun CircleGlyph(
             Box(Modifier.matchParentSize().glassRim(CircleShape))
         }
         Crossfade(
-            targetState = icon,
+            targetState = glyphText ?: icon,
             animationSpec = tween(durationMillis = 180),
             label = "playerMenuGlyph",
         ) { glyph ->
-            Icon(
-                imageVector = glyph,
-                contentDescription = contentDescription,
-                tint = Color.White,
-                modifier = Modifier.size(19.dp * (size / 34.dp)),
-            )
+            if (glyph is String) {
+                Text(
+                    glyph,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = (17 * (size / 34.dp)).sp,
+                    modifier = Modifier.semantics { this.contentDescription = contentDescription },
+                )
+            } else {
+                Icon(
+                    imageVector = glyph as ImageVector,
+                    contentDescription = contentDescription,
+                    tint = Color.White,
+                    modifier = Modifier.size(19.dp * (size / 34.dp)),
+                )
+            }
         }
         if (busy) {
             CircularProgressIndicator(
