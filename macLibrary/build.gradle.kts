@@ -53,7 +53,7 @@ compose.desktop {
             packageVersion = libVersion
             description = "Tidies the BitChord Audio music library on pCloud"
             vendor = "BitChord Audio"
-            modules("jdk.unsupported", "java.naming")
+            modules("jdk.unsupported", "java.naming", "jdk.charsets")
             macOS {
                 bundleID = "com.music.bitchord.library"
                 appCategory = "public.app-category.music"

@@ -34,7 +34,9 @@ class Manifest(root: String) {
     private val removed = ArrayList<JSONObject>()
 
     init {
-        val text = listOf(local, inLibrary).filter { it.isFile }.maxByOrNull { it.lastModified() }?.let { runCatching { it.readText() }.getOrNull() }
+        // The newest copy that is whole (one cut short while written is passed over).
+        val text = listOf(local, inLibrary).filter { it.isFile }.sortedByDescending { it.lastModified() }
+            .firstNotNullOfOrNull { f -> runCatching { f.readText().also { t -> JSONObject(t) } }.getOrNull() }
         runCatching {
             val o = JSONObject(text!!)
             val f = o.getJSONObject("files")
@@ -109,11 +111,14 @@ class Manifest(root: String) {
         .put("moves", JSONArray(moves)).put("removed", JSONArray(removed)).toString()
 
     /** Written on the Mac at once (a .tmp then renamed); [publish] puts it in the library too. */
-    fun save(publish: ((File) -> Unit)? = null) = runCatching {
-        val tmp = File(local.parentFile, local.name + ".tmp")
-        tmp.writeText(json())
-        tmp.renameTo(local)
-        if (publish != null) publish(local) else { inLibrary.parentFile.mkdirs(); inLibrary.writeText(local.readText()) }
+    // One at a time: two saves sharing one .tmp left built.json cut in the middle (a renamed half-written file).
+    @Synchronized fun save(publish: ((File) -> Unit)? = null) = runCatching {
+        val text = json()
+        val tmp = File(local.parentFile, local.name + "." + java.util.UUID.randomUUID() + ".tmp")
+        tmp.writeText(text)
+        check(tmp.length() > 0 && runCatching { JSONObject(tmp.readText()) }.isSuccess) { "built.json incompleto" }
+        java.nio.file.Files.move(tmp.toPath(), local.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        if (publish != null) publish(local) else { inLibrary.parentFile.mkdirs(); inLibrary.writeText(text) }
     }
 }
 
