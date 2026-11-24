@@ -2166,4 +2166,6 @@
     <string name="qa_smart_suggestion">Smart shuffle suggestion</string>
     <string name="cover_web_search">Search images on the web</string>
     <string name="cover_web_searching">Searching the web…</string>
+    <string name="rounded_edge_video">Rounded edge-to-edge video</string>
+    <string name="rounded_edge_video_sub">The video across the whole width keeps rounded corners</string>
 </resources>

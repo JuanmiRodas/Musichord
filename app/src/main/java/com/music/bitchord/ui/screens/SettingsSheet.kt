@@ -1520,6 +1520,18 @@ fun SettingsScreen(
                     )
                 }
             }
+            // BitChord Audio: rounded corners on the edge-to-edge video.
+            val roundedEdgeTitle = stringResource(R.string.rounded_edge_video)
+            row(roundedEdgeTitle, "video", "corners", "esquinas", "rounded") {
+                val rounded by AppSettings.roundedEdgeVideo.collectAsStateWithLifecycle()
+                SettingsRow(
+                    icon = SfIcons.Fullscreen,
+                    title = roundedEdgeTitle,
+                    subtitle = stringResource(R.string.rounded_edge_video_sub),
+                    trailing = { IosSwitch(checked = rounded, onCheckedChange = AppSettings::setRoundedEdgeVideo) },
+                    onClick = { AppSettings.setRoundedEdgeVideo(!rounded) },
+                )
+            }
             // Listed at every width: the page itself keeps the framed sleeve
             // wherever a square the window's width wouldn't fit — see
             // [ReleaseHeader].

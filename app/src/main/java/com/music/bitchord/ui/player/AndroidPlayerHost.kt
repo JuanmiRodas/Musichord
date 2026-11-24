@@ -232,6 +232,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         MusicVideoEngine.resync()
         showMessage(app.getString(com.music.bitchord.R.string.video_resync))
     }
+    override val roundedEdgeVideo: StateFlow<Boolean> get() = com.music.bitchord.data.settings.AppSettings.roundedEdgeVideo
     override fun videoThumbFor(mediaId: String): String? {
         val ref = com.music.bitchord.data.video.VideoMode.cached(mediaId)
         val id = when {

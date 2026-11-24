@@ -179,6 +179,9 @@ interface PlayerHost {
     /** BitChord Audio: the thumbnail of the video video mode shows for [mediaId], when it has one. */
     fun videoThumbFor(mediaId: String): String? = null
 
+    /** BitChord Audio: the edge-to-edge video with rounded corners (Settings › Appearance). */
+    val roundedEdgeVideo: StateFlow<Boolean> get() = NoVideoMode
+
     /** BitChord Audio: the artist's logo (url, width over height) to show instead of the name; null for none. */
     suspend fun artistLogoFor(song: Song): Pair<String, Float>? = null
     fun autoVideoShade() {}

@@ -2185,4 +2185,6 @@
     <string name="qa_smart_suggestion">Sugerencia del shuffle inteligente</string>
     <string name="cover_web_search">Buscar imágenes en Internet</string>
     <string name="cover_web_searching">Buscando en Internet…</string>
+    <string name="rounded_edge_video">Vídeo de borde a borde redondeado</string>
+    <string name="rounded_edge_video_sub">El vídeo a todo el ancho mantiene las esquinas redondeadas</string>
 </resources>

@@ -1104,6 +1104,7 @@ fun NowPlayingScreen(
     val videoModeSquare = videoModeFrame == 0
     // BitChord Audio: the picture out to the screen's edges, at the album square's height.
     val videoEdge = videoOverlay && videoModeFrame == 1
+    val roundedEdge by PlayerPlatform.host.roundedEdgeVideo.collectAsStateWithLifecycle()
     // BitChord Audio: edge to edge, the player goes to OLED black around the picture and its
     // controls take the video's most present colour, washed out — both easing in and out.
     val shownVideoId by PlayerPlatform.host.videoModeShownVideoId.collectAsStateWithLifecycle()
@@ -4560,11 +4561,11 @@ fun NowPlayingScreen(
                                         VideoLoadingBackdrop(
                                             Modifier
                                                 .fillMaxSize()
-                                                .clip(RoundedCornerShape(if (videoEdge) 0.dp else 10.dp)),
+                                                .clip(RoundedCornerShape(if (videoEdge && !roundedEdge) 0.dp else 10.dp)),
                                             artRequest = art.request,
                                             canvas = canvasAny.takeIf { videoOverlay },
                                             isPlaying = isPlaying,
-                                            edgeRadius = if (videoEdge) 0.dp else 10.dp,
+                                            edgeRadius = if (videoEdge && !roundedEdge) 0.dp else 10.dp,
                                         )
                                     }
                                     // BitChord Audio: in the album square or out to the
@@ -4604,7 +4605,7 @@ fun NowPlayingScreen(
                                         onRenderedChanged = { videoRendered = it },
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .clip(RoundedCornerShape(if ((if (videoMode) videoEdge else lastEdge) && videoMorph > 0.99f) 0.dp else 10.dp))
+                                            .clip(RoundedCornerShape(if ((if (videoMode) videoEdge else lastEdge) && !roundedEdge && videoMorph > 0.99f) 0.dp else 10.dp))
                                             .graphicsLayer {
                                                 // Leaving: zooming in as it fades into the cover under it.
                                                 val leave = if (videoMode) 1f else 1f + (if (heroAudio) 0.12f else 0.35f) * (1f - videoMorph)
@@ -4625,7 +4626,7 @@ fun NowPlayingScreen(
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
                                                 // Edge to edge the picture has no corners, nor does its shade.
-                                                .clip(RoundedCornerShape(bottomStart = if (videoEdge) 0.dp else 10.dp, bottomEnd = if (videoEdge) 0.dp else 10.dp))
+                                                .clip(RoundedCornerShape(bottomStart = if (videoEdge && !roundedEdge) 0.dp else 10.dp, bottomEnd = if (videoEdge && !roundedEdge) 0.dp else 10.dp))
                                                 // BitChord Audio: no lyrics loaded, no shade over the picture.
                                                 .then(if (lyricsTranslation.displayedLyrics.isNotEmpty() && videoShade > 0f) Modifier.videoLyricsScrim(videoShade) else Modifier)
                                                 // BitChord Audio: the foot of the picture, in three: a tap on

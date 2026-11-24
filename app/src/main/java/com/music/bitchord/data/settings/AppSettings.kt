@@ -864,6 +864,8 @@ object AppSettings {
     val fanartKey = MutableStateFlow("")
     /** BitChord Audio: the artist's logo (Apple, fanart.tv) instead of the name in the player. */
     val artistLogoInPlayer = MutableStateFlow(true)
+    /** BitChord Audio: the edge-to-edge video's corners rounded. */
+    val roundedEdgeVideo = MutableStateFlow(true)
     val lastfmEndpoint = MutableStateFlow("")
     val lastfmScrobbleEnabled = MutableStateFlow(false)
     val lastfmNowPlaying = MutableStateFlow(false)
@@ -1262,6 +1264,7 @@ object AppSettings {
         signatureApiEnabled.value = prefs.getBoolean(KEY_SIGNATURE_API_ENABLED, false)
         signatureApiUrl.value = normalizeSignatureApiUrl(prefs.getString(KEY_SIGNATURE_API_URL, "").orEmpty())
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
+        roundedEdgeVideo.value = prefs.getBoolean("rounded_edge_video", true)
         fullBleedDetailArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_DETAIL_ARTWORK, false)
         showTotalDuration.value = prefs.getBoolean(KEY_SHOW_TOTAL_DURATION, false)
         // The old legacy mesh switch answers until a theme has been picked.
@@ -2043,6 +2046,11 @@ object AppSettings {
         val normalized = normalizeSignatureApiUrl(value)
         signatureApiUrl.value = normalized
         prefs.edit().putString(KEY_SIGNATURE_API_URL, normalized).apply()
+    }
+
+    fun setRoundedEdgeVideo(value: Boolean) {
+        roundedEdgeVideo.value = value
+        prefs.edit().putBoolean("rounded_edge_video", value).apply()
     }
 
     fun setFullBleedArtwork(value: Boolean) {
