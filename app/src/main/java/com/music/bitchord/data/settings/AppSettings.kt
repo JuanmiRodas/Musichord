@@ -1,5 +1,6 @@
 package com.music.bitchord.data.settings
 
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.stateIn
 import com.music.bitchord.data.webdav.update
 import com.music.bitchord.ui.components.VideoThumbnails
@@ -1258,6 +1259,7 @@ object AppSettings {
         }
         canvasOverCellular.value = prefs.getBoolean(KEY_CANVAS_OVER_CELLULAR, false)
         disableSpotifyCanvas.value = prefs.getBoolean(KEY_DISABLE_SPOTIFY_CANVAS, false)
+        linkPowerSaving()
         spotifyCanvasAutoHide.value = prefs.getBoolean(KEY_SPOTIFY_CANVAS_AUTO_HIDE, true)
         prioritizeSpotifyCanvas.value = prefs.getBoolean(KEY_PRIORITIZE_SPOTIFY_CANVAS, false)
         updateEffectiveSpotifyCanvasSettings()
@@ -2006,6 +2008,30 @@ object AppSettings {
         setLyricsSources(LyricsSource.offered.toSet())
         setLyricsSourceOrder(LyricsSource.offered)
         setPrioritizeSyllableSync(false)
+    }
+
+    /**
+     * BitChord Audio: one switch, wherever it is shown — the battery menu's "animated covers"
+     * and "UI animations" are this app's own settings (Settings, the canvas button), not copies.
+     */
+    @Volatile private var powerLinked = false
+    private fun linkPowerSaving() {
+        if (powerLinked) return
+        powerLinked = true
+        val ps = com.music.bitchord.ui.player.PowerSaving
+        val covers = com.music.bitchord.ui.player.PowerSaving.Feature.ANIMATED_COVERS
+        val motion = com.music.bitchord.ui.player.PowerSaving.Feature.UI_ANIMATIONS
+        if (ps.isOn(covers) != animatedCanvas.value) ps.set(covers, animatedCanvas.value)
+        if (ps.isOn(motion) == reduceAnimation.value) ps.set(motion, !reduceAnimation.value)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+        with(scope) { launch {
+            ps.on.collect { m ->
+                m[covers.id]?.let { if (it != animatedCanvas.value) setAnimatedCanvas(it) }
+                m[motion.id]?.let { if (it == reduceAnimation.value) setReduceAnimation(!it) }
+            }
+        } }
+        with(scope) { launch { animatedCanvas.collect { if (ps.isOn(covers) != it) ps.set(covers, it) } } }
+        with(scope) { launch { reduceAnimation.collect { if (ps.isOn(motion) == it) ps.set(motion, !it) } } }
     }
 
     fun setAnimatedCanvas(value: Boolean) {

@@ -3439,6 +3439,8 @@ private fun BitChordApp(
                                 onOpenDiscord = { navigator.push(AppRoute.Discord) },
                                 onOpenSpotify = { navigator.push(AppRoute.Spotify) },
                                 contentPadding = listPadding,
+                                onOpenPcloud = { navigator.push(AppRoute.SettingsSection(com.music.bitchord.ui.screens.SettingsCategory.PCLOUD)) },
+                                onOpenPcloudAccount = { navigator.push(AppRoute.Sources) },
                             )
                         } else if (pageRoute == AppRoute.Sources) {
                             SourcesScreen(

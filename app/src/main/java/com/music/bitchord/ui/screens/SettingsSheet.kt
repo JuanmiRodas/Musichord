@@ -2184,7 +2184,7 @@ fun SettingsScreen(
             }
         }
 
-        if (shows(SettingsCategory.ADVANCED)) SearchableSettingsGroup(search, header = stringResource(R.string.advanced_options)) {
+        if (shows(SettingsCategory.PCLOUD)) SearchableSettingsGroup(search, header = stringResource(R.string.pcloud_settings_library)) {
             val sourcePrefTitle = stringResource(R.string.source_preference)
             val sourcePrefValues = listOf(
                 AppSettings.SOURCE_BEST to stringResource(R.string.source_preference_best),
@@ -2216,6 +2216,36 @@ fun SettingsScreen(
                     onClick = { showLibraryFolders = true },
                 )
             }
+            val minKbpsTitle = stringResource(R.string.own_min_kbps)
+            row(minKbpsTitle, "kbps", "bitrate", "calidad", "quality", "pcloud") {
+                val steps = listOf(128, 192, 224, 256, 320)
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = minKbpsTitle,
+                    subtitle = stringResource(R.string.own_min_kbps_subtitle, ownMinKbps),
+                    onClick = {
+                        val next = steps.firstOrNull { it > ownMinKbps } ?: steps.first()
+                        AppSettings.setOwnFileMinKbps(next)
+                    },
+                )
+            }
+            val ownMobileTitle = stringResource(R.string.own_files_mobile_data)
+            row(ownMobileTitle, "pcloud", "mobile data", "datos", "wifi", "my files") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = ownMobileTitle,
+                    subtitle = stringResource(R.string.own_files_mobile_data_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = ownFilesOnMobileData,
+                            onCheckedChange = AppSettings::setOwnFilesOnMobileData,
+                        )
+                    },
+                    onClick = { AppSettings.setOwnFilesOnMobileData(!ownFilesOnMobileData) },
+                )
+            }
+        }
+        if (shows(SettingsCategory.PCLOUD)) SearchableSettingsGroup(search, header = stringResource(R.string.playlists_title)) {
             val playlistsTitle = stringResource(R.string.playlists_title)
             row(playlistsTitle, "playlist", "export", "import", "m3u", "json", "pcloud") {
                 SettingsRow(
@@ -2259,44 +2289,53 @@ fun SettingsScreen(
                     onClick = { importFilePicker.launch(arrayOf("*/*")) },
                 )
             }
-            val minKbpsTitle = stringResource(R.string.own_min_kbps)
-            row(minKbpsTitle, "kbps", "bitrate", "calidad", "quality", "pcloud") {
-                val steps = listOf(128, 192, 224, 256, 320)
+        }
+        if (shows(SettingsCategory.APPEARANCE)) SearchableSettingsGroup(search, header = stringResource(R.string.settings_player_group)) {
+            // BitChord Audio: no "Best part" button (it sat over the lyrics) — the setting went with it.
+            val quickTitle = stringResource(R.string.quick_actions_title)
+            row(quickTitle, "buttons", "botones", "player", "reproductor", "quick") {
+                var editing by remember { mutableStateOf(false) }
                 SettingsRow(
                     icon = SfIcons.GraphicEq,
-                    title = minKbpsTitle,
-                    subtitle = stringResource(R.string.own_min_kbps_subtitle, ownMinKbps),
-                    onClick = {
-                        val next = steps.firstOrNull { it > ownMinKbps } ?: steps.first()
-                        AppSettings.setOwnFileMinKbps(next)
-                    },
+                    title = quickTitle,
+                    subtitle = stringResource(R.string.quick_actions_subtitle),
+                    onClick = { editing = true },
                 )
+                if (editing) com.music.bitchord.ui.components.QuickActionsEditor(onDismiss = { editing = false })
             }
-            val saavnDlTitle = stringResource(R.string.saavn_for_downloads)
-            row(saavnDlTitle, "jiosaavn", "download", "descargas", "320") {
+            val lastWaveTitle = stringResource(R.string.lastwave_player)
+            row(lastWaveTitle, "lastwave", "style", "waves", "glass", "estilo", "ondas") {
+                val lastWave by AppSettings.lastWavePlayer.collectAsStateWithLifecycle()
                 SettingsRow(
                     icon = SfIcons.GraphicEq,
-                    title = saavnDlTitle,
-                    subtitle = stringResource(R.string.saavn_for_downloads_subtitle),
+                    title = lastWaveTitle,
+                    subtitle = stringResource(R.string.lastwave_player_subtitle),
                     trailing = {
-                        IosSwitch(checked = saavnForDownloads, onCheckedChange = AppSettings::setJioSaavnForDownloads)
+                        IosSwitch(
+                            checked = lastWave,
+                            onCheckedChange = AppSettings::setLastWavePlayer,
+                        )
                     },
-                    onClick = { AppSettings.setJioSaavnForDownloads(!saavnForDownloads) },
+                    onClick = { AppSettings.setLastWavePlayer(!lastWave) },
                 )
             }
-            val onlyFromTitle = stringResource(R.string.download_only_from)
-            row(onlyFromTitle, "download", "descargas", "source", "fuente", "jiosaavn", "pcloud") {
+            val showNerdStatsTitle = stringResource(R.string.show_nerd_stats)
+            row(showNerdStatsTitle, "debug", "bitrate", "codec") {
                 SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = onlyFromTitle,
-                    subtitle = if (downloadSources.isEmpty()) {
-                        stringResource(R.string.download_only_from_any)
-                    } else {
-                        com.music.bitchord.download.DownloadSkips.allowedLabels()
+                    icon = SfIcons.BarChart,
+                    title = showNerdStatsTitle,
+                    subtitle = stringResource(R.string.show_nerd_stats_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = nerdStats,
+                            onCheckedChange = AppSettings::setShowNerdStats,
+                        )
                     },
-                    onClick = { showDownloadSources = true },
+                    onClick = { AppSettings.setShowNerdStats(!nerdStats) },
                 )
             }
+        }
+        if (shows(SettingsCategory.APPEARANCE)) SearchableSettingsGroup(search, header = stringResource(R.string.settings_lock_screen_group)) {
             val aodTitle = stringResource(R.string.aod_title)
             row(aodTitle, "aod", "always on", "siempre activa", "lock", "bloqueo", "oled", "pantalla") {
                 SettingsRow(
@@ -2340,192 +2379,8 @@ fun SettingsScreen(
                     )
                 }
             }
-            val logsTitle = stringResource(R.string.crash_logs_title)
-            val crashReports by com.music.bitchord.data.CrashLog.reports.collectAsStateWithLifecycle()
-            val logsContext = androidx.compose.ui.platform.LocalContext.current
-            row(logsTitle, "log", "registro", "crash", "error", "fallo", "debug") {
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = logsTitle,
-                    subtitle = stringResource(R.string.crash_logs_subtitle, crashReports),
-                    onClick = { com.music.bitchord.data.CrashLog.share(logsContext) },
-                )
-            }
-            val connectTitle = stringResource(R.string.connect_title)
-            row(connectTitle, "cast", "chromecast", "speaker", "altavoz", "connect", "receiver") {
-                val connectContext = androidx.compose.ui.platform.LocalContext.current
-                val connectId = remember(showConnect) { com.music.bitchord.playback.cast.CastConnect.appId(connectContext) }
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = connectTitle,
-                    subtitle = connectId?.let { stringResource(R.string.connect_on, it) } ?: stringResource(R.string.connect_off),
-                    onClick = { showConnect = true },
-                )
-            }
-            val logUploadTitle = stringResource(R.string.log_upload_title)
-            row(logUploadTitle, "log", "registro", "github", "debug") {
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = logUploadTitle,
-                    subtitle = if (logRepo.isBlank()) stringResource(R.string.log_upload_off)
-                    else logRepo + (logStatus?.let { " · $it" } ?: ""),
-                    onClick = { showLogUpload = true },
-                )
-            }
-            val noRecTitle = stringResource(R.string.no_recommend_title)
-            row(noRecTitle, "recommend", "recomendar", "radio", "autoplay", "exclude", "excluir") {
-                val noRec by com.music.bitchord.data.NoRecommend.entries.collectAsStateWithLifecycle()
-                SettingsRow(
-                    icon = SfIcons.VisibilityOff,
-                    title = noRecTitle,
-                    subtitle = stringResource(R.string.no_recommend_subtitle, noRec.size),
-                    onClick = { showNoRecommend = true },
-                )
-            }
-            val cleanerTitle = stringResource(R.string.cleaner_title)
-            row(cleanerTitle, "liked", "me gusta", "duplicates", "duplicados", "clean", "limpiar") {
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = cleanerTitle,
-                    subtitle = stringResource(R.string.cleaner_subtitle),
-                    onClick = { com.music.bitchord.ui.components.LikedCleanerUi.show() },
-                )
-            }
-            val skipsTitle = stringResource(R.string.download_skips_title)
-            row(skipsTitle, "download", "descargas", "skipped", "omitidas", "report", "informe") {
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = skipsTitle,
-                    subtitle = stringResource(R.string.download_skips_subtitle, downloadSkips.size),
-                    onClick = { showDownloadSkips = true },
-                )
-            }
-            val upgradeDlTitle = stringResource(R.string.upgrade_downloads)
-            row(upgradeDlTitle, "download", "descargas", "upgrade", "mejorar", "quality") {
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = upgradeDlTitle,
-                    subtitle = stringResource(R.string.upgrade_downloads_subtitle),
-                    trailing = {
-                        IosSwitch(checked = upgradeDownloads, onCheckedChange = AppSettings::setUpgradeDownloads)
-                    },
-                    onClick = { AppSettings.setUpgradeDownloads(!upgradeDownloads) },
-                )
-            }
-            val ownMobileTitle = stringResource(R.string.own_files_mobile_data)
-            row(ownMobileTitle, "pcloud", "mobile data", "datos", "wifi", "my files") {
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = ownMobileTitle,
-                    subtitle = stringResource(R.string.own_files_mobile_data_subtitle),
-                    trailing = {
-                        IosSwitch(
-                            checked = ownFilesOnMobileData,
-                            onCheckedChange = AppSettings::setOwnFilesOnMobileData,
-                        )
-                    },
-                    onClick = { AppSettings.setOwnFilesOnMobileData(!ownFilesOnMobileData) },
-                )
-            }
-            val audioOnlyTitle = stringResource(R.string.audio_only)
-            row(audioOnlyTitle, "audio", "video", "music video", "music only") {
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = audioOnlyTitle,
-                    subtitle = stringResource(R.string.audio_only_subtitle),
-                    trailing = {
-                        IosSwitch(
-                            checked = audioOnly,
-                            onCheckedChange = AppSettings::setAudioOnly,
-                        )
-                    },
-                    onClick = { AppSettings.setAudioOnly(!audioOnly) },
-                )
-            }
-            val smartAlignmentTitle = stringResource(R.string.smart_version_alignment)
-            row(smartAlignmentTitle, "alignment", "sync", "waveform", "video", "audio", "skit", "intro") {
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = smartAlignmentTitle,
-                    subtitle = stringResource(R.string.smart_version_alignment_subtitle),
-                    trailing = {
-                        IosSwitch(
-                            checked = smartVersionAlignment,
-                            onCheckedChange = AppSettings::setSmartVersionAlignment,
-                        )
-                    },
-                    onClick = { AppSettings.setSmartVersionAlignment(!smartVersionAlignment) },
-                )
-            }
-            // BitChord Audio: no "Best part" button (it sat over the lyrics) — the setting went with it.
-            val quickTitle = stringResource(R.string.quick_actions_title)
-            val vkTitle = stringResource(R.string.vk_account)
-            row(vkTitle, "vk", "vkontakte", "video", "vídeo", "login") {
-                var vkIn by remember { mutableStateOf(com.music.bitchord.data.video.VkVideo.signedIn()) }
-                val opening by com.music.bitchord.data.video.VkVideo.loginOpen.collectAsStateWithLifecycle()
-                LaunchedEffect(opening) { vkIn = com.music.bitchord.data.video.VkVideo.signedIn() }
-                SettingsRow(
-                    icon = SfIcons.PlayCircle,
-                    title = vkTitle,
-                    subtitle = stringResource(if (vkIn) R.string.vk_signed_in else R.string.vk_signed_out),
-                    onClick = {
-                        if (vkIn) { com.music.bitchord.data.video.VkVideo.signOut(); vkIn = false }
-                        else com.music.bitchord.data.video.VkVideo.loginOpen.value = true
-                    },
-                )
-            }
-            val keysTitle = stringResource(R.string.service_keys_title)
-            row(keysTitle, "keys", "claves", "api", "last.fm", "lastfm", "discogs", "fanart", "token") {
-                var open by remember { mutableStateOf(false) }
-                SettingsRow(
-                    icon = SfIcons.Key,
-                    title = keysTitle,
-                    subtitle = stringResource(R.string.service_keys_subtitle),
-                    onClick = { open = true },
-                )
-                if (open) com.music.bitchord.ui.components.ServiceKeysSheet(onDismiss = { open = false })
-            }
-            row(quickTitle, "buttons", "botones", "player", "reproductor", "quick") {
-                var editing by remember { mutableStateOf(false) }
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = quickTitle,
-                    subtitle = stringResource(R.string.quick_actions_subtitle),
-                    onClick = { editing = true },
-                )
-                if (editing) com.music.bitchord.ui.components.QuickActionsEditor(onDismiss = { editing = false })
-            }
-            val lastWaveTitle = stringResource(R.string.lastwave_player)
-            row(lastWaveTitle, "lastwave", "style", "waves", "glass", "estilo", "ondas") {
-                val lastWave by AppSettings.lastWavePlayer.collectAsStateWithLifecycle()
-                SettingsRow(
-                    icon = SfIcons.GraphicEq,
-                    title = lastWaveTitle,
-                    subtitle = stringResource(R.string.lastwave_player_subtitle),
-                    trailing = {
-                        IosSwitch(
-                            checked = lastWave,
-                            onCheckedChange = AppSettings::setLastWavePlayer,
-                        )
-                    },
-                    onClick = { AppSettings.setLastWavePlayer(!lastWave) },
-                )
-            }
-            val showNerdStatsTitle = stringResource(R.string.show_nerd_stats)
-            row(showNerdStatsTitle, "debug", "bitrate", "codec") {
-                SettingsRow(
-                    icon = SfIcons.BarChart,
-                    title = showNerdStatsTitle,
-                    subtitle = stringResource(R.string.show_nerd_stats_subtitle),
-                    trailing = {
-                        IosSwitch(
-                            checked = nerdStats,
-                            onCheckedChange = AppSettings::setShowNerdStats,
-                        )
-                    },
-                    onClick = { AppSettings.setShowNerdStats(!nerdStats) },
-                )
-            }
+        }
+        if (shows(SettingsCategory.APPEARANCE)) SearchableSettingsGroup(search, header = stringResource(R.string.app_icon)) {
             val appIconTitle = stringResource(R.string.app_icon)
             row(appIconTitle, "icon", "launcher", "logo") {
                 var selectedIcon by remember { mutableStateOf(AppIcon.current(context)) }
@@ -2586,6 +2441,141 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+                }
+        if (shows(SettingsCategory.PLAYBACK)) SearchableSettingsGroup(search, header = stringResource(R.string.settings_video_speakers_group)) {
+            val audioOnlyTitle = stringResource(R.string.audio_only)
+            row(audioOnlyTitle, "audio", "video", "music video", "music only") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = audioOnlyTitle,
+                    subtitle = stringResource(R.string.audio_only_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = audioOnly,
+                            onCheckedChange = AppSettings::setAudioOnly,
+                        )
+                    },
+                    onClick = { AppSettings.setAudioOnly(!audioOnly) },
+                )
+            }
+            val smartAlignmentTitle = stringResource(R.string.smart_version_alignment)
+            row(smartAlignmentTitle, "alignment", "sync", "waveform", "video", "audio", "skit", "intro") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = smartAlignmentTitle,
+                    subtitle = stringResource(R.string.smart_version_alignment_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = smartVersionAlignment,
+                            onCheckedChange = AppSettings::setSmartVersionAlignment,
+                        )
+                    },
+                    onClick = { AppSettings.setSmartVersionAlignment(!smartVersionAlignment) },
+                )
+            }
+            val connectTitle = stringResource(R.string.connect_title)
+            row(connectTitle, "cast", "chromecast", "speaker", "altavoz", "connect", "receiver") {
+                val connectContext = androidx.compose.ui.platform.LocalContext.current
+                val connectId = remember(showConnect) { com.music.bitchord.playback.cast.CastConnect.appId(connectContext) }
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = connectTitle,
+                    subtitle = connectId?.let { stringResource(R.string.connect_on, it) } ?: stringResource(R.string.connect_off),
+                    onClick = { showConnect = true },
+                )
+            }
+        }
+        if (shows(SettingsCategory.DOWNLOADS)) SearchableSettingsGroup(search, header = stringResource(R.string.settings_download_sources_group)) {
+            val saavnDlTitle = stringResource(R.string.saavn_for_downloads)
+            row(saavnDlTitle, "jiosaavn", "download", "descargas", "320") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = saavnDlTitle,
+                    subtitle = stringResource(R.string.saavn_for_downloads_subtitle),
+                    trailing = {
+                        IosSwitch(checked = saavnForDownloads, onCheckedChange = AppSettings::setJioSaavnForDownloads)
+                    },
+                    onClick = { AppSettings.setJioSaavnForDownloads(!saavnForDownloads) },
+                )
+            }
+            val onlyFromTitle = stringResource(R.string.download_only_from)
+            row(onlyFromTitle, "download", "descargas", "source", "fuente", "jiosaavn", "pcloud") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = onlyFromTitle,
+                    subtitle = if (downloadSources.isEmpty()) {
+                        stringResource(R.string.download_only_from_any)
+                    } else {
+                        com.music.bitchord.download.DownloadSkips.allowedLabels()
+                    },
+                    onClick = { showDownloadSources = true },
+                )
+            }
+            val upgradeDlTitle = stringResource(R.string.upgrade_downloads)
+            row(upgradeDlTitle, "download", "descargas", "upgrade", "mejorar", "quality") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = upgradeDlTitle,
+                    subtitle = stringResource(R.string.upgrade_downloads_subtitle),
+                    trailing = {
+                        IosSwitch(checked = upgradeDownloads, onCheckedChange = AppSettings::setUpgradeDownloads)
+                    },
+                    onClick = { AppSettings.setUpgradeDownloads(!upgradeDownloads) },
+                )
+            }
+            val skipsTitle = stringResource(R.string.download_skips_title)
+            row(skipsTitle, "download", "descargas", "skipped", "omitidas", "report", "informe") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = skipsTitle,
+                    subtitle = stringResource(R.string.download_skips_subtitle, downloadSkips.size),
+                    onClick = { showDownloadSkips = true },
+                )
+            }
+        }
+        if (shows(SettingsCategory.CONTENT_PREFERENCES)) SearchableSettingsGroup(search, header = stringResource(R.string.settings_recommendations_group)) {
+            val noRecTitle = stringResource(R.string.no_recommend_title)
+            row(noRecTitle, "recommend", "recomendar", "radio", "autoplay", "exclude", "excluir") {
+                val noRec by com.music.bitchord.data.NoRecommend.entries.collectAsStateWithLifecycle()
+                SettingsRow(
+                    icon = SfIcons.VisibilityOff,
+                    title = noRecTitle,
+                    subtitle = stringResource(R.string.no_recommend_subtitle, noRec.size),
+                    onClick = { showNoRecommend = true },
+                )
+            }
+            val cleanerTitle = stringResource(R.string.cleaner_title)
+            row(cleanerTitle, "liked", "me gusta", "duplicates", "duplicados", "clean", "limpiar") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = cleanerTitle,
+                    subtitle = stringResource(R.string.cleaner_subtitle),
+                    onClick = { com.music.bitchord.ui.components.LikedCleanerUi.show() },
+                )
+            }
+        }
+        if (shows(SettingsCategory.ADVANCED)) SearchableSettingsGroup(search, header = stringResource(R.string.advanced_options)) {
+            val logsTitle = stringResource(R.string.crash_logs_title)
+            val crashReports by com.music.bitchord.data.CrashLog.reports.collectAsStateWithLifecycle()
+            val logsContext = androidx.compose.ui.platform.LocalContext.current
+            row(logsTitle, "log", "registro", "crash", "error", "fallo", "debug") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = logsTitle,
+                    subtitle = stringResource(R.string.crash_logs_subtitle, crashReports),
+                    onClick = { com.music.bitchord.data.CrashLog.share(logsContext) },
+                )
+            }
+            val logUploadTitle = stringResource(R.string.log_upload_title)
+            row(logUploadTitle, "log", "registro", "github", "debug") {
+                SettingsRow(
+                    icon = SfIcons.GraphicEq,
+                    title = logUploadTitle,
+                    subtitle = if (logRepo.isBlank()) stringResource(R.string.log_upload_off)
+                    else logRepo + (logStatus?.let { " · $it" } ?: ""),
+                    onClick = { showLogUpload = true },
+                )
             }
         }
 
@@ -3717,7 +3707,12 @@ enum class SettingsCategory(@param:StringRes val title: Int) {
     MISCELLANEOUS(R.string.miscellaneous),
     LANGUAGE(R.string.language),
     ADVANCED(R.string.advanced_options),
+    /** BitChord Audio: pCloud's own settings, opened from Account and integrations (not listed here). */
+    PCLOUD(R.string.pcloud_settings_title),
     ;
+
+    /** Listed on the main page; the service pages are reached from Account and integrations. */
+    val listed: Boolean get() = this != PCLOUD
 
     val icon: ImageVector
         get() = when (this) {
@@ -3732,6 +3727,7 @@ enum class SettingsCategory(@param:StringRes val title: Int) {
             MISCELLANEOUS -> SfIcons.Miscellaneous
             LANGUAGE -> SfIcons.Language
             ADVANCED -> SfIcons.Advanced
+            PCLOUD -> SfIcons.Cloud
         }
 }
 
@@ -3749,7 +3745,7 @@ enum class SettingsChoiceKind(@param:StringRes val title: Int) {
 @Composable
 private fun SettingsCategoryList(onOpen: (SettingsCategory) -> Unit) {
     SettingsGroup {
-        SettingsCategory.entries.forEachIndexed { index, category ->
+        SettingsCategory.entries.filter { it.listed }.forEachIndexed { index, category ->
             if (index > 0) RowDivider()
             SettingsRow(
                 icon = category.icon,

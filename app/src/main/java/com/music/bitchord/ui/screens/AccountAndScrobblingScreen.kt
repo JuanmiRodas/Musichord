@@ -1,5 +1,9 @@
 package com.music.bitchord.ui.screens
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import com.music.bitchord.ui.icons.SfIcons
 import com.music.bitchord.auth.clearSpotifyWebSession
 import androidx.compose.foundation.layout.Column
@@ -48,6 +52,9 @@ fun AccountAndScrobblingScreen(
     onOpenDiscord: () -> Unit,
     onOpenSpotify: () -> Unit,
     contentPadding: PaddingValues,
+    /** BitChord Audio: pCloud's settings page, and its sign-in (Sources). */
+    onOpenPcloud: () -> Unit = {},
+    onOpenPcloudAccount: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
@@ -67,6 +74,7 @@ fun AccountAndScrobblingScreen(
     val discordRpcEnabled by AppSettings.discordRpcEnabled.collectAsStateWithLifecycle()
     val spotifyConnected by AppSettings.spotifySpdcToken.collectAsStateWithLifecycle()
     val youtubePremiumAudio by AppSettings.youtubePremiumAudio.collectAsStateWithLifecycle()
+    var lastfmLoginOpen by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -214,7 +222,7 @@ fun AccountAndScrobblingScreen(
                             checked = lastfmEnabled,
                             onCheckedChange = { checked ->
                                 if (checked && lastfmSessionKey.isBlank()) {
-                                    onOpenLastfmLogin()
+                                    lastfmLoginOpen = true
                                 } else {
                                     AppSettings.setLastfmEnabled(checked)
                                 }
@@ -229,10 +237,15 @@ fun AccountAndScrobblingScreen(
                             AppSettings.setLastfmScrobbleEnabled(false)
                             AppSettings.setLastfmNowPlaying(false)
                         } else {
-                            onOpenLastfmLogin()
+                            lastfmLoginOpen = !lastfmLoginOpen
                         }
                     },
                 )
+                // BitChord Audio: Last.fm's sign-in right here, under its row (no pop-up).
+                if (lastfmSessionKey.isBlank() && lastfmLoginOpen) {
+                    RowDivider()
+                    LastfmInlineLogin(onDone = { lastfmLoginOpen = false })
+                }
                 if (lastfmEnabled && lastfmSessionKey.isNotBlank()) {
                     RowDivider()
                     SettingsRow(
@@ -355,7 +368,114 @@ fun AccountAndScrobblingScreen(
             }
         }
 
+        // BitChord Audio: each service with everything it needs in one place.
+        SettingsGroup(header = stringResource(R.string.lastfm_keys_header), footer = stringResource(R.string.lastfm_keys_footer)) {
+            com.music.bitchord.ui.components.ServiceKeyFields(com.music.bitchord.data.ServiceKeys.Service.LASTFM)
+        }
+
+        SettingsGroup(header = "pCloud", footer = stringResource(R.string.pcloud_group_footer)) {
+            val webdavUser by AppSettings.webdavUsername.collectAsStateWithLifecycle()
+            SettingsRow(
+                icon = SfIcons.Cloud,
+                title = stringResource(R.string.pcloud_account_row),
+                subtitle = webdavUser.takeIf { it.isNotBlank() }?.let { stringResource(R.string.signed_in_as, it) }
+                    ?: stringResource(R.string.tap_to_sign_in),
+                onClick = onOpenPcloudAccount,
+            )
+            RowDivider()
+            SettingsRow(
+                icon = SfIcons.Storage,
+                title = stringResource(R.string.pcloud_settings_title),
+                subtitle = stringResource(R.string.pcloud_settings_subtitle),
+                onClick = onOpenPcloud,
+            )
+        }
+
+        SettingsGroup(header = "VK", footer = stringResource(R.string.vk_group_footer)) {
+            var vkIn by remember { mutableStateOf(com.music.bitchord.data.video.VkVideo.signedIn()) }
+            val opening by com.music.bitchord.data.video.VkVideo.loginOpen.collectAsStateWithLifecycle()
+            androidx.compose.runtime.LaunchedEffect(opening) { vkIn = com.music.bitchord.data.video.VkVideo.signedIn() }
+            SettingsRow(
+                icon = SfIcons.PlayCircle,
+                title = stringResource(R.string.vk_account),
+                subtitle = stringResource(if (vkIn) R.string.vk_signed_in else R.string.vk_signed_out),
+                onClick = { if (!vkIn) com.music.bitchord.data.video.VkVideo.loginOpen.value = true },
+            )
+            if (vkIn) {
+                FullWidthDivider()
+                DestructiveRow(label = stringResource(R.string.sign_out), onClick = {
+                    com.music.bitchord.data.video.VkVideo.signOut(); vkIn = false
+                })
+            }
+        }
+
+        SettingsGroup(header = stringResource(R.string.song_info_services_header), footer = stringResource(R.string.service_keys_intro)) {
+            com.music.bitchord.ui.components.ServiceKeyFields(com.music.bitchord.data.ServiceKeys.Service.DISCOGS)
+            RowDivider()
+            com.music.bitchord.ui.components.ServiceKeyFields(com.music.bitchord.data.ServiceKeys.Service.FANART)
+        }
+
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** BitChord Audio: Last.fm's sign-in inline — name, password, a button, and what went wrong. */
+@Composable
+private fun LastfmInlineLogin(onDone: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var user by remember { mutableStateOf("") }
+    var pass by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    androidx.compose.foundation.layout.Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+    ) {
+        androidx.compose.material3.OutlinedTextField(
+            value = user, onValueChange = { user = it }, singleLine = true,
+            label = { androidx.compose.material3.Text(stringResource(R.string.username)) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        androidx.compose.material3.OutlinedTextField(
+            value = pass, onValueChange = { pass = it }, singleLine = true,
+            label = { androidx.compose.material3.Text(stringResource(R.string.password)) },
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        error?.let { androidx.compose.material3.Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        androidx.compose.material3.Button(
+            enabled = !loading && user.isNotBlank() && pass.isNotBlank(),
+            onClick = {
+                loading = true
+                error = null
+                scope.launch {
+                    try {
+                        if (AppSettings.lastfmApiKey.value.isBlank() || AppSettings.lastfmSecret.value.isBlank()) {
+                            error = context.getString(R.string.lastfm_keys_needed)
+                            return@launch
+                        }
+                        com.music.bitchord.data.scrobbling.LastFM.initialize(
+                            apiKey = AppSettings.lastfmApiKey.value,
+                            secret = AppSettings.lastfmSecret.value,
+                        )
+                        com.music.bitchord.data.scrobbling.LastFM.getMobileSession(user.trim(), pass)
+                            .onSuccess { auth ->
+                                AppSettings.setLastfmSessionKey(auth.session.key)
+                                AppSettings.setLastfmUsername(auth.session.name)
+                                AppSettings.setLastfmEnabled(true)
+                                com.music.bitchord.data.ServiceKeys.applyLastFm()
+                                onDone()
+                            }
+                            .onFailure { e -> error = e.message ?: context.getString(R.string.login_failed) }
+                    } catch (e: Exception) {
+                        error = e.message ?: context.getString(R.string.login_failed)
+                    } finally {
+                        loading = false
+                    }
+                }
+            },
+        ) { androidx.compose.material3.Text(stringResource(R.string.sign_in)) }
     }
 }
 

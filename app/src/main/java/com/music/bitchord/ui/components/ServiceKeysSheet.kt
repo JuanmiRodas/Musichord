@@ -98,6 +98,46 @@ fun ServiceKeysSheet(onDismiss: () -> Unit) {
 
 private class Field(val label: String, val value: String, val set: (String) -> Unit)
 
+/**
+ * BitChord Audio: one service's key fields, inline in a settings card (Account and
+ * integrations) — masked, encrypted, checked against the service, removable.
+ */
+@Composable
+fun ServiceKeyFields(service: ServiceKeys.Service) {
+    val lastKey by AppSettings.lastfmApiKey.collectAsStateWithLifecycle()
+    val lastSecret by AppSettings.lastfmSecret.collectAsStateWithLifecycle()
+    val discogs by AppSettings.discogsToken.collectAsStateWithLifecycle()
+    val fanart by AppSettings.fanartKey.collectAsStateWithLifecycle()
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        when (service) {
+            ServiceKeys.Service.LASTFM -> ServiceBlock(
+                name = stringResource(R.string.service_keys_lastfm_keys),
+                use = stringResource(R.string.service_keys_lastfm_use),
+                fields = listOf(
+                    Field(stringResource(R.string.service_keys_api_key), lastKey) { AppSettings.setLastfmApiKey(it.trim()); ServiceKeys.applyLastFm() },
+                    Field(stringResource(R.string.service_keys_secret), lastSecret) { AppSettings.setLastfmSecret(it.trim()); ServiceKeys.applyLastFm() },
+                ),
+                test = { ServiceKeys.test(ServiceKeys.Service.LASTFM, lastKey, lastSecret) },
+            )
+            ServiceKeys.Service.DISCOGS -> ServiceBlock(
+                name = "Discogs",
+                use = stringResource(R.string.service_keys_discogs_use),
+                fields = listOf(Field(stringResource(R.string.service_keys_token), discogs) { AppSettings.setDiscogsToken(it) }),
+                test = { ServiceKeys.test(ServiceKeys.Service.DISCOGS, discogs) },
+            )
+            ServiceKeys.Service.FANART -> ServiceBlock(
+                name = "fanart.tv",
+                use = stringResource(R.string.service_keys_fanart_use),
+                fields = listOf(Field(stringResource(R.string.service_keys_api_key), fanart) { AppSettings.setFanartKey(it) }),
+                test = { ServiceKeys.test(ServiceKeys.Service.FANART, fanart) },
+            )
+        }
+    }
+}
+
 @Composable
 private fun ServiceBlock(name: String, use: String, fields: List<Field>, test: suspend () -> ServiceKeys.Check) {
     val scope = rememberCoroutineScope()

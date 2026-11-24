@@ -2187,4 +2187,20 @@
     <string name="cover_web_searching">Buscando en Internet…</string>
     <string name="rounded_edge_video">Vídeo de borde a borde redondeado</string>
     <string name="rounded_edge_video_sub">El vídeo a todo el ancho mantiene las esquinas redondeadas</string>
+    <string name="pcloud_settings_library">Biblioteca</string>
+    <string name="settings_player_group">Reproductor</string>
+    <string name="settings_lock_screen_group">Pantalla de bloqueo</string>
+    <string name="settings_video_speakers_group">Vídeo y altavoces</string>
+    <string name="settings_download_sources_group">Fuentes de descarga</string>
+    <string name="settings_recommendations_group">Recomendaciones</string>
+    <string name="pcloud_settings_title">Ajustes de pCloud</string>
+    <string name="pcloud_settings_subtitle">Carpetas, fuente preferida, calidad mínima, datos móviles, listas</string>
+    <string name="pcloud_account_row">Cuenta de pCloud</string>
+    <string name="pcloud_group_footer">Tu biblioteca de música en pCloud: inicio de sesión y todo lo que tiene que ver con cómo se usa.</string>
+    <string name="vk_group_footer">Vídeos de VK con tu propia sesión de VK.</string>
+    <string name="song_info_services_header">Información de canciones y artistas</string>
+    <string name="lastfm_keys_header">Clave de la API de Last.fm</string>
+    <string name="lastfm_keys_footer">Necesaria para iniciar sesión y hacer scrobbling. Crea una cuenta de API gratuita en last.fm/api.</string>
+    <string name="lastfm_keys_needed">Primero añade abajo la clave y el secreto de la API de Last.fm.</string>
+    <string name="service_keys_lastfm_keys">Clave y secreto de la API</string>
 </resources>

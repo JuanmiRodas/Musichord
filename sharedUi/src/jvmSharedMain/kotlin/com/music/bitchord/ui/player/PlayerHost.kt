@@ -179,6 +179,9 @@ interface PlayerHost {
     /** BitChord Audio: the thumbnail of the video video mode shows for [mediaId], when it has one. */
     fun videoThumbFor(mediaId: String): String? = null
 
+    /** BitChord Audio: the canvas button's setting — 0 off (still covers), 1 Spotify's canvas, 2 animated covers only. */
+    val canvasMode: StateFlow<Int> get() = NoCanvasMode
+
     /** BitChord Audio: the edge-to-edge video with rounded corners (Settings › Appearance). */
     val roundedEdgeVideo: StateFlow<Boolean> get() = NoVideoMode
 
@@ -372,6 +375,7 @@ internal fun MusicVideoSurface(
 
 private val NoVideoMode = MutableStateFlow(false)
 private val NoSuggestions = MutableStateFlow<Set<String>>(emptySet())
+private val NoCanvasMode = MutableStateFlow(1)
 private val NoVideoOn = MutableStateFlow(true)
 private val NoVideoFrame = MutableStateFlow(2)
 private val NoVideoScale = MutableStateFlow(1f)

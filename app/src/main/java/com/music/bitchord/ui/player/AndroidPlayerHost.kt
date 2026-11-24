@@ -232,6 +232,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         MusicVideoEngine.resync()
         showMessage(app.getString(com.music.bitchord.R.string.video_resync))
     }
+    override val canvasMode: StateFlow<Int> by lazy {
+        kotlinx.coroutines.flow.combine(
+            com.music.bitchord.data.settings.AppSettings.animatedCanvas,
+            com.music.bitchord.data.settings.AppSettings.disableSpotifyCanvas,
+        ) { on, spotifyOff -> if (!on) 0 else if (spotifyOff) 2 else 1 }
+            .stateIn(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default), kotlinx.coroutines.flow.SharingStarted.Eagerly, 1)
+    }
     override val roundedEdgeVideo: StateFlow<Boolean> get() = com.music.bitchord.data.settings.AppSettings.roundedEdgeVideo
     override fun videoThumbFor(mediaId: String): String? {
         val ref = com.music.bitchord.data.video.VideoMode.cached(mediaId)

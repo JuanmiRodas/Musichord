@@ -75,9 +75,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.SlowMotionVideo
-import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.MotionPhotosOn
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.SmartDisplay
@@ -1108,6 +1105,7 @@ fun NowPlayingScreen(
     // BitChord Audio: the picture out to the screen's edges, at the album square's height.
     val videoEdge = videoOverlay && videoModeFrame == 1
     val roundedEdge by PlayerPlatform.host.roundedEdgeVideo.collectAsStateWithLifecycle()
+    val canvasMode by PlayerPlatform.host.canvasMode.collectAsStateWithLifecycle()
     // BitChord Audio: edge to edge, the player goes to OLED black around the picture and its
     // controls take the video's most present colour, washed out — both easing in and out.
     val shownVideoId by PlayerPlatform.host.videoModeShownVideoId.collectAsStateWithLifecycle()
@@ -5553,10 +5551,10 @@ fun NowPlayingScreen(
                                         icon = when (action) {
                                             PlayerQuickAction.STAR -> if (liked) BitChordIcons.StarFilled else BitChordIcons.Star
                                             // BitChord Audio: what the cover is now — still, Spotify's canvas, or an animated cover.
-                                            PlayerQuickAction.CANVAS -> when (canvasAny?.source) {
-                                                CanvasSource.SPOTIFY -> Icons.Rounded.SlowMotionVideo
-                                                null -> Icons.Rounded.Image
-                                                else -> Icons.Rounded.MotionPhotosOn
+                                            PlayerQuickAction.CANVAS -> when (canvasMode) {
+                                                1 -> CanvasIcons.SpotifyCanvas
+                                                2 -> CanvasIcons.AnimatedCover
+                                                else -> CanvasIcons.StillCover
                                             }
                                             else -> action.icon
                                         },
