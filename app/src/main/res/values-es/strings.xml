@@ -2155,4 +2155,7 @@
     <string name="canvas_spotify_on">Canvas de Spotify encendido</string>
     <string name="canvas_all_off">Portadas animadas apagadas</string>
     <string name="canvas_all_on">Portadas animadas encendidas</string>
+    <string name="vk_account">Cuenta de VK (vídeos)</string>
+    <string name="vk_signed_in">Sesión de VK iniciada: sus vídeos se buscan cuando YouTube no tiene. Toca para cerrar sesión</string>
+    <string name="vk_signed_out">Inicia sesión en la página de VK para usar sus vídeos</string>
 </resources>

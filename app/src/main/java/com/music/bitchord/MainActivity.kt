@@ -6601,6 +6601,32 @@ private fun BitChordApp(
             }
         }
 
+        // BitChord Audio: VK's own sign-in page, for VK Video as a video source.
+        val vkLogin by com.music.bitchord.data.video.VkVideo.loginOpen.collectAsStateWithLifecycle()
+        if (vkLogin) {
+            BackHandler { com.music.bitchord.data.video.VkVideo.loginOpen.value = false }
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { com.music.bitchord.data.video.VkVideo.loginOpen.value = false }) {
+                            Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.close), tint = MaterialTheme.colorScheme.onBackground)
+                        }
+                        Text(stringResource(R.string.vk_account), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground)
+                    }
+                    com.music.bitchord.auth.VkLoginScreen(
+                        modifier = Modifier.navigationBarsPadding(),
+                        onConnected = {
+                            com.music.bitchord.data.video.VkVideo.loginOpen.value = false
+                            Toast.makeText(context, R.string.vk_signed_in, Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                }
+            }
+        }
+
         if (showSpotifyCanvasAuth) {
             BackHandler { showSpotifyCanvasAuth = false }
             SpotifyCanvasAuthScreen(

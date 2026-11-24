@@ -31,12 +31,14 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** A video to show for a song: on YouTube, or on bilibili. */
 data class VideoRef(val site: Site, val id: String) {
-    enum class Site { YOUTUBE, BILIBILI, PCLOUD, ANIMETHEMES }
+    enum class Site { YOUTUBE, BILIBILI, PCLOUD, ANIMETHEMES, VK }
 
     /** What the video engine files it under: a YouTube id as itself, so its caches carry over. */
     val key: String get() = when (site) {
         Site.YOUTUBE -> id
         Site.BILIBILI -> "bili:$id"
+        // BitChord Audio: VK Video, by owner_video.
+        Site.VK -> "vk:$id"
         // BitChord Audio: a video file of yours in pCloud, by its address.
         Site.PCLOUD -> "pcloud:${id.hashCode().toUInt()}:${PcloudVideos.nameOf(id).take(40)}"
         // BitChord Audio: an anime's opening or ending on AnimeThemes, by its file's name.
@@ -468,13 +470,28 @@ object VideoMode {
         // fallback behind YouTube's videos.
         val themeLeads = theme != null && isThemeCut(song)
         val youTubeRefs = ordered.map { VideoRef(VideoRef.Site.YOUTUBE, it.videoId) }
-        val all = (listOfNotNull(linked) + (if (themeLeads) listOfNotNull(theme) + youTubeRefs else youTubeRefs + listOfNotNull(theme)))
+        // BitChord Audio: VK Video (your sign-in) when YouTube has nothing for the song.
+        val vk = if (linked == null && youTubeRefs.isEmpty() && VkVideo.signedIn()) vkFor(song) else emptyList()
+        val all = (listOfNotNull(linked) + (if (themeLeads) listOfNotNull(theme) + youTubeRefs else youTubeRefs + listOfNotNull(theme)) + vk)
             .distinctBy { it.key }
             .filterNot { it.key in unplayable || isWrong(song, it) }
         val first = all.firstOrNull() ?: if (searchFailed) throw LookupFailed() else return null
         alternatives[song.videoId] = all.drop(1).take(5).toMutableList()
         if (base != null && paired != null && first.id == paired.videoId) pairedFrom[song.videoId] = base.videoId
         return first
+    }
+
+    /** VK's videos that are [song]: its name in the title, about its length. */
+    private suspend fun vkFor(song: Song): List<VideoRef> {
+        val artist = song.artist.split(',').first().trim()
+        val hits = runCatching { VkVideo.search("${song.title} $artist") }.getOrDefault(emptyList())
+        val core = norm(song.title)
+        val length = song.durationMillis() / 1000
+        return hits.filter { h ->
+            core.length >= 2 && core in norm(h.title) &&
+                (length <= 0 || h.durationSec <= 0 || kotlin.math.abs(h.durationSec - length) <= 40)
+        }.take(3).map { VideoRef(VideoRef.Site.VK, it.id) }
+            .also { if (it.isNotEmpty()) TrackLog.d(TAG, "video for '${song.title}': VK has ${it.size}") }
     }
 
     private val THEME_CUT = Regex(

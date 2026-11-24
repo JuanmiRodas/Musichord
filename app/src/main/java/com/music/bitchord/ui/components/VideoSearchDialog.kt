@@ -84,7 +84,7 @@ private data class VideoHit(
     val pcloud: PcloudVideos.Video? = null,
 )
 
-private enum class Source(val label: String) { YOUTUBE("YouTube"), ANIMETHEMES("AnimeThemes"), BILIBILI("bilibili"), PCLOUD("pCloud") }
+private enum class Source(val label: String) { YOUTUBE("YouTube"), ANIMETHEMES("AnimeThemes"), BILIBILI("bilibili"), VK("VK"), PCLOUD("pCloud") }
 
 /**
  * BitChord Audio: the video button held — which video a song shows in video mode.
@@ -115,6 +115,7 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
                 VideoRef.Site.ANIMETHEMES -> Source.ANIMETHEMES
                 VideoRef.Site.PCLOUD -> Source.PCLOUD
                 VideoRef.Site.BILIBILI -> Source.BILIBILI
+                VideoRef.Site.VK -> Source.VK
                 else -> Source.YOUTUBE
             },
         )
@@ -150,6 +151,9 @@ fun VideoSearchDialog(song: Song, onDismiss: () -> Unit) {
                 }
                 Source.BILIBILI -> Bilibili.search(asked).map {
                     VideoHit(VideoRef(VideoRef.Site.BILIBILI, it.bvid), it.title, it.author, it.durationText, it.thumbnail)
+                }
+                Source.VK -> com.music.bitchord.data.video.VkVideo.search(asked).map {
+                    VideoHit(VideoRef(VideoRef.Site.VK, it.id), it.title, it.author, it.durationText, it.thumbnail)
                 }
                 Source.PCLOUD -> PcloudVideos.search(asked).map { it.toHit() }
             }
@@ -260,6 +264,7 @@ private fun PcloudVideos.Video.toHit() = VideoHit(
 private fun describe(ref: VideoRef): String = when (ref.site) {
     VideoRef.Site.YOUTUBE -> "YouTube · ${ref.id}"
     VideoRef.Site.BILIBILI -> "bilibili · ${ref.id}"
+    VideoRef.Site.VK -> "VK · ${ref.id}"
     VideoRef.Site.PCLOUD -> "pCloud · " + PcloudVideos.nameOf(ref.id).substringBeforeLast('.')
     VideoRef.Site.ANIMETHEMES -> "AnimeThemes · " + AnimeThemes.videoOf(ref.id).substringAfterLast('/').substringBeforeLast('.')
 }

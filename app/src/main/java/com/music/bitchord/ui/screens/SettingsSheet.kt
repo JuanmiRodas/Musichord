@@ -2447,6 +2447,21 @@ fun SettingsScreen(
             }
             // BitChord Audio: no "Best part" button (it sat over the lyrics) — the setting went with it.
             val quickTitle = stringResource(R.string.quick_actions_title)
+            val vkTitle = stringResource(R.string.vk_account)
+            row(vkTitle, "vk", "vkontakte", "video", "vídeo", "login") {
+                var vkIn by remember { mutableStateOf(com.music.bitchord.data.video.VkVideo.signedIn()) }
+                val opening by com.music.bitchord.data.video.VkVideo.loginOpen.collectAsStateWithLifecycle()
+                LaunchedEffect(opening) { vkIn = com.music.bitchord.data.video.VkVideo.signedIn() }
+                SettingsRow(
+                    icon = SfIcons.PlayCircle,
+                    title = vkTitle,
+                    subtitle = stringResource(if (vkIn) R.string.vk_signed_in else R.string.vk_signed_out),
+                    onClick = {
+                        if (vkIn) { com.music.bitchord.data.video.VkVideo.signOut(); vkIn = false }
+                        else com.music.bitchord.data.video.VkVideo.loginOpen.value = true
+                    },
+                )
+            }
             row(quickTitle, "buttons", "botones", "player", "reproductor", "quick") {
                 var editing by remember { mutableStateOf(false) }
                 SettingsRow(

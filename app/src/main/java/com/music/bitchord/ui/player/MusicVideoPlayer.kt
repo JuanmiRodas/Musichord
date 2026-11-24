@@ -780,6 +780,22 @@ object MusicVideoEngine {
             loadJob = scope.launch { loadBilibili(ref.id, videoId) }
             return
         }
+        // BitChord Audio: VK Video's MP4 through your VK session; its own sound read for the sync.
+        if (ref.site == com.music.bitchord.data.video.VideoRef.Site.VK) {
+            loadJob = scope.launch {
+                val stream = runCatching { com.music.bitchord.data.video.VkVideo.stream(ref.id, cap) }.getOrNull()
+                if (loadedId != videoId) return@launch
+                if (stream == null) {
+                    TrackLog.w(TAG, "video: no VK stream", about = videoId)
+                    loadedId = null
+                    loadedFor?.let { com.music.bitchord.data.video.VideoMode.failed(it, ref) }
+                    return@launch
+                }
+                if (stream.height > 0) _aspect.value = stream.width.toFloat() / stream.height
+                loadFile(stream.url, videoId, stream.headers, stream.url, stream.headers, ranged = true)
+            }
+            return
+        }
         if (ref.site == com.music.bitchord.data.video.VideoRef.Site.PCLOUD) {
             loadJob = scope.launch {
                 val headers = com.music.bitchord.data.video.PcloudVideos.headers()
