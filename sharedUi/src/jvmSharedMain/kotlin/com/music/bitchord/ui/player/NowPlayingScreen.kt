@@ -1795,6 +1795,10 @@ fun NowPlayingScreen(
     // still-art full-bleed preference. Other providers and static artwork keep
     // answering to that preference exactly as before.
     // A music video sits in the card's place at its own 16:9, never full bleed.
+    // BitChord Audio: the audio view is the cover full-bleed (no square sleeve): video mode
+    // then neither grows out of nor shrinks into a square — the cover simply goes to (and
+    // comes back from) its own place while the picture fades.
+    val heroAudio = spotifyCanvasOnPhone || (fullBleedArt && playerFillsWindow(windowWidth))
     val heroMode = !videoMode && (
         spotifyCanvasOnPhone ||
             (fullBleedArt && playerFillsWindow(windowWidth))
@@ -4121,7 +4125,7 @@ fun NowPlayingScreen(
                                         // picture box stands in, still frame first.
                                         // The sleeve is only the collapsed header's
                                         // thumbnail, and what flies to the mini player.
-                                        (if (docking()) 1f else if (!videoMode) ((0.2f - videoMorph) / 0.2f).coerceIn(0f, 1f) else (p() * 2f - 1f).coerceIn(0f, 1f))
+                                        (if (docking()) 1f else if (!videoMode) (if (heroAudio) 1f else ((0.2f - videoMorph) / 0.2f).coerceIn(0f, 1f)) else (p() * 2f - 1f).coerceIn(0f, 1f))
                                 }
                                 .graphicsLayer {
                                     val shown = sleeveShown()
@@ -4492,7 +4496,7 @@ fun NowPlayingScreen(
                                     // On the way out the frame shrinks from where it last was, not from the square.
                                     if (videoMode) target.copyInto(lastTarget)
                                     else if (!lastTarget[0].isNaN()) lastTarget.copyInto(target)
-                                    val m = videoMorph
+                                    val m = if (heroAudio) 1f else videoMorph
                                     return floatArrayOf(
                                         sl + (target[0] - sl) * m, st + (target[1] - st) * m,
                                         side + (target[2] - side) * m, side + (target[3] - side) * m,
@@ -4515,7 +4519,7 @@ fun NowPlayingScreen(
                                         }
                                         .graphicsLayer {
                                             // Back at the cover's square, the cover itself takes over (cross-faded).
-                                            val handOver = if (videoMode) 1f else (videoMorph / 0.2f).coerceIn(0f, 1f)
+                                            val handOver = if (videoMode || heroAudio) 1f else (videoMorph / 0.2f).coerceIn(0f, 1f)
                                             alpha = (1f - p() * 2f).coerceIn(0f, 1f) * handOver
                                             translationX = swipeSettle.value * (1f - p())
                                         }
@@ -4529,7 +4533,7 @@ fun NowPlayingScreen(
                                 ) {
                                     // BitChord Audio: on the way back to the cover — the cover, and over it
                                     // the last picture (if one was showing) zooming in as it fades away.
-                                    if (!videoMode) {
+                                    if (!videoMode && !heroAudio) {
                                         coil3.compose.AsyncImage(
                                             model = art.request,
                                             contentDescription = null,
@@ -4595,7 +4599,7 @@ fun NowPlayingScreen(
                                             .clip(RoundedCornerShape(if ((if (videoMode) videoEdge else lastEdge) && videoMorph > 0.99f) 0.dp else 10.dp))
                                             .graphicsLayer {
                                                 // Leaving: zooming in as it fades into the cover under it.
-                                                val leave = if (videoMode) 1f else 1f + 0.35f * (1f - videoMorph)
+                                                val leave = if (videoMode) 1f else 1f + (if (heroAudio) 0.12f else 0.35f) * (1f - videoMorph)
                                                 scaleX = zoom * leave
                                                 scaleY = zoom * leave
                                                 translationY = shift * size.height * zoom
