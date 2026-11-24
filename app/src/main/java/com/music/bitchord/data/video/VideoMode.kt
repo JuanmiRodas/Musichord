@@ -198,19 +198,21 @@ object VideoMode {
         _shadeLevel.value = prefs?.getInt("shade:$key", 0) ?: 0
     }
 
+    /** 0 automatic, 1–5 light to dark, −1 off (no shade, none worked out either). Quietly: the button shows it. */
     fun setShadeLevel(level: Int) {
-        val v = level.coerceIn(0, 5)
+        val v = level.coerceIn(-1, 5)
         _shadeLevel.value = v
         shadeKey?.let { k -> prefs?.edit()?.putInt("shade:$k", v)?.apply() }
-        app?.let { ctx ->
-            scope.launch(Dispatchers.Main) {
-                Toast.makeText(ctx, if (v == 0) ctx.getString(R.string.video_shade_auto) else ctx.getString(R.string.video_shade_level, v), Toast.LENGTH_SHORT).show()
-            }
-        }
     }
 
-    /** One step darker, round to the lightest after the fifth. */
-    fun cycleShade() = setShadeLevel(_shadeLevel.value % 5 + 1)
+    /** One step darker; after the fifth, off; then the lightest again. */
+    fun cycleShade() = setShadeLevel(
+        when (val l = _shadeLevel.value) {
+            in 0..4 -> l + 1
+            5 -> -1
+            else -> 1
+        },
+    )
 
     // ── The search, remembered ────────────────────────────────────────────
 

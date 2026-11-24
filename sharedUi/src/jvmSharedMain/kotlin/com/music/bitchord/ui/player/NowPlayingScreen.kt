@@ -1133,6 +1133,8 @@ fun NowPlayingScreen(
     val videoShade = when {
         // BitChord Audio: set by hand (the shade button), light to dark.
         shadeByHand in 1..5 -> floatArrayOf(0.5f, 0.72f, 0.85f, 0.95f, 0.99f)[shadeByHand - 1]
+        // BitChord Audio: off — no shade, and none worked out from the picture either.
+        shadeByHand < 0 -> 0f
         videoTextLevel >= 0.6f -> 0.99f
         videoTextLevel >= 0.3f || videoLooks?.busyBottom == true -> 0.95f
         else -> 0.72f
@@ -2578,7 +2580,7 @@ fun NowPlayingScreen(
                         null
                     },
                     lyricsOn = videoModeLyrics,
-                    lyricsShade = if (videoShade > 0.9f) videoShade else 0.78f,
+                    lyricsShade = if (videoShade > 0.9f || videoShade == 0f) videoShade else 0.78f,
                     onToggleLyrics = if (videoOverlay) {
                         { PlayerPlatform.host.setVideoModeLyrics(!videoModeLyrics) }
                     } else {
@@ -4119,7 +4121,7 @@ fun NowPlayingScreen(
                                         // picture box stands in, still frame first.
                                         // The sleeve is only the collapsed header's
                                         // thumbnail, and what flies to the mini player.
-                                        (if ((!videoMode && videoMorph <= 0.001f) || docking()) 1f else (p() * 2f - 1f).coerceIn(0f, 1f))
+                                        (if (docking()) 1f else if (!videoMode) ((0.2f - videoMorph) / 0.2f).coerceIn(0f, 1f) else (p() * 2f - 1f).coerceIn(0f, 1f))
                                 }
                                 .graphicsLayer {
                                     val shown = sleeveShown()
@@ -4460,6 +4462,9 @@ fun NowPlayingScreen(
                         // collapse into the lyrics or the queue, where the thumbnail
                         // is the still sleeve, and for the trip to the mini player,
                         // which takes the picture over.
+                        // BitChord Audio: whether a picture was up when video mode went off.
+                        var exitWithPicture by remember { mutableStateOf(false) }
+                        SideEffect { if (videoMode) exitWithPicture = videoRendered }
                         if (videoMode || videoMorph > 0.001f) {
                             var cornerTouch by remember { mutableStateOf(0) }
                             var cornerShown by remember { mutableStateOf(true) }
@@ -4505,7 +4510,9 @@ fun NowPlayingScreen(
                                             layout(width, height) { placeable.placeRelative(0, 0) }
                                         }
                                         .graphicsLayer {
-                                            alpha = (1f - p() * 2f).coerceIn(0f, 1f)
+                                            // Back at the cover's square, the cover itself takes over (cross-faded).
+                                            val handOver = if (videoMode) 1f else (videoMorph / 0.2f).coerceIn(0f, 1f)
+                                            alpha = (1f - p() * 2f).coerceIn(0f, 1f) * handOver
                                             translationX = swipeSettle.value * (1f - p())
                                         }
                                         // BitChord Audio: a touch on the picture brings its buttons back.
@@ -4516,7 +4523,8 @@ fun NowPlayingScreen(
                                             }
                                         },
                                 ) {
-                                    // BitChord Audio: on the way back to the cover, only the cover.
+                                    // BitChord Audio: on the way back to the cover — the cover, and over it
+                                    // the last picture (if one was showing) zooming in as it fades away.
                                     if (!videoMode) {
                                         coil3.compose.AsyncImage(
                                             model = art.request,
@@ -4524,6 +4532,22 @@ fun NowPlayingScreen(
                                             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
                                         )
+                                        if (exitWithPicture) {
+                                            MusicVideoSurface(
+                                                videoId = song.videoId,
+                                                fit = false,
+                                                onRenderedChanged = {},
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .graphicsLayer {
+                                                        val zoomIn = 1f + 0.35f * (1f - videoMorph)
+                                                        scaleX = zoomIn
+                                                        scaleY = zoomIn
+                                                        alpha = videoMorph * videoMorph
+                                                    },
+                                            )
+                                        }
                                         return@Box
                                     }
                                     // Black with a spinner under the picture until
@@ -4592,7 +4616,7 @@ fun NowPlayingScreen(
                                                 // Edge to edge the picture has no corners, nor does its shade.
                                                 .clip(RoundedCornerShape(bottomStart = if (videoEdge) 0.dp else 10.dp, bottomEnd = if (videoEdge) 0.dp else 10.dp))
                                                 // BitChord Audio: no lyrics loaded, no shade over the picture.
-                                                .then(if (lyricsTranslation.displayedLyrics.isNotEmpty()) Modifier.videoLyricsScrim(videoShade) else Modifier)
+                                                .then(if (lyricsTranslation.displayedLyrics.isNotEmpty() && videoShade > 0f) Modifier.videoLyricsScrim(videoShade) else Modifier)
                                                 // BitChord Audio: the foot of the picture, in three: a tap on
                                                 // the left puts the lyrics 0.5 s earlier, on the right 0.5 s
                                                 // later, in the middle opens their options. No buttons shown.
@@ -5520,14 +5544,20 @@ fun NowPlayingScreen(
                                             PlayerQuickAction.VIDEO_AUDIO -> videoModeOn && videoModeOriginalAudio
                                             PlayerQuickAction.TRANSLATION -> translationOn
                                             PlayerQuickAction.LYRICS -> lyricsOnCover
-                                            PlayerQuickAction.SHADE -> shadeByHand > 0
+                                            PlayerQuickAction.SHADE -> shadeByHand != 0
                                             PlayerQuickAction.STAR -> liked
                                             else -> action.id in lit
                                         },
                                         enabled = action != PlayerQuickAction.VIDEO_AUDIO || videoModeOn,
                                         // BitChord Audio: the translation shows what it does now — "A" on, "文" off.
-                                        glyphText = if (action == PlayerQuickAction.TRANSLATION) (if (translationOn) "A" else "文") else null,
+                                        glyphText = if (action == PlayerQuickAction.TRANSLATION) (if (translationOn) "a" else "文") else null,
                                         busy = action == PlayerQuickAction.VIDEO && videoModeOn && videoModeLooking == song.videoId,
+                                        // BitChord Audio: the shade's icon as strong as the shade — faint when off, full on automatic.
+                                        glyphAlpha = if (action == PlayerQuickAction.SHADE) when {
+                                            shadeByHand < 0 -> 0.3f
+                                            shadeByHand == 0 -> 1f
+                                            else -> 0.45f + 0.11f * shadeByHand
+                                        } else 1f,
                                         haptic = if (action == PlayerQuickAction.STAR) (if (liked) Haptic.ToggleOff else Haptic.ToggleOn) else Haptic.Tap,
                                         // BitChord Audio: a long press does the button's other half.
                                         onLongClick = when (action) {

@@ -1151,6 +1151,8 @@ internal fun CircleGlyph(
     enabled: Boolean = true,
     /** BitChord Audio: a letter drawn in place of [icon] (the translation's "A" / "文"). */
     glyphText: String? = null,
+    /** BitChord Audio: how strongly the glyph is drawn (the shade button shows its level). */
+    glyphAlpha: Float = 1f,
 ) {
     val haptics = rememberHaptics()
     val discAlpha by animateFloatAsState(
@@ -1217,10 +1219,11 @@ internal fun CircleGlyph(
                         .offset(y = if (glyph.all { it.code < 128 }) (-1).dp else 0.dp),
                 )
             } else {
+                val shownAlpha by animateFloatAsState(glyphAlpha, tween(300), label = "glyphAlpha")
                 Icon(
                     imageVector = glyph as ImageVector,
                     contentDescription = contentDescription,
-                    tint = Color.White,
+                    tint = Color.White.copy(alpha = shownAlpha),
                     modifier = Modifier.size(19.dp * (size / 34.dp)),
                 )
             }

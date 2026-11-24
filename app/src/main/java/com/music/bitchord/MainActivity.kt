@@ -2656,12 +2656,10 @@ private fun BitChordApp(
                 "canvas" -> {
                     val off = !AppSettings.disableSpotifyCanvas.value
                     AppSettings.setDisableSpotifyCanvas(off)
-                    Toast.makeText(context, if (off) R.string.canvas_spotify_off else R.string.canvas_spotify_on, Toast.LENGTH_SHORT).show()
                 }
                 "canvas_all" -> {
                     val on = !AppSettings.animatedCanvas.value
                     AppSettings.setAnimatedCanvas(on)
-                    Toast.makeText(context, if (on) R.string.canvas_all_on else R.string.canvas_all_off, Toast.LENGTH_SHORT).show()
                 }
                 "sleep" -> {
                     val timer = com.music.bitchord.playback.SleepTimer
