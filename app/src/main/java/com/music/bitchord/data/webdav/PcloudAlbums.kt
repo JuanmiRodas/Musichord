@@ -62,4 +62,51 @@ object PcloudAlbums {
     fun open(id: String, song: Song) {
         _opens.tryEmit(id to song)
     }
+
+    // ── BitChord Audio: the whole album, wherever the song came from ──
+
+    private val ytAlbums = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private const val NONE = "-"
+
+    private fun albumKey(artist: String, album: String) =
+        artist.substringBefore(',').lowercase().filter { it.isLetterOrDigit() } + "|" + album.lowercase().filter { it.isLetterOrDigit() }
+
+    /** YouTube Music's album page already known for [song] (no look-up). */
+    fun knownYouTubeAlbum(song: Song): String? {
+        song.albumId?.takeIf { it.startsWith("MPREb") }?.let { return it }
+        val album = song.albumName?.takeIf { it.isNotBlank() } ?: return ytAlbums["song|" + song.videoId]?.takeIf { it != NONE }
+        return ytAlbums[albumKey(song.artist, album)]?.takeIf { it != NONE }
+    }
+
+    /**
+     * The YouTube Music album of [song] — the whole album, with your own copies of its songs
+     * shown in it — rather than the page of only the songs of it you have. Found by the album's
+     * name; a song with no album name is looked up as a song for the album it is on. Kept.
+     */
+    suspend fun resolveYouTubeAlbum(song: Song): String? {
+        knownYouTubeAlbum(song)?.let { return it }
+        val album = song.albumName?.takeIf { it.isNotBlank() }
+        if (album != null) {
+            val key = albumKey(song.artist, album)
+            if (ytAlbums[key] == NONE) return null
+            val id = runCatching { youTubeAlbumId(song) }.getOrNull()
+            ytAlbums[key] = id ?: NONE
+            return id
+        }
+        val key = "song|" + song.videoId
+        if (ytAlbums[key] == NONE) return null
+        val title = song.title.replace(Regex("""\s*[(\[].*?[)\]]"""), "").trim()
+        val artist = song.artist.substringBefore(',').trim()
+        val hit = runCatching {
+            com.music.bitchord.data.YtMusicRepository.search("$title $artist", com.music.bitchord.data.model.SearchFilter.SONGS).getOrNull().orEmpty()
+        }.getOrDefault(emptyList()).mapNotNull { (it as? com.music.bitchord.data.model.SearchResult.Track)?.song }
+            .firstOrNull { s ->
+                s.albumId?.startsWith("MPREb") == true &&
+                    s.title.lowercase().filter { it.isLetterOrDigit() } == title.lowercase().filter { it.isLetterOrDigit() } &&
+                    OwnFileMatcher.sameArtist(song.artist, s.artist)
+            }
+        TrackLog.d("BitChord", "album of '${song.title}' (no album name): " + (hit?.let { "${it.albumName} on YouTube Music" } ?: "not found"))
+        ytAlbums[key] = hit?.albumId ?: NONE
+        return hit?.albumId
+    }
 }

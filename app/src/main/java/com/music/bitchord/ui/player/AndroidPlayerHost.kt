@@ -216,8 +216,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         com.music.bitchord.ui.components.SongDnaPage(song = song, modifier = modifier, listState = listState, onClose = onClose)
     }
 
+    // BitChord Audio: YouTube Music's whole album first (your copies show in it); your own
+    // album page only when YouTube Music has none.
     override fun albumPageOf(song: com.music.bitchord.data.model.Song): String? =
-        com.music.bitchord.data.AlbumAppearances.pageOf(song)
+        com.music.bitchord.data.webdav.PcloudAlbums.knownYouTubeAlbum(song) ?: com.music.bitchord.data.AlbumAppearances.pageOf(song)
+    override suspend fun albumPageResolved(song: com.music.bitchord.data.model.Song): String? =
+        runCatching { com.music.bitchord.data.webdav.PcloudAlbums.resolveYouTubeAlbum(song) }.getOrNull()
+            ?: com.music.bitchord.data.AlbumAppearances.pageOf(song)
     override val videoModeLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.lyricsScale
     override val songLyricsScale: StateFlow<Float> get() = com.music.bitchord.data.video.VideoMode.songLyricsScale
     override fun setSongLyricsScale(value: Float) = com.music.bitchord.data.video.VideoMode.setSongLyricsScale(value)
@@ -376,7 +381,7 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     }
 
     override fun albumPageIdOf(song: com.music.bitchord.data.model.Song): String? =
-        com.music.bitchord.data.webdav.PcloudAlbums.pageIdOf(song)
+        com.music.bitchord.data.webdav.PcloudAlbums.knownYouTubeAlbum(song) ?: com.music.bitchord.data.webdav.PcloudAlbums.pageIdOf(song)
 
     override fun openAlbumOf(song: com.music.bitchord.data.model.Song) {
         if (com.music.bitchord.data.webdav.WebDavConfig.isWebDavId(song.videoId) &&
@@ -384,8 +389,13 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         ) return
         // BitChord Audio: an album name with no page of ours — YouTube Music's album of it.
         if (song.albumName.isNullOrBlank()) {
-            if (!com.music.bitchord.ui.components.PcloudBrowser.openFolderOf(song)) {
-                showMessage(app.getString(com.music.bitchord.R.string.no_album_metadata))
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val id = runCatching { com.music.bitchord.data.webdav.PcloudAlbums.resolveYouTubeAlbum(song) }.getOrNull()
+                when {
+                    id != null -> com.music.bitchord.data.webdav.PcloudAlbums.open(id, song)
+                    com.music.bitchord.ui.components.PcloudBrowser.openFolderOf(song) -> Unit
+                    else -> showMessage(app.getString(com.music.bitchord.R.string.no_album_metadata))
+                }
             }
             return
         }

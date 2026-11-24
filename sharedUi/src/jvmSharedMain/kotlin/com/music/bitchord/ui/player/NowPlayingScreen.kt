@@ -4964,7 +4964,7 @@ fun NowPlayingScreen(
                                         .graphicsLayer { alpha = (1f - p() * 4f).coerceIn(0f, 1f) }
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(Color.White.copy(alpha = 0.08f))
-                                        .opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
+                                        .opensPage(rememberAlbumPage(song), onOpenAlbum),
                                 )
                                 Spacer(Modifier.width(12.dp))
                             }
@@ -5034,7 +5034,7 @@ fun NowPlayingScreen(
                                             onOverflowChange = { titleOverflowing = it },
                                             // Only the tracks YouTube hands us a browse id for
                                             // lead anywhere; the rest stay plain text.
-                                            modifier = Modifier.opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
+                                            modifier = Modifier.opensPage(rememberAlbumPage(song), onOpenAlbum),
                                         )
                                         ArtistCreditsMarquee(
                                             text = shownInfo.artist,
@@ -5063,7 +5063,7 @@ fun NowPlayingScreen(
                                                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 15.sp, lineHeightStyle = SongInfoTrim),
                                                 color = chromeWhite(0.4f),
                                                 enabled = scrolling,
-                                                modifier = Modifier.opensPage(remember(song) { PlayerPlatform.host.albumPageOf(song) }, onOpenAlbum),
+                                                modifier = Modifier.opensPage(rememberAlbumPage(song), onOpenAlbum),
                                             )
                                         }
                                     }
@@ -5879,3 +5879,13 @@ private val SongInfoTrim = androidx.compose.ui.text.style.LineHeightStyle(
     androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
     androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
 )
+
+
+/** BitChord Audio: the album page a song's title and album open — looked up (whole album) as it shows. */
+@Composable
+private fun rememberAlbumPage(song: Song): String? {
+    val page by androidx.compose.runtime.produceState(PlayerPlatform.host.albumPageOf(song), song.videoId, song.albumName) {
+        value = runCatching { PlayerPlatform.host.albumPageResolved(song) }.getOrNull() ?: value
+    }
+    return page
+}
