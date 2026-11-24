@@ -185,7 +185,7 @@ object MusicVideoEngine {
                 // to open made every video slower to start). Switching it on
                 // rebuilds the picture from the stream already found — not
                 // asking YouTube again, which is what lost it before.
-                if (loadedRef?.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) reload()
+                if (loadedRef?.site == com.music.bitchord.data.video.VideoRef.Site.YOUTUBE) reloadKeepingFrame()
                 applySound()
             }
         }
@@ -251,6 +251,8 @@ object MusicVideoEngine {
             frameWatch?.cancel()
             if (preparedAt > 0L) TrackLog.d(TAG, "video: first frame ${System.currentTimeMillis() - preparedAt}ms after it was found", about = loadedId)
             preparedAt = 0L
+            holdFrame = false
+            holdJob?.cancel()
             _frameOn.value = top()
             _shownVideoId.value = loadedFor
             applySound()
@@ -468,6 +470,28 @@ object MusicVideoEngine {
         val forId = loadedFor ?: return
         com.music.bitchord.playback.smart.VideoAligner.forget(forId, ref.key)
         loadedId?.let { com.music.bitchord.playback.smart.VideoAligner.forget(forId, it) }
+        reload()
+    }
+
+    /**
+     * BitChord Audio: while the picture is rebuilt only for its sound, the last frame stays
+     * on screen (no fade to the cover) until the rebuilt one's first frame lands — or 8 s.
+     */
+    @Volatile private var holdFrame = false
+    private var holdJob: Job? = null
+
+    private fun reloadKeepingFrame() {
+        if (_shownVideoId.value == null) { reload(); return }
+        holdFrame = true
+        holdJob?.cancel()
+        holdJob = scope.launch {
+            delay(8_000)
+            if (holdFrame) {
+                holdFrame = false
+                _shownVideoId.value = null
+                _frameOn.value = null
+            }
+        }
         reload()
     }
 
@@ -1084,16 +1108,16 @@ object MusicVideoEngine {
         loadedRef = null
         loadedFor = null
         loadedProfile = null
-        _shownVideoId.value = null
+        if (!holdFrame) _shownVideoId.value = null
         pendingAlign = null
         alignJob?.cancel()
         looksJob?.cancel()
-        com.music.bitchord.data.video.VideoMode.showLooks(null)
+        if (!holdFrame) com.music.bitchord.data.video.VideoMode.showLooks(null)
         _dip.value = false
         _blend.value = null
         lastAudioAt = -1L
         applySound()
-        _frameOn.value = null
+        if (!holdFrame) _frameOn.value = null
         _quality.value = _quality.value.copy(heights = emptyList(), activeHeight = null)
         player?.let {
             it.stop()

@@ -1094,6 +1094,12 @@ fun NowPlayingScreen(
     val videoOverlay = videoOverlayNow ||
         (videoModeOn && cameFromVideo && holdExpired != song.videoId)
     val videoMode = showsMusicVideo(song) || videoOverlay
+    // BitChord Audio: the cover's square growing into the video's frame (and back), 0 → 1.
+    val videoMorph by animateFloatAsState(
+        targetValue = if (videoMode) 1f else 0f,
+        animationSpec = tween(durationMillis = 560, easing = FastOutSlowInEasing),
+        label = "videoMorph",
+    )
     val videoModeFrame by PlayerPlatform.host.videoModeFrame.collectAsStateWithLifecycle()
     val videoModeSquare = videoModeFrame == 0
     // BitChord Audio: the picture out to the screen's edges, at the album square's height.
@@ -4113,7 +4119,7 @@ fun NowPlayingScreen(
                                         // picture box stands in, still frame first.
                                         // The sleeve is only the collapsed header's
                                         // thumbnail, and what flies to the mini player.
-                                        (if (!videoMode || docking()) 1f else (p() * 2f - 1f).coerceIn(0f, 1f))
+                                        (if ((!videoMode && videoMorph <= 0.001f) || docking()) 1f else (p() * 2f - 1f).coerceIn(0f, 1f))
                                 }
                                 .graphicsLayer {
                                     val shown = sleeveShown()
@@ -4454,45 +4460,47 @@ fun NowPlayingScreen(
                         // collapse into the lyrics or the queue, where the thumbnail
                         // is the still sleeve, and for the trip to the mini player,
                         // which takes the picture over.
-                        if (videoMode) {
+                        if (videoMode || videoMorph > 0.001f) {
                             var cornerTouch by remember { mutableStateOf(0) }
                             var cornerShown by remember { mutableStateOf(true) }
                             WhileShown({ !collapsePastHalf && !docking() }) {
                                 val videoAspect by PlayerPlatform.host.musicVideoAspect
                                     .collectAsStateWithLifecycle()
                                 val aspect = videoAspect.coerceIn(1f, 2.4f)
+                                // BitChord Audio: where the frame is — left, top, width, height — between
+                                // the cover's square (0) and the video's own frame (1).
+                                fun androidx.compose.ui.unit.Density.videoRect(): FloatArray {
+                                    val side = artSize().roundToPx().toFloat()
+                                    val sl = fromStart(artStart().roundToPx().toFloat(), side)
+                                    val st = artTop().roundToPx().toFloat()
+                                    val target = when {
+                                        videoEdge && playerBounds.width > 0 -> floatArrayOf(
+                                            -(playerBounds.width - boxWidthPx) / 2f, st, playerBounds.width.toFloat(), side,
+                                        )
+                                        squareVideo || !videoMode -> floatArrayOf(sl, st, side, side)
+                                        else -> {
+                                            val h = boxWidthPx / aspect
+                                            floatArrayOf(0f, (artTop() + artSize() / 2).roundToPx() - h / 2f, boxWidthPx.toFloat(), h)
+                                        }
+                                    }
+                                    val m = videoMorph
+                                    return floatArrayOf(
+                                        sl + (target[0] - sl) * m, st + (target[1] - st) * m,
+                                        side + (target[2] - side) * m, side + (target[3] - side) * m,
+                                    )
+                                }
                                 Box(
                                     modifier = Modifier
                                         .offset {
-                                            // BitChord Audio: out to the player's edges, at the square's height.
-                                            if (videoEdge && playerBounds.width > 0) {
-                                                // Laid out at the player's own width, the box is already
-                                                // centred on it: no gutter to take off.
-                                                return@offset IntOffset(0, artTop().roundToPx())
-                                            }
-                                            if (squareVideo) {
-                                                val side = artSize().roundToPx()
-                                                return@offset IntOffset(
-                                                    fromStart(artStart().roundToPx().toFloat(), side.toFloat()).roundToInt(),
-                                                    artTop().roundToPx(),
-                                                )
-                                            }
-                                            val height = (boxWidthPx / aspect).roundToInt()
-                                            val centre = (artTop() + artSize() / 2).roundToPx()
-                                            IntOffset(0, centre - height / 2)
+                                            val r = videoRect()
+                                            // Wider than the gutters, the box is centred on them by its parent.
+                                            val centring = ((r[2] - boxWidthPx) / 2f).coerceAtLeast(0f)
+                                            IntOffset((r[0] + centring).roundToInt(), r[1].roundToInt())
                                         }
                                         .layout { measurable, _ ->
-                                            val edge = videoEdge && playerBounds.width > 0
-                                            val width = when {
-                                                edge -> playerBounds.width
-                                                squareVideo -> artSize().roundToPx()
-                                                else -> boxWidthPx
-                                            }
-                                            val height = when {
-                                                edge -> artSize().roundToPx()
-                                                squareVideo -> width
-                                                else -> (boxWidthPx / aspect).roundToInt()
-                                            }
+                                            val r = videoRect()
+                                            val width = r[2].roundToInt().coerceAtLeast(1)
+                                            val height = r[3].roundToInt().coerceAtLeast(1)
                                             val placeable = measurable.measure(Constraints.fixed(width, height))
                                             layout(width, height) { placeable.placeRelative(0, 0) }
                                         }
@@ -4508,6 +4516,16 @@ fun NowPlayingScreen(
                                             }
                                         },
                                 ) {
+                                    // BitChord Audio: on the way back to the cover, only the cover.
+                                    if (!videoMode) {
+                                        coil3.compose.AsyncImage(
+                                            model = art.request,
+                                            contentDescription = null,
+                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                                        )
+                                        return@Box
+                                    }
                                     // Black with a spinner under the picture until
                                     // its first frame lands.
                                     if (!videoRendered) {
@@ -4515,7 +4533,7 @@ fun NowPlayingScreen(
                                             Modifier
                                                 .fillMaxSize()
                                                 .clip(RoundedCornerShape(if (videoEdge) 0.dp else 10.dp)),
-                                            artRequest = art.request.takeIf { videoOverlay },
+                                            artRequest = art.request,
                                             canvas = canvasAny.takeIf { videoOverlay },
                                             isPlaying = isPlaying,
                                             edgeRadius = if (videoEdge) 0.dp else 10.dp,
@@ -4537,7 +4555,7 @@ fun NowPlayingScreen(
                                         label = "videoBarsShift",
                                     )
                                     // BitChord Audio: a picture narrower than its frame shows the cover,
-                                    // blurred and dimmed, at its sides — not black bars.
+                                    // filling the frame (cropped), at its sides — not black bars.
                                     if (videoRendered && videoOverlay && !squareVideo && !videoEdge) {
                                         coil3.compose.AsyncImage(
                                             model = art.request,
@@ -4545,12 +4563,7 @@ fun NowPlayingScreen(
                                             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                             modifier = Modifier
                                                 .fillMaxSize()
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .blur(28.dp)
-                                                .drawWithContent {
-                                                    drawContent()
-                                                    drawRect(Color.Black.copy(alpha = 0.35f))
-                                                },
+                                                .clip(RoundedCornerShape(10.dp)),
                                         )
                                     }
                                     MusicVideoSurface(

@@ -221,7 +221,12 @@ internal fun rememberLastWaveLook(enabled: Boolean, artworkUrl: String?, playing
             }
         }
     }
-    val colors = rememberArtworkColors(artworkUrl).colors
+    // BitChord Audio: the last picture's colours kept while the next one's are read — an
+    // empty list in between made the background jump to the default blue (cover ⇄ video).
+    val read = rememberArtworkColors(artworkUrl).colors
+    var kept by remember { androidx.compose.runtime.mutableStateOf(read) }
+    if (read.isNotEmpty() && read != kept) kept = read
+    val colors = if (read.isNotEmpty()) read else kept
     // LastWave's own picks: Palette's vibrant, light vibrant and dark vibrant swatches.
     val context = coil3.compose.LocalPlatformContext.current
     // Kept until the next picture's are read, so the colours ease from one to the other.
