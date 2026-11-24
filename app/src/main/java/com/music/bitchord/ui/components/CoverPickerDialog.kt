@@ -105,6 +105,28 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
         covers = null
         covers = runCatching { CoverSources.find(app, song, searched) }.getOrDefault(emptyList())
     }
+    // BitChord Audio: the covers in the album's other files, beside the search's.
+    var albumCovers by remember(song.videoId) { mutableStateOf<List<CoverSources.Cover>>(emptyList()) }
+    LaunchedEffect(albumSongs) {
+        if (albumSongs.isNotEmpty()) albumCovers = runCatching { CoverSources.fromAlbumFiles(app, albumSongs) }.getOrDefault(emptyList())
+    }
+    // BitChord Audio: a web image search, when asked for.
+    var webCovers by remember(song.videoId) { mutableStateOf<List<CoverSources.Cover>?>(emptyList()) }
+    var webAsked by remember(song.videoId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(webAsked) {
+        val q = webAsked ?: return@LaunchedEffect
+        webCovers = null
+        webCovers = runCatching { CoverSources.fromWeb(q) }.getOrDefault(emptyList())
+    }
+    // BitChord Audio: each picture's real size, read from its header (and its weight).
+    val probes = remember(song.videoId) { androidx.compose.runtime.mutableStateMapOf<String, CoverSources.Probe>() }
+    val allCovers = (covers.orEmpty() + albumCovers + webCovers.orEmpty()).distinctBy { it.url }
+    LaunchedEffect(allCovers.size) {
+        val todo = allCovers.map { it.url }.filter { it !in probes }
+        todo.chunked(6).forEach { batch ->
+            batch.map { u -> launch { CoverSources.probe(u)?.let { probes[u] = it } } }.forEach { it.join() }
+        }
+    }
 
     fun applyCover() {
         val url = picked ?: return
@@ -172,7 +194,16 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
                     onSearch = { searched = query.trim().takeIf { it.isNotEmpty() && it != CoverSources.defaultQuery(song) } },
                 )
                 Spacer(Modifier.padding(4.dp))
-                val list = covers?.filter { it.url !in broken }
+                // BitChord Audio: the web, searched by hand when the rest isn't enough.
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { webAsked = query.trim().ifEmpty { CoverSources.defaultQuery(song) } },
+                    enabled = webCovers != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(if (webCovers == null) R.string.cover_web_searching else R.string.cover_web_search))
+                }
+                Spacer(Modifier.padding(4.dp))
+                val list = covers?.let { found -> (found + albumCovers + webCovers.orEmpty()).distinctBy { it.url } }?.filter { it.url !in broken }
                 when {
                     list == null -> Text(stringResource(R.string.cover_searching), style = MaterialTheme.typography.labelMedium)
                     list.isEmpty() -> Text(stringResource(R.string.cover_none), style = MaterialTheme.typography.labelMedium)
@@ -197,6 +228,13 @@ fun CoverPickerDialog(song: Song, onDismiss: () -> Unit) {
                                             .clickable { picked = c.url },
                                     )
                                     Text(c.source, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    probes[c.url]?.let { pr ->
+                                        val dims = if (pr.width != null && pr.height != null) "${pr.width}×${pr.height}" else null
+                                        val weight = pr.bytes?.let { b -> if (b >= 1_000_000) "%.1f MB".format(b / 1_000_000.0) else "${(b / 1000).coerceAtLeast(1)} KB" }
+                                        listOfNotNull(dims, weight).joinToString(" · ").takeIf { it.isNotEmpty() }?.let {
+                                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                                        }
+                                    }
                                     if (c.detail.isNotBlank()) {
                                         Text(
                                             c.detail,

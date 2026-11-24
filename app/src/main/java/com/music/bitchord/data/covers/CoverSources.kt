@@ -252,4 +252,116 @@ object CoverSources {
         }
         return out
     }
+
+    // ── BitChord Audio: the album's other files, the web, and what each picture is ──
+
+    /** The covers inside (and beside) the other files of the album: each song's own picture. */
+    suspend fun fromAlbumFiles(context: Context, mates: List<Song>): List<Cover> = withContext(Dispatchers.IO) {
+        val out = ArrayList<Cover>()
+        for (m in mates.take(30)) {
+            val files = runCatching { filesOf(m) }.getOrDefault(emptyList()).take(1)
+            for (f in files) {
+                runCatching { RemoteArtworkStore.resolveArt(context, f.copy(thumbnailUrl = null)) }.getOrNull()
+                    ?.let { out += Cover(it, "Album file", m.title) }
+                f.thumbnailUrl?.let { out += Cover(it, "Album file", m.title) }
+            }
+            if (files.isEmpty()) m.thumbnailUrl?.let { out += Cover(it.artworkAt(1200) ?: it, "Album song", m.title) }
+        }
+        out.distinctBy { it.url }
+    }
+
+    /**
+     * Pictures from a web image search (Bing Images, read as a browser would) for [query]:
+     * the full-size picture of each result, with the site it is on.
+     */
+    suspend fun fromWeb(query: String): List<Cover> = withContext(Dispatchers.IO) {
+        val html = runCatching {
+            http.newCall(
+                Request.Builder().url("https://www.bing.com/images/search?q=${enc(query)}&form=HDRSC2&first=1")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36")
+                    .header("Accept-Language", "es-ES,es;q=0.9,en;q=0.8")
+                    .build(),
+            ).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
+        }.getOrNull() ?: return@withContext emptyList()
+        Regex("""\bm="(\{[^"]+\})"""").findAll(html).mapNotNull { m ->
+            val json = m.groupValues[1].replace("&quot;", "\"").replace("&amp;", "&")
+            val o = runCatching { JSONObject(json) }.getOrNull() ?: return@mapNotNull null
+            val url = o.optString("murl").takeIf { it.startsWith("http") } ?: return@mapNotNull null
+            val site = o.optString("purl").let { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }.orEmpty()
+            Cover(url, "Web", site)
+        }.distinctBy { it.url }.take(40).toList()
+    }
+
+    /** What a picture is: its width × height and its size in bytes (either may be unknown). */
+    data class Probe(val width: Int?, val height: Int?, val bytes: Long?)
+
+    /** Reads the start of the picture at [url] — its header holds its size — and its length. */
+    suspend fun probe(url: String): Probe? = withContext(Dispatchers.IO) {
+        if (!url.startsWith("http")) return@withContext null
+        runCatching {
+            val req = Request.Builder().url(url).header("User-Agent", AGENT).header("Range", "bytes=0-65535")
+                .apply {
+                    if (url.contains("webdav", ignoreCase = true)) {
+                        WebDavConfig.basicAuthHeader(AppSettings.webdavUsername.value, AppSettings.webdavPassword.value)?.let { header("Authorization", it) }
+                    }
+                }.build()
+            http.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use null
+                val total = r.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull()
+                    ?: r.body?.contentLength()?.takeIf { it > 0 && r.code == 200 }
+                val head = r.body?.byteStream()?.use { input ->
+                    val buf = ByteArray(65536)
+                    var n = 0
+                    while (n < buf.size) { val k = input.read(buf, n, buf.size - n); if (k < 0) break; n += k }
+                    buf.copyOf(n)
+                } ?: ByteArray(0)
+                val dims = dimensions(head)
+                Probe(dims?.first, dims?.second, total)
+            }
+        }.getOrNull()
+    }
+
+    private fun u16(b: ByteArray, i: Int) = ((b[i].toInt() and 0xFF) shl 8) or (b[i + 1].toInt() and 0xFF)
+    private fun le16(b: ByteArray, i: Int) = (b[i].toInt() and 0xFF) or ((b[i + 1].toInt() and 0xFF) shl 8)
+    private fun le24(b: ByteArray, i: Int) = le16(b, i) or ((b[i + 2].toInt() and 0xFF) shl 16)
+
+    /** Width and height from a JPEG, PNG, WebP or GIF header. */
+    private fun dimensions(b: ByteArray): Pair<Int, Int>? {
+        if (b.size < 30) return null
+        // PNG
+        if (b[0] == 0x89.toByte() && b[1] == 'P'.code.toByte()) {
+            val w = (u16(b, 16) shl 16) or u16(b, 18); val h = (u16(b, 20) shl 16) or u16(b, 22)
+            return w to h
+        }
+        // GIF
+        if (b[0] == 'G'.code.toByte() && b[1] == 'I'.code.toByte()) return le16(b, 6) to le16(b, 8)
+        // WebP
+        if (b[0] == 'R'.code.toByte() && b[8] == 'W'.code.toByte() && b[9] == 'E'.code.toByte()) {
+            val kind = String(b, 12, 4, Charsets.US_ASCII)
+            return when (kind) {
+                "VP8 " -> (le16(b, 26) and 0x3FFF) to (le16(b, 28) and 0x3FFF)
+                "VP8L" -> {
+                    val v = (b[21].toInt() and 0xFF) or ((b[22].toInt() and 0xFF) shl 8) or ((b[23].toInt() and 0xFF) shl 16) or ((b[24].toInt() and 0xFF) shl 24)
+                    ((v and 0x3FFF) + 1) to (((v shr 14) and 0x3FFF) + 1)
+                }
+                "VP8X" -> (le24(b, 24) + 1) to (le24(b, 27) + 1)
+                else -> null
+            }
+        }
+        // JPEG: walk the markers to the frame header.
+        if (b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte()) {
+            var i = 2
+            while (i + 9 < b.size) {
+                if (b[i] != 0xFF.toByte()) { i++; continue }
+                val marker = b[i + 1].toInt() and 0xFF
+                if (marker == 0xD8 || marker == 0x01 || marker in 0xD0..0xD7 || marker == 0xFF) { i++; continue }
+                val len = u16(b, i + 2)
+                if (marker in 0xC0..0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
+                    return u16(b, i + 7) to u16(b, i + 5)
+                }
+                i += 2 + len
+            }
+        }
+        return null
+    }
 }

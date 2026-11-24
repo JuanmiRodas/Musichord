@@ -2183,4 +2183,6 @@
     <string name="artist_gallery_empty">No se han encontrado imágenes</string>
     <string name="artist_gallery_open">Abrir</string>
     <string name="qa_smart_suggestion">Sugerencia del shuffle inteligente</string>
+    <string name="cover_web_search">Buscar imágenes en Internet</string>
+    <string name="cover_web_searching">Buscando en Internet…</string>
 </resources>

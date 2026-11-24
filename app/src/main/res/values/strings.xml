@@ -2164,4 +2164,6 @@
     <string name="artist_gallery_empty">No pictures found</string>
     <string name="artist_gallery_open">Open</string>
     <string name="qa_smart_suggestion">Smart shuffle suggestion</string>
+    <string name="cover_web_search">Search images on the web</string>
+    <string name="cover_web_searching">Searching the web…</string>
 </resources>
