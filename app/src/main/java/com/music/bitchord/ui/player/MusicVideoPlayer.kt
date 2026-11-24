@@ -1051,8 +1051,12 @@ object MusicVideoEngine {
         }
         val exo = player ?: return
         val upstream = OkHttpDataSource.Factory(Http.client).setDefaultRequestProperties(stream.headers)
-        val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
-            .createMediaSource(MediaItem.fromUri(stream.url))
+        val factory = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
+        val picture = factory.createMediaSource(MediaItem.fromUri(stream.url))
+        // BitChord Audio: a DASH picture comes with its sound as a second file.
+        val source = stream.audioUrl?.let {
+            androidx.media3.exoplayer.source.MergingMediaSource(picture, factory.createMediaSource(MediaItem.fromUri(it)))
+        } ?: picture
         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
             .build()

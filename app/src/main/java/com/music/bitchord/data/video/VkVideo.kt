@@ -72,7 +72,10 @@ object VkVideo {
         jar.flush()
     }
 
-    private fun page(url: String): String? = runCatching {
+    /** The plain page reads redirect in circles now (VK moved to vkvideo.ru): given up after the first time. */
+    @Volatile private var plainPagesLoop = false
+
+    private fun page(url: String): String? = if (plainPagesLoop) null else runCatching {
         http.newCall(
             Request.Builder().url(url)
                 .header("User-Agent", UA)
@@ -83,9 +86,13 @@ object VkVideo {
             val body = r.body?.string()
             if (!r.isSuccessful) { TrackLog.w(TAG, "VK: HTTP ${r.code} for ${r.request.url.encodedPath}"); null } else body
         }
-    }.onFailure { TrackLog.w(TAG, "VK: ${it.message}") }.getOrNull()
+    }.onFailure {
+        if (it.message?.contains("follow-up", ignoreCase = true) == true) plainPagesLoop = true
+        TrackLog.w(TAG, "VK: ${it.message}")
+    }.getOrNull()
 
-    private fun unescape(s: String) = s.replace("\\/", "/").replace("&amp;", "&").replace("&quot;", "\"")
+    private fun unescape(s: String) = s.replace(Regex("""\\u([0-9a-fA-F]{4})""")) { it.groupValues[1].toInt(16).toChar().toString() }
+        .replace("\\/", "/").replace("&amp;", "&").replace("&quot;", "\"")
         .replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">").replace(Regex("<[^>]+>"), "").trim()
 
     private val LINK = Regex("""href="/video(-?\d+_\d+)[^"]*"""")
@@ -259,7 +266,8 @@ object VkVideo {
     """.trimIndent()
 
     private val SOURCE = Regex("""<source[^>]+src="([^"]+)"[^>]*>""")
-    private val URL_N = Regex(""""url(\d{3,4})"\s*:\s*"([^"]+)"""")
+    // "url720" on the old pages, "mp4_720" in the player's newer answers.
+    private val URL_N = Regex(""""(?:url|mp4_)(\d{3,4})"\s*:\s*"([^"]+)"""")
 
     /**
      * The picture of video [id], at most [maxHeight] tall: one of its progressive MP4s (they
@@ -289,7 +297,7 @@ object VkVideo {
                 hls = requests.firstOrNull { it.contains(".m3u8") }
             }
         }
-        val headers = mapOf("User-Agent" to UA, "Referer" to "https://vkvideo.ru/", "Cookie" to cookies())
+        val headers = mapOf("User-Agent" to UA, "Referer" to "https://vkvideo.ru/", "Origin" to "https://vkvideo.ru", "Cookie" to cookies())
         val best = found.keys.filter { it in 1..maxHeight }.maxOrNull()?.let { it to found[it]!! }
             ?: found.entries.minByOrNull { it.key }?.let { it.key to it.value }
         if (best == null) {
@@ -323,7 +331,7 @@ object VkVideo {
     private val STREAM_HOOK = """
         (function(){
           if(window.__bcVk)return;window.__bcVk=[];
-          var keep=function(t){try{if(t&&/"(?:url\d{3,4}|hls)"\s*:/.test(t))window.__bcVk.push(t.slice(0,200000));}catch(e){}};
+          var keep=function(t){try{if(t&&/"(?:url\d{3,4}|mp4_\d{3,4}|hls)"\s*:/.test(t))window.__bcVk.push(t.slice(0,200000));}catch(e){}};
           try{var pl=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.muted=true;this.volume=0;return pl.apply(this,arguments);};}catch(e){}
           var f=window.fetch;if(f){window.fetch=function(){var r=f.apply(this,arguments);try{r.then(function(x){x.clone().text().then(keep).catch(function(){});}).catch(function(){});}catch(e){}return r;};}
           var o=XMLHttpRequest.prototype.open,s=XMLHttpRequest.prototype.send;
@@ -336,7 +344,7 @@ object VkVideo {
         (function(){
           var v=document.querySelector('video');if(v){try{v.muted=true;v.pause();}catch(e){}}
           var parts=(window.__bcVk||[]).slice();
-          var h=document.documentElement.innerHTML;if(/"(?:url\d{3,4}|hls)"\s*:/.test(h))parts.push(h);
+          var h=document.documentElement.innerHTML;if(/"(?:url\d{3,4}|mp4_\d{3,4}|hls)"\s*:/.test(h))parts.push(h);
           return parts.length?parts.join('\n'):null;
         })()
     """.trimIndent()
