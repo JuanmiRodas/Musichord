@@ -266,7 +266,8 @@ object Engine {
         } else spare.forEach { unknown += it.rel }
         Live.unmatched = unknown
         if (unknown.isNotEmpty()) ops.log("app", "library: ${unknown.size} files not made by the app and matching no song (left where they are): ${unknown.take(5)}")
-        if (unwanted.size > 50 && plan.copy.size < present.size) { ops.log("app", "build: plan smaller than the library (sources not read?) — nothing removed"); unwanted.clear() }
+        // A plan far smaller than the library means the sources weren't read: then nothing is removed.
+        if (unwanted.size > 50 && plan.copy.size < present.size * 0.7) { ops.log("app", "build: plan smaller than the library (sources not read?) — nothing removed"); unwanted.clear() }
 
         Live.total = plan.copy.size + unwanted.size
         // 1. Remove what the plan no longer wants (only files the app made, or second copies).

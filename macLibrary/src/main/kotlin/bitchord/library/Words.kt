@@ -62,21 +62,44 @@ object Words {
         val s = nfc(s0).replace('\u0000', ' ').trim()
         if (s.count { it.code in 0x80..0xFF } < 2) return s
         val bytes = bytesOf(s) ?: return s
-        val ascii = s.filter { it.code < 0x80 }
+        // UTF-8 read as Latin-1 ("CatatÃ³nica", "Hey, TÃº"): the bytes are UTF-8.
+        runCatching {
+            java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes)).toString()
+        }.getOrNull()?.let { u -> if (u != s && u.none { it.code in 0x80..0x9F }) return nfc(u) }
+        // East Asian text read as Latin-1: every decoding that keeps the plain letters, the most plausible one.
+        var best: String? = null; var bestScore = 0
         for (cs in decoders) {
             val d = runCatching {
                 cs.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
                     .decode(ByteBuffer.wrap(bytes)).toString()
             }.getOrNull() ?: continue
-            // Plain letters and digits stay where they were (punctuation may be half of a character).
             // Plain letters and digits stay where they were; in Big5, GBK or Shift-JIS a letter right after an
             // accented one may be the second half of a character ("¤é¥»ªZ¹DÀ]" is 日本武道館).
             if (!sameLetters(d.filter { it.code < 0x80 && it.isLetterOrDigit() }, s)) continue
             if (d.count { CJK_ONLY.containsMatchIn(it.toString()) } < 2 && !Regex("[～〜・「」『』]").containsMatchIn(d)) continue
             if (HALF_KANA.containsMatchIn(d) || !EAST.containsMatchIn(d)) continue
-            return nfc(d)
+            val score = plausibility(d)
+            if (score > bestScore) { best = d; bestScore = score }
         }
-        return s
+        return best?.let { nfc(it) } ?: s
+    }
+
+    /** How much a decoding looks like real text: common kana, kanji and CJK punctuation count; odd leftovers count against. */
+    private fun plausibility(d: String): Int {
+        var n = 0
+        for (c in d) {
+            val k = c.code
+            n += when {
+                k in 0x3041..0x30FF -> 3                       // kana
+                k in 0x4E00..0x9FFF -> 2                       // common kanji
+                c in "「」『』“”・～〜、。！？（）" -> 3
+                k < 0x80 -> 0
+                k in 0x80..0x24F || c in "‘’¨〃ńŃ" -> -4         // Latin-1 or odd marks left over
+                else -> -1
+            }
+        }
+        return n
     }
 
     // ── Words that name nothing ──

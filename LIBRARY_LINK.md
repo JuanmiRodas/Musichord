@@ -139,3 +139,14 @@ Para archivos que desaparecen y aparecen sin que el Mac lo diga (otra herramient
   "background": url } }` (fanart.tv), para la página de artista del móvil. AcoustID reconoce por
   el sonido las canciones sin nombre útil; Last.fm decide el tipo en «Otros artistas»; Discogs
   añade recopilatorios que MusicBrainz no tiene.
+
+## 1.0.36 — limpieza tras la auditoría
+
+- Duplicados: el seguro que impedía cualquier borrado con más de 50 sobrantes ahora solo actúa si el plan es menor que el 70 % de la biblioteca (fuentes sin leer).
+- `Words.fix`: UTF-8 leído como Latin-1 («CatatÃ³nica» → «Catatónica»); para Big5/GBK/Shift-JIS se elige la decodificación más plausible.
+- Cuarentena: copia local en `Store.dir/quarantine.json` y regla fija para «Música de los vídeos OPS» y los nombres «a1 jap …».
+- Basura de YouTube fuera de títulos y álbumes; AcoustID también para vídeos, canciones sueltas y sin álbum (15 min por pasada).
+- Series: `Openings/`, `Endings/` (subcarpeta por serie si hay varias), `Personajes/`, `Canciones en español/`, `Otras/`; se conservan todas las versiones, solo se quitan copias idénticas.
+- NANA: las canciones acreditadas a los personajes (inspi' NANA/REIRA, NANA starring MIKA NAKASHIMA) van a la carpeta NANA; el resto, a la artista.
+- Artistas unificados a mano (`SAME_PEOPLE`) y nunca unidos (`OTHER_PEOPLE`: Miho Morikawa ≠ 福原美穂, Hitomi ≠ Hitomi Kuroishi).
+- Un álbum con dos nombres (japonés / romaji) se une al latino; la misma pista dos veces en el mismo álbum → la mejor copia.
