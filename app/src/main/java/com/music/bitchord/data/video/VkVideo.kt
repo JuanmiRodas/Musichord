@@ -36,7 +36,7 @@ object VkVideo {
     private const val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
 
     data class Hit(val id: String, val title: String, val author: String, val durationText: String?, val thumbnail: String?, val durationSec: Int)
-    data class Stream(val url: String, val headers: Map<String, String>, val width: Int, val height: Int)
+    data class Stream(val url: String, val headers: Map<String, String>, val width: Int, val height: Int, val hls: Boolean = false)
 
     /** The VK sign-in page is up (Settings › VK). */
     val loginOpen = MutableStateFlow(false)
@@ -164,7 +164,8 @@ object VkVideo {
                 view = WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    settings.mediaPlaybackRequiresUserGesture = false
+                    // Never plays anything itself: its sound would cut into the song's.
+                    settings.mediaPlaybackRequiresUserGesture = true
                     settings.userAgentString = UA
                     CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -260,12 +261,18 @@ object VkVideo {
     private val SOURCE = Regex("""<source[^>]+src="([^"]+)"[^>]*>""")
     private val URL_N = Regex(""""url(\d{3,4})"\s*:\s*"([^"]+)"""")
 
-    /** The MP4 of video [id], at most [maxHeight] tall: from its page's HTML, else from the page drawn in a hidden browser. */
+    /**
+     * The picture of video [id], at most [maxHeight] tall: one of its progressive MP4s (they
+     * carry picture and sound together) read from its page or from the player's own answers in
+     * a hidden browser; else its HLS playlist. Never a stream sniffed off the network: those
+     * were DASH pieces — sometimes the sound alone, which played with no picture.
+     */
     suspend fun stream(id: String, maxHeight: Int = 1080): Stream? {
         val found = LinkedHashMap<Int, String>()
+        var hls: String? = null
         withContext(Dispatchers.IO) {
             for (u in listOf("$MOBILE/video$id", "https://vkvideo.ru/video$id")) {
-                page(u)?.let { collect(it, found) }
+                page(u)?.let { collect(it, found); if (hls == null) hls = hlsOf(it) }
                 if (found.isNotEmpty()) break
             }
         }
@@ -273,44 +280,51 @@ object VkVideo {
             val requests = mutableListOf<String>()
             runCatching {
                 inPage("https://vkvideo.ru/video$id", 20_000, STREAM_JS, requests = requests, hook = STREAM_HOOK) { raw ->
-                    LinkedHashMap<Int, String>().also { collect(raw, it) }.takeIf { it.isNotEmpty() }
+                    val map = LinkedHashMap<Int, String>().also { collect(raw, it) }
+                    if (map.isEmpty()) hlsOf(raw)?.let { hls = it }
+                    map.takeIf { it.isNotEmpty() || hls != null }
                 }
             }.getOrNull()?.let { found.putAll(it) }
-            if (found.isEmpty()) synchronized(requests) {
-                requests.filter { MP4_REQUEST.containsMatchIn(it) }.forEach { u ->
-                    val h = Regex("""\.(\d{3,4})\.mp4""").find(u)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                    found.putIfAbsent(h, u)
-                }
+            if (found.isEmpty() && hls == null) synchronized(requests) {
+                hls = requests.firstOrNull { it.contains(".m3u8") }
             }
         }
+        val headers = mapOf("User-Agent" to UA, "Referer" to "https://vkvideo.ru/", "Cookie" to cookies())
         val best = found.keys.filter { it in 1..maxHeight }.maxOrNull()?.let { it to found[it]!! }
-            ?: found.entries.firstOrNull()?.let { it.key to it.value }
+            ?: found.entries.minByOrNull { it.key }?.let { it.key to it.value }
         if (best == null) {
-            TrackLog.w(TAG, "VK: no MP4 for $id (signed in: ${signedIn()})")
-            return null
+            val playlist = hls ?: run {
+                TrackLog.w(TAG, "VK: no picture for $id (signed in: ${signedIn()})")
+                return null
+            }
+            TrackLog.d(TAG, "VK: HLS for $id")
+            return Stream(playlist, headers, 1280, 720, hls = true)
         }
         val height = best.first.takeIf { it > 0 } ?: 720
-        TrackLog.d(TAG, "VK: stream for $id (${height}p)")
-        return Stream(best.second, mapOf("User-Agent" to UA, "Referer" to "https://vkvideo.ru/", "Cookie" to cookies()), height * 16 / 9, height)
+        TrackLog.d(TAG, "VK: MP4 for $id (${height}p)")
+        return Stream(best.second, headers, height * 16 / 9, height)
     }
+
+    private val HLS = Regex(""""hls(?:_ondemand|_fmp4)?"\s*:\s*"([^"]+)"""")
+
+    private fun hlsOf(text: String): String? = HLS.find(text)?.groupValues?.get(1)?.let(::unescape)?.takeIf { it.startsWith("http") }
 
     /** The "url720": "…" MP4s and <source> tags in [text], by height. */
     private fun collect(text: String, found: MutableMap<Int, String>) {
         URL_N.findAll(text).forEach { m -> m.groupValues[1].toIntOrNull()?.let { h -> found.putIfAbsent(h, unescape(m.groupValues[2])) } }
         SOURCE.findAll(text).forEach { m ->
             val url = unescape(m.groupValues[1])
-            val h = Regex("""\.(\d{3,4})\.mp4""").find(url)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            if (url.startsWith("http") && !url.contains(".m3u8")) found.putIfAbsent(h, url)
+            val h = Regex("""\.(\d{3,4})\.mp4""").find(url)?.groupValues?.get(1)?.toIntOrNull() ?: return@forEach
+            if (url.startsWith("http")) found.putIfAbsent(h, url)
         }
     }
-
-    private val MP4_REQUEST = Regex("""\.mp4(\?|$)|okcdn\.ru/\?.*type=\d""")
 
     /** Keeps every API answer the page gets that names MP4s, for [STREAM_JS] to read. */
     private val STREAM_HOOK = """
         (function(){
           if(window.__bcVk)return;window.__bcVk=[];
-          var keep=function(t){try{if(t&&/"url\d{3,4}"\s*:/.test(t))window.__bcVk.push(t.slice(0,200000));}catch(e){}};
+          var keep=function(t){try{if(t&&/"(?:url\d{3,4}|hls)"\s*:/.test(t))window.__bcVk.push(t.slice(0,200000));}catch(e){}};
+          try{var pl=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.muted=true;this.volume=0;return pl.apply(this,arguments);};}catch(e){}
           var f=window.fetch;if(f){window.fetch=function(){var r=f.apply(this,arguments);try{r.then(function(x){x.clone().text().then(keep).catch(function(){});}).catch(function(){});}catch(e){}return r;};}
           var o=XMLHttpRequest.prototype.open,s=XMLHttpRequest.prototype.send;
           XMLHttpRequest.prototype.send=function(){var x=this;try{x.addEventListener('load',function(){try{keep(x.responseText);}catch(e){}});}catch(e){}return s.apply(this,arguments);};
@@ -320,10 +334,9 @@ object VkVideo {
     /** What the drawn video page holds: kept API answers, its HTML, a <video>'s own file. */
     private val STREAM_JS = """
         (function(){
-          var v=document.querySelector('video');if(v){try{v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){});}catch(e){}}
+          var v=document.querySelector('video');if(v){try{v.muted=true;v.pause();}catch(e){}}
           var parts=(window.__bcVk||[]).slice();
-          if(v&&v.src&&v.src.indexOf('http')===0&&v.src.indexOf('.m3u8')<0)parts.push('"url0":"'+v.src+'"');
-          var h=document.documentElement.innerHTML;if(/"url\d{3,4}"\s*:/.test(h))parts.push(h);
+          var h=document.documentElement.innerHTML;if(/"(?:url\d{3,4}|hls)"\s*:/.test(h))parts.push(h);
           return parts.length?parts.join('\n'):null;
         })()
     """.trimIndent()

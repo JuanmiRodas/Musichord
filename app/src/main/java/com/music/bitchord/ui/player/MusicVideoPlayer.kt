@@ -816,7 +816,7 @@ object MusicVideoEngine {
                     return@launch
                 }
                 if (stream.height > 0) _aspect.value = stream.width.toFloat() / stream.height
-                loadFile(stream.url, videoId, stream.headers, stream.url, stream.headers, ranged = true)
+                loadFile(stream.url, videoId, stream.headers, stream.url, stream.headers, ranged = true, hls = stream.hls)
             }
             return
         }
@@ -993,13 +993,16 @@ object MusicVideoEngine {
      */
     private fun loadFile(
         url: String, key: String, headers: Map<String, String>, soundUrl: String, soundHeaders: Map<String, String>,
-        ranged: Boolean, chunked: Boolean = true,
+        ranged: Boolean, chunked: Boolean = true, hls: Boolean = false,
     ) {
         val exo = player ?: return
         val upstream = OkHttpDataSource.Factory(Http.client).setDefaultRequestProperties(
             headers + ("User-Agent" to "BitChordAudio/1.0 (Android music player)"),
         )
-        val source = ProgressiveMediaSource.Factory(if (chunked) ChunkedDataSource.Factory(upstream, CHUNK_BYTES) else upstream)
+        // BitChord Audio: an HLS playlist (VK's, when it gives no MP4) through its own source.
+        val source = if (hls) {
+            androidx.media3.exoplayer.hls.HlsMediaSource.Factory(upstream).createMediaSource(MediaItem.fromUri(url))
+        } else ProgressiveMediaSource.Factory(if (chunked) ChunkedDataSource.Factory(upstream, CHUNK_BYTES) else upstream)
             .createMediaSource(MediaItem.fromUri(url))
         // Its own sound is decoded only when asked for (the "original audio" switch).
         val sound = com.music.bitchord.data.video.VideoMode.originalAudio.value
@@ -1010,7 +1013,7 @@ object MusicVideoEngine {
         loadedProfile = null
         val forId = loadedFor
         val ctx = appContext
-        if (forId != null && ctx != null) {
+        if (forId != null && ctx != null && !hls) {
             controller?.currentMediaItem?.toSong()?.takeIf { it.videoId == forId }?.let { song ->
                 pendingAlign = {
                     com.music.bitchord.playback.smart.VideoAligner.request(ctx, song, key, soundUrl, soundHeaders, ranged = ranged, songSound = {

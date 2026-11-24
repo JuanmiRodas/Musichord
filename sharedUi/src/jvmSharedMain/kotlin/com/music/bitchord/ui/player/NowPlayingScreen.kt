@@ -3146,7 +3146,9 @@ fun NowPlayingScreen(
                         )
                         if (oled < 1f) LastWaveBackdrop(
                             look = look,
-                            artworkUrl = remoteArt ?: song.thumbnailUrl,
+                            // BitChord Audio: in video mode the background (and so the glass of the
+                            // controls over it) takes the video's picture, crossfading from the cover.
+                            artworkUrl = lastWaveArt,
                             seedKey = song.videoId,
                             playing = isPlaying && power[PowerSaving.Feature.BACKGROUND_MOTION.id] != false,
                             alpha = { backdropAlpha },
