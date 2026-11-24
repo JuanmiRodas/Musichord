@@ -2897,7 +2897,6 @@ private fun LastWaveTransport(
  * LastWave's press on a glass control: a spring down to [pressedScale] while held. Its own
  * interaction source, handed to the control's clickable so the press is the control's.
  */
-@Composable
 /**
  * BitChord Audio: the battery button — a tap steps through the saving levels (moving
  * pictures off; also the waves and liquid glass; also OLED black; back to all), a long
@@ -2974,6 +2973,7 @@ private fun BatteryButton() {
     }
 }
 
+@Composable
 internal fun lastWavePressScale(interaction: MutableInteractionSource, pressedScale: Float = 0.88f): Float {
     val pressed by interaction.collectIsPressedAsState()
     // BitChord Audio: battery saving — no bounce.
