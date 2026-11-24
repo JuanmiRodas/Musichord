@@ -183,17 +183,20 @@ object VkVideo {
                     }
                     loadUrl(url)
                 }
-                withTimeoutOrNull<T>(timeoutMs) {
+                val page = view
+                var result: T? = null
+                withTimeoutOrNull(timeoutMs) {
                     var last: T? = null
                     var same = 0
-                    while (true) {
+                    while (result == null) {
                         delay(POLL_MS)
-                        val raw = view?.let { eval(it, js) } ?: continue
+                        val raw = eval(page, js) ?: continue
                         val got = runCatching { parse(raw) }.getOrNull() ?: continue
                         if (got == last) same++ else { last = got; same = 1 }
-                        if (same >= settle) return@withTimeoutOrNull got
+                        if (same >= settle) result = got
                     }
                 }
+                result
             } finally {
                 runCatching { view?.stopLoading(); view?.destroy() }
             }
