@@ -217,22 +217,41 @@ object VkVideo {
     /** The result cards drawn on vkvideo.ru: id, title, picture, duration, channel. */
     private val SEARCH_JS = """
         (function(){
-          var out=[],seen={};
+          var BADGE=/^(?:4K|UHD|FHD|QHD|HD|SD|\d{3,4}p)?\s*(?:\d{1,2}:)?\d{1,2}:\d{2}\s*/i;
+          function clean(t){return (t||'').replace(/\s+/g,' ').trim();}
+          function meta(t){return !t||t.length<2||/^(?:4K|UHD|FHD|QHD|HD|SD|\d{3,4}p)$/i.test(t)||/^(?:\d{1,2}:)?\d{1,2}:\d{2}$/.test(t)||
+            /просмотр|views|назад|\bago\b|^\d[\d\s.,KkMмтыс]*$/i.test(t);}
+          function idOf(a){var m=(a.getAttribute('href')||'').match(/video(-?\d+_\d+)/);return m?m[1]:null;}
+          var ids=[],info={};
           var as=document.querySelectorAll('a[href*="video"]');
-          for(var i=0;i<as.length&&out.length<25;i++){
-            var a=as[i];var m=(a.getAttribute('href')||'').match(/video(-?\d+_\d+)/);
-            if(!m||seen[m[1]])continue;
-            var card=a.closest('[class*="card"],[class*="Card"],[class*="item"],[class*="Item"],[data-testid*="video"],li,article')||a.parentElement;
-            var t=a.getAttribute('aria-label')||a.getAttribute('title')||'';
-            if(!t&&card){var te=card.querySelector('[class*="title"],[class*="Title"],[data-testid*="title"]');t=te?te.textContent:'';}
-            if(!t)t=a.textContent||'';
-            t=t.replace(/\s+/g,' ').trim();
-            if(t.length<2||/^\d{1,2}:\d{2}/.test(t))continue;
-            var th='';var img=card&&card.querySelector('img');if(img)th=img.currentSrc||img.src||'';
-            if(!th&&card){var bg=card.querySelector('[style*="background-image"]');if(bg){var mm=(bg.getAttribute('style')||'').match(/url\(["']?([^"')]+)/);if(mm)th=mm[1];}}
-            var txt=card?(card.innerText||''):'';var dm=txt.match(/(^|\s)(\d{1,2}:\d{2}(?::\d{2})?)(\s|$)/);
-            var ch='';if(card){var ce=card.querySelector('[class*="owner"],[class*="Owner"],[class*="author"],[class*="Author"],[class*="channel"],[class*="Channel"]');if(ce)ch=(ce.textContent||'').trim();}
-            seen[m[1]]=1;out.push({id:m[1],t:t,th:th,d:dm?dm[2]:'',a:ch});
+          for(var i=0;i<as.length;i++){
+            var a=as[i];var id=idOf(a);if(!id)continue;
+            if(!info[id]){if(ids.length>=25)continue;info[id]={ts:[],th:'',d:'',card:null};ids.push(id);}
+            var o=info[id];
+            var raw=clean(a.getAttribute('aria-label')||a.getAttribute('title')||a.textContent);
+            var dm=raw.match(/(?:\d{1,2}:)?\d{1,2}:\d{2}/);if(dm&&!o.d)o.d=dm[0];
+            var t=clean(raw.replace(BADGE,''));if(!meta(t))o.ts.push(t);
+            if(!o.th){var img=a.querySelector('img');if(img)o.th=img.currentSrc||img.src||'';}
+            if(!o.th){var bg=a.querySelector('[style*="background-image"]');var st=bg?bg.getAttribute('style'):(a.getAttribute('style')||'');var mm=(st||'').match(/url\(["']?([^"')]+)/);if(mm)o.th=mm[1];}
+            var c=a;
+            for(var k=0;k<7&&c.parentElement;k++){
+              var up=c.parentElement;var links=up.querySelectorAll('a[href*="video"]');var other=false;
+              for(var j=0;j<links.length;j++){var x=idOf(links[j]);if(x&&x!==id){other=true;break;}}
+              if(other)break;c=up;
+            }
+            if(!o.card||o.card.contains(c))o.card=c;
+          }
+          var out=[];
+          for(var n=0;n<ids.length;n++){
+            var o=info[ids[n]];var lines=[];
+            if(o.card){lines=(o.card.innerText||'').split('\n').map(function(l){return clean(l.replace(BADGE,''));}).filter(function(l){return !meta(l);});}
+            var title=o.ts.sort(function(p,q){return q.length-p.length;})[0]||lines[0]||'';
+            if(!title)continue;
+            var ch='';
+            if(o.card){var ce=o.card.querySelector('[class*="owner"],[class*="Owner"],[class*="author"],[class*="Author"],[class*="channel"],[class*="Channel"],[class*="group"],[class*="Group"]');if(ce)ch=clean(ce.textContent);}
+            if(!ch||ch===title){for(var l=0;l<lines.length;l++){if(lines[l]!==title&&title.indexOf(lines[l])<0){ch=lines[l];break;}}}
+            if(!o.th&&o.card){var im=o.card.querySelector('img');if(im)o.th=im.currentSrc||im.src||'';}
+            out.push({id:ids[n],t:title,th:o.th,d:o.d,a:ch});
           }
           return out.length?JSON.stringify(out):null;
         })()
