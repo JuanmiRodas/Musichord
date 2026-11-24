@@ -4474,6 +4474,7 @@ fun NowPlayingScreen(
                                 val aspect = videoAspect.coerceIn(1f, 2.4f)
                                 // BitChord Audio: where the frame is — left, top, width, height — between
                                 // the cover's square (0) and the video's own frame (1).
+                                val lastTarget = remember { floatArrayOf(Float.NaN, 0f, 0f, 0f) }
                                 fun androidx.compose.ui.unit.Density.videoRect(): FloatArray {
                                     val side = artSize().roundToPx().toFloat()
                                     val sl = fromStart(artStart().roundToPx().toFloat(), side)
@@ -4488,6 +4489,9 @@ fun NowPlayingScreen(
                                             floatArrayOf(0f, (artTop() + artSize() / 2).roundToPx() - h / 2f, boxWidthPx.toFloat(), h)
                                         }
                                     }
+                                    // On the way out the frame shrinks from where it last was, not from the square.
+                                    if (videoMode) target.copyInto(lastTarget)
+                                    else if (!lastTarget[0].isNaN()) lastTarget.copyInto(target)
                                     val m = videoMorph
                                     return floatArrayOf(
                                         sl + (target[0] - sl) * m, st + (target[1] - st) * m,
@@ -4532,27 +4536,15 @@ fun NowPlayingScreen(
                                             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
                                         )
-                                        if (exitWithPicture) {
-                                            MusicVideoSurface(
-                                                videoId = song.videoId,
-                                                fit = false,
-                                                onRenderedChanged = {},
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .graphicsLayer {
-                                                        val zoomIn = 1f + 0.35f * (1f - videoMorph)
-                                                        scaleX = zoomIn
-                                                        scaleY = zoomIn
-                                                        alpha = videoMorph * videoMorph
-                                                    },
-                                            )
-                                        }
-                                        return@Box
                                     }
                                     // Black with a spinner under the picture until
-                                    // its first frame lands.
-                                    if (!videoRendered) {
+                                    // its first frame lands — and kept a moment after,
+                                    // while the picture fades in over it (no black between).
+                                    var backdropDone by remember { mutableStateOf(false) }
+                                    LaunchedEffect(videoRendered) {
+                                        if (videoRendered) { delay(450); backdropDone = true } else backdropDone = false
+                                    }
+                                    if (videoMode && (!videoRendered || !backdropDone)) {
                                         VideoLoadingBackdrop(
                                             Modifier
                                                 .fillMaxSize()
@@ -4590,17 +4582,24 @@ fun NowPlayingScreen(
                                                 .clip(RoundedCornerShape(10.dp)),
                                         )
                                     }
+                                    // BitChord Audio: the shape the picture had, kept for the way out.
+                                    var lastFit by remember { mutableStateOf(true) }
+                                    var lastEdge by remember { mutableStateOf(false) }
+                                    if (videoMode) SideEffect { lastFit = !squareVideo && !videoEdge; lastEdge = videoEdge }
                                     MusicVideoSurface(
                                         videoId = song.videoId,
-                                        fit = !squareVideo && !videoEdge,
+                                        fit = if (videoMode) !squareVideo && !videoEdge else lastFit,
                                         onRenderedChanged = { videoRendered = it },
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .clip(RoundedCornerShape(if (videoEdge) 0.dp else 10.dp))
+                                            .clip(RoundedCornerShape(if ((if (videoMode) videoEdge else lastEdge) && videoMorph > 0.99f) 0.dp else 10.dp))
                                             .graphicsLayer {
-                                                scaleX = zoom
-                                                scaleY = zoom
+                                                // Leaving: zooming in as it fades into the cover under it.
+                                                val leave = if (videoMode) 1f else 1f + 0.35f * (1f - videoMorph)
+                                                scaleX = zoom * leave
+                                                scaleY = zoom * leave
                                                 translationY = shift * size.height * zoom
+                                                if (!videoMode) alpha = if (exitWithPicture) videoMorph * videoMorph else 0f
                                             },
                                     )
                                     // BitChord Audio: video mode's lyrics, over the bottom of the picture.
