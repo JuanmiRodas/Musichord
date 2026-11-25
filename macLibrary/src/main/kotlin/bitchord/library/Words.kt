@@ -39,6 +39,13 @@ object Words {
         return out.toByteArray()
     }
 
+    private fun isHighCp1252(c: Char): Boolean {
+        if (c.code in 0x80..0xFF) return true
+        if (c.code < 0x80) return false
+        val b = c.toString().toByteArray(cp1252)
+        return b.size == 1 && b[0] != '?'.code.toByte() && (b[0].toInt() and 0xFF) >= 0x80
+    }
+
     /**
      * "°®ÄÚÀï²Ë" → "爱内里菜", "Get Along¡«SelfTag Version¡«" → "Get Along～SelfTag Version～";
      * "Fantôme", "Malmö" or "¡Viva!" stay: a repair must keep every plain letter where it was
@@ -48,20 +55,20 @@ object Words {
         val all = s.filter { it.code < 0x80 && it.isLetterOrDigit() }
         if (decoded == all) return true
         // Only for text that is mostly garbled ("Canción María" read as Big5 would lose letters too).
-        if (s.count { it.code in 0x80..0xFF } < 6) return false
+        if (s.count(::isHighCp1252) < 4) return false
         var j = 0
         for ((i, c) in s.withIndex()) {
             if (c.code >= 0x80 || !c.isLetterOrDigit()) continue
             if (j < decoded.length && decoded[j] == c) { j++; continue }
-            if (i == 0 || s[i - 1].code !in 0x80..0xFF) return false
+            if (i == 0 || !isHighCp1252(s[i - 1])) return false
         }
         return j == decoded.length
     }
 
     fun fix(s0: String): String {
         val s = nfc(s0).replace('\u0000', ' ').trim()
-        if (s.count { it.code in 0x80..0xFF } < 2) return s
         val bytes = bytesOf(s) ?: return s
+        if (bytes.count { (it.toInt() and 0xFF) >= 0x80 } < 2) return s
         // UTF-8 read as Latin-1 ("CatatÃ³nica", "Hey, TÃº"): the bytes are UTF-8.
         runCatching {
             java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)

@@ -52,7 +52,9 @@ object Builder {
     data class Plan(val copy: List<Item>, val skipped: List<Pair<Track, String>>, val alternatives: Map<String, List<String>>, val keyOf: Map<String, String>,
                     val japaneseAlbums: Set<String> = emptySet(), val yearless: Set<Pair<String, String>> = emptySet(),
                     /** Lists written beside the songs: a single's or a compilation's whole track list (.m3u and .txt), path → text. */
-                    val sidecars: Map<String, String> = emptyMap())
+                    val sidecars: Map<String, String> = emptyMap(),
+                    /** Artist (Latin, Japanese) pairs discovered across the library, for YouTube Music naming lookup. */
+                    val scriptPairs: List<Pair<String?, String?>> = emptyList())
 
     /** A song as the plan reads it. */
     private data class Id(val title: String, val artist: String, val albumArtist: String, val various: Boolean, val album: String, val year: String?, val no: Int?, val disc: Int?)
@@ -136,12 +138,25 @@ object Builder {
     private val CJK = Regex("""[\p{IsHiragana}\p{IsKatakana}\p{IsHan}\p{IsHangul}]""")
     private fun latin(s: String) = s.any { it.isLetter() } && !CJK.containsMatchIn(s)
     private val VARIOUS = Regex("(?i)^(various( artists)?|varios( artistas)?|varias|va|v\\.a\\.|compilation|soundtrack|anime|unknown( artist)?|artista desconocido)$")
+    /** Real band/duo names containing &, , or / (populated per plan from album_artist/folders and Last.fm). */
+    @Volatile private var wholeBands: Set<String> = emptySet()
     private fun firstArtist(s: String): String {
+        val stripped = Words.nfc(s).replace(Regex("(?i)\\s+(feat|ft|featuring|with|con)\\.?\\s.*$"), "").trim()
+        if (stripped.isEmpty()) return ""
+        // Keep real band/duo names intact ("Earth, Wind & Fire", "Simon & Garfunkel", "MYTH & ROID", "AC/DC", "S/mileage").
+        if (Words.plain(stripped) in wholeBands || (stripped.any { it in ",&/" } && LastFm.tags(stripped).isNotEmpty())) return stripped
         var depth = 0
-        val cut = s.indexOfFirst { c ->
-            when (c) { '(', '（', '[', '【' -> { depth++; false }; ')', '）', ']', '】' -> { if (depth > 0) depth--; false }; else -> depth == 0 && c in ",&、;/×:：" }
-        }
-        return (if (cut >= 0) s.substring(0, cut) else s).replace(Regex("(?i)\\s(feat|ft|featuring|with|con)\\.?\\s.*$"), "").trim()
+        val cut = stripped.indices.firstOrNull { i ->
+            val c = stripped[i]
+            when (c) {
+                '(', '（', '[', '【' -> { depth++; false }
+                ')', '）', ']', '】' -> { if (depth > 0) depth--; false }
+                // Only split on '/' when surrounded by whitespace ("Artist A / Artist B"), never inside "AC/DC" or "S/mileage".
+                '/' -> depth == 0 && i > 0 && i + 1 < stripped.length && stripped[i - 1].isWhitespace() && stripped[i + 1].isWhitespace()
+                else -> depth == 0 && c in ",&、;×:："
+            }
+        } ?: -1
+        return (if (cut >= 0) stripped.substring(0, cut) else stripped).trim()
     }
     private fun folderName(s: String) = s.replace(Regex("(?i)\\s*[-–]?\\s*(discography|discografía|discografia( completa)?|collection|colecci[oó]n|коллекция|complete|\\(mp3\\)|\\[mp3\\]|\\(flac\\))"), " ")
         .replace(Regex("\\[[^\\]]*]|\\(\\d{4}[^)]*\\)"), " ").replace(Regex("\\s+"), " ").trim()
@@ -163,8 +178,8 @@ object Builder {
         fun find(k: String): String { var x = k; while (parent[x] != null && parent[x] != x) x = parent[x]!!; return x }
         /** Pairs never joined: two people whose names were confused somewhere ("Miho Morikawa" is not 福原美穂). */
         val apart = HashSet<Set<String>>()
-        /** The name a group is shown with, when it is fixed by hand. */
-        val forced = HashMap<String, String>()
+        /** The Latin spelling a group is shown with when fixed by hand (still lets YtMusicNames attach Japanese script when appropriate). */
+        val forcedLatin = HashMap<String, String>()
         fun union(a: String, b: String) {
             if (setOf(a, b) in apart || setOf(find(a), find(b)) in apart) return
             val ra = find(a); val rb = find(b); if (ra != rb) parent[rb] = ra
@@ -184,24 +199,34 @@ object Builder {
             return w * (1 + (if (caps) 0.8 else 0.0) + (if (accents) 0.8 else 0.0) - (if (shouting) 0.3 else 0.0))
         }
         private val shownCache = HashMap<String, String>()
+        /** Pairs of (Latin, Japanese) spellings discovered for each group (for YouTube Music lookup). */
+        fun scriptPairs(): List<Pair<String?, String?>> = variants.keys.map { find(it) }.distinct().mapNotNull { g ->
+            val members = variants.keys.filter { find(it) == g }
+            val all = members.flatMap { m -> variants[m].orEmpty().entries }
+            val lat = forcedLatin[g] ?: all.filter { latin(it.key) }.maxByOrNull { it.value }?.key
+            val eastEntry = all.filter { CJK.containsMatchIn(it.key) && it.key.count { c -> c in 'A'..'Z' || c in 'a'..'z' } < 3 }.maxByOrNull { it.value }
+            val east = eastEntry?.key
+            if (east == null || Words.plain(lat.orEmpty()) in LATIN_ONLY) null else (lat to east)
+        }
         fun shown(name: String): String {
             val k = pkey(name)
             if (k.isEmpty() || variants[k] == null) return Words.nfc(name).trim()
             val g = find(k)
-            forced[g]?.let { return it }
             return shownCache.getOrPut(g) {
                 val members = variants.keys.filter { find(it) == g }
                 val all = members.flatMap { m -> variants[m].orEmpty().entries }
+                val totalW = all.sumOf { it.value }.coerceAtLeast(1.0)
                 // The spelling most used, then within it (same letters) the one with capitals and accents:
                 // "Naomi Tamura" over "naomi tamura", "Beyoncé" over "Beyonce".
                 val latins = all.filter { latin(it.key) }
                 val spelling = latins.groupBy { Words.plain(it.key) }.maxByOrNull { (_, l) -> l.sumOf { it.value } }?.value.orEmpty()
                 val withCaps = spelling.filter { v -> v.key.any { it.isUpperCase() } }.ifEmpty { spelling }
-                val lat = withCaps.maxByOrNull { score(it.key, it.value) }?.key
-                // A Japanese name is in Japanese (not "L'Arc乣en乣Ciel", a Latin name misread).
-                val east = all.filter { CJK.containsMatchIn(it.key) && it.key.count { c -> c in 'A'..'Z' || c in 'a'..'z' } < 3 }.maxByOrNull { it.value }?.key
+                val lat = forcedLatin[g] ?: withCaps.maxByOrNull { score(it.key, it.value) }?.key
+                // A Japanese name is in Japanese (not "L'Arc乣en乣Ciel"); guard against a single mistagged character name sticking to a large group.
+                val eastEntry = all.filter { CJK.containsMatchIn(it.key) && it.key.count { c -> c in 'A'..'Z' || c in 'a'..'z' } < 3 }.maxByOrNull { it.value }
+                val east = eastEntry?.takeIf { e -> e.value >= 2.0 || e.value >= totalW * 0.15 || YtMusicNames.of(lat, e.key) != null }?.key
                 val roma = if (lat == null && east != null) Romaji.of(east) else null
-                // As YouTube Music writes it: in Latin letters as it is ("ANRI"); in Japanese, its romaji first.
+                // As YouTube Music (hl=ja, gl=JP) writes it: in Latin letters as it is ("Aimer", "ANRI", "L'Arc~en~Ciel"); in Japanese, "Romaji (日本語)".
                 if (east != null && Words.plain(lat.orEmpty()) !in LATIN_ONLY) YtMusicNames.of(lat, east)?.let { y ->
                     return@getOrPut if (!CJK.containsMatchIn(y)) y else "${lat ?: roma ?: y} ($y)".takeIf { lat != null || roma != null } ?: y
                 }
@@ -211,25 +236,26 @@ object Builder {
         fun group(name: String): String = pkey(name).let { if (it.isEmpty()) "" else find(it) }
     }
 
-    private val GRAB_BAG = Regex("(?iu)^(vari[oa]s|various( artists)?|va|musique|m[uú]sica.*|music|otros.*|other.*|misc.*|comercial|rock|pop|nueva.*|mix.*|random|singles?|descargad.*|anime|animes|anime y japonadas|openings?|endings?|openings, endings.*|colaboraciones|mp3|videojuegos?|games?|juegos?|series|películas|peliculas|movies|bso|ost|espa[ñn]ol|spanish|english|ingl[eé]s|j-?pop|k-?pop|classical|cl[aá]sica|pop( .*)?|rock( .*)?|jazz|dance|electr[oó]nica?|latino?|indie|metal|chill.*|lounge|[0-9]{2}s|años [0-9]{2}|other artists|otros artistas|varios artistas|.*fandubs?.*|.*\\ben espa[ñn]a\\b.*|.*latinas?|.*\\bmix \\d+|aquella m[uú]sica que conocimos|aquellos \\d0|ñ los éxitos del año|.*\\b(mp3|flac) collection|.*\\(studio albums\\)|best of anime)$")
+    private val GRAB_BAG = Regex("(?iu)^(vari[oa]s|various( artists)?|va|musique|m[uú]sica.*|music|otros.*|other.*|misc.*|comercial|rock|pop|nueva.*|mix.*|random|singles?|descargad.*|anime|animes|anime y japonadas|openings?|endings?|openings, endings.*|colaboraciones|mp3|videojuegos?|games?|juegos?|series|películas|peliculas|movies|bso|ost|espa[ñn]ol|spanish|english|ingl[eé]s|j-?pop|k-?pop|classical|cl[aá]sica|pop( .*)?|rock( .*)?|jazz|dance|electr[oó]nica?|latino?|indie|metal|chill.*|lounge|[0-9]{2}s|años [0-9]{2}|other artists|otros artistas|varios artistas|.*fandubs?.*|.*\\ben espa[ñn]a\\b.*|.*latinas?|.*\\bmix \\d+|aquella m[uú]sica que conocimos|aquellos \\d0|ñ los éxitos del año|.*\\(studio albums\\)|best of anime)$")
 
-    private val REMIX = Regex("(?iu)\\b(remix(es)?|rmx|re-?mix(ed)?|mix|mega ?mix|non-stop|trance|eurobeat|orchestra|orchestral|orgel|music ?box|classical|classics|meets classics)\\b|ayu-?mi-?x|ayu-ro|リミックス|オルゴール")
+    private val REMIX = Regex("(?iu)(?<!-)\\b(remix(es)?|rmx|re-?mix(ed)?|mix|mega ?mix|non-stop|trance|eurobeat|orchestra|orchestral|orgel|music ?box|meets classics|classical\\s+(?:mix|version|edition|album|collection))\\b(?!-)|ayu-?mi-?x|ayu-ro|リミックス|オルゴール")
     private val LIVE = Regex("(?i)\\blive\\b|concert|\\btour\\b|countdown|unplugged|コンサート|ライブ|ライヴ|\\ben directo\\b|en vivo|武道館|budokan|\\bdome\\b|arena")
     private val OST = Regex("(?i)soundtrack|sountrack|\\bost\\b|o\\.s\\.t|\\bbgm\\b|original score|music collection|音楽集|サウンドトラック|サントラ|交響詩|orgel|オルゴール|piano fantasia|brass|ブラス|music fantasy|image ?album|イメージアルバム|sound ?track|sound & song|合唱組曲")
     private val DRAMA = Regex("(?i)drama|ドラマ|radio|ラジオ|chapter\\.?\\s*\\d")
     private val SPANISH = Regex("(?iu)español|espanol|castellano|latino|spanish|fandub|\\bversi[oó]n espa|\\(es\\)|\\bes\\b.*\\b(op|ed|opening|ending)|^\\s*[a-z]?\\d+\\s+es\\s|[-_\\s]sp(\\.\\w{3,4})?$|\\(sp\\)")
-    private val EDITION = Regex("(?i)\\s*[\\[(（]?\\s*(deluxe|edici[oó]n de lujo|special edition|edici[oó]n especial|limited edition|expanded edition|remaster(ed)?|bonus tracks?|disc\\s*\\d+|cd\\s*\\d+|disk\\s*\\d+|\\+\\s*cd extra|cd\\s*\\+\\s*dvd[^\\])）]*|アニメ盤|初回(限定|生産)盤[^\\])）]*|通常盤)\\s*(version|edition|ed\\.?)?\\s*[\\])）]?")
+    private val EDITION = Regex("(?i)\\s*[\\[(（]?\\s*(deluxe|super\\s*deluxe|super|complete|expanded|extended(?:\\s+versions?)?|\\d+(?:st|nd|rd|th)\\s+anniversary|anniversary|edici[oó]n de lujo|special|edici[oó]n especial|limited|remaster(?:ed)?|bonus tracks?|from\\s+u\\.?s\\.?|target(?:\\s+exclusive)?|platinum|japan(?:ese)?|(?:the\\s+)?til\\s+dawn|disc\\s*\\d+|cd\\s*\\d+|disk\\s*\\d+|\\+\\s*cd extra|cd\\s*\\+\\s*dvd[^\\])）]*|アニメ盤|初回(?:限定|生産)盤[^\\])）]*|通常盤)\\s*(version|edition|ed\\.?)?\\s*[\\])）]?")
 
     /** An album without its edition or disc ("He Perdido Los Zapatos [edición De Lujo]" = "He Perdido Los Zapatos"). */
     fun albumBase(a0: String): String {
-        // A name cut short in its tag ("25 (Target Exclusive", "Evermore (Super"): without the unclosed bracket.
-        val a = Regex("\\s*[(\\[（][^)\\]）]*$").replace(a0, "").ifBlank { a0 }
+        // Normalize mixed fullwidth/ASCII brackets ("（「noAno」...CD)" → "(「noAno」...CD)") and strip genuinely unclosed trailing brackets.
+        val norm = a0.replace('（', '(').replace('）', ')')
+        val a = Regex("\\s*[(\\[][^)\\]]*$").replace(norm, "").ifBlank { norm }
         return clean(a.replace(EDITION, " ").replace(Regex("\\s+"), " ").trim(' ', '-', '–', '~')).ifBlank { a.trim() }
     }
     fun albumKey(a: String): String {
         // "Slayers MEGUMIX -GOLD (スレイヤーズ MEGUMIX -GOLD)" and "スレイヤーズ MEGUMIX -GOLD" are one album:
         // a name in brackets that only says the same in Japanese is left out, and a series' Japanese name read as its Latin one.
-        var b = albumBase(a)
+        var b = albumBase(a).replace('α', 'a').replace('Α', 'A')
         Regex("^(.*\\p{IsLatin}.*?)\\s*[(（]([^)）]*[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}][^)）]*)[)）]\\s*$").find(b)?.let { b = it.groupValues[1] }
         var k = Words.plain(b)
         aliases.entries.filter { (key, _) -> key.length >= 3 && CJK.containsMatchIn(key) && k.contains(key) }.sortedByDescending { it.key.length }
@@ -297,7 +323,7 @@ object Builder {
             set(v) { field = v; runCatching { file.writeText(org.json.JSONObject().put("compilationsFirst", v).toString()) } }
     }
 
-    private val VERSION = Regex("(?iu)\\b(ver(sion)?|remix|mix|live|acoustic|instrumental|inst|edit|tv size|tv-size|off vocal|karaoke|demo|remaster(ed)?)\\b|-[a-z]-version|バージョン|ヴァージョン|リミックス|ライブ|ニュー・?テイク|new take|re-?recorded|self ?cover|セルフカバー|featuring|\\bfeat\\.")
+    private val VERSION = Regex("(?iu)\\b(ver(sion)?|remix|mix|live|en directo|directo|unplugged|first take|acoustic|ac[úu]stic[oa]|extended|club mix|radio edit|instrumental|inst|edit|tv size|tv-size|off vocal|karaoke|demo|remaster(ed)?)\\b|-[a-z]-version|バージョン|ヴァージョン|リミックス|ライブ|ニュー・?テイク|new take|re-?record(?:ed|ing)|self ?cover|セルフカバー|featuring|\\bfeat\\.")
 
     const val OUTSIDE = "instrumental de banda sonora de serie"
     /** Beside the library (in its parent folder): the series' soundtrack instrumentals taken out of it. */
@@ -307,21 +333,27 @@ object Builder {
 
     /**
      * The kind of music of an artist with few songs, for "Otros artistas/<kind>/<artist>": from its
-     * genre tags, its words and where it was found. As few kinds as will do.
+     * name, genre tags, words and where it was found. As few kinds as will do.
      */
-    fun kindOf(tracks: List<Track>, titles: List<String>, years: List<Int>, tags: List<String> = emptyList()): String {
+    fun kindOf(tracks: List<Track>, titles: List<String>, years: List<Int>, tags: List<String> = emptyList(), artistName: String = ""): String {
+        // CJK characters or seiyuu credit "(CV." in the artist's own name → JPOP directly.
+        if (CJK.containsMatchIn(artistName) || Regex("(?iu)[(（]cv\\b|\\bcv[.:：]").containsMatchIn(artistName)) return "JPOP"
         // Last.fm's tags of the artist first, when it has them.
         val lt = tags.joinToString(" ")
+        val top3 = tags.take(3).joinToString(" ")
         val eightiesTag = Regex("\\b80s\\b|ochenta").containsMatchIn(lt) || years.isNotEmpty() && years.average() in 1977.0..1992.0
+        val nonSpanishTag = Regex("brazilian|mpb|bossa nova|german|eurodance|italian").containsMatchIn(lt)
+        val mainstreamTop = Regex("\\b(pop|rock|metal|electropop|indie|dance|hip-?hop|rnb|punk|alternative)\\b").containsMatchIn(top3)
         when {
             Regex("j-?pop|j-?rock|japanese|anime|city pop|vocaloid|enka|seiyuu|anison").containsMatchIn(lt) -> return "JPOP"
-            Regex("spanish|español|espanol|latin|movida|flamenco|rumba|pop rock español").containsMatchIn(lt) -> return if (eightiesTag) "80s en España" else "Español"
+            !nonSpanishTag && Regex("spanish|español|espanol|latin pop|pop latino|rock en español|movida|flamenco|rumba|copla|pop rock español").containsMatchIn(lt) -> return if (eightiesTag) "80s en España" else "Español"
             Regex("french|chanson|français|francais").containsMatchIn(lt) -> return "Francés"
-            Regex("classical|soundtrack|score|ost|composer|film music").containsMatchIn(lt) -> return "Clásica y bandas sonoras"
+            !mainstreamTop && Regex("classical|soundtrack|score|ost|composer|film music|video game music").containsMatchIn(lt) -> return "Clásica y bandas sonoras"
         }
         val genres = tracks.joinToString(" ") { it.tags["genre"].orEmpty() }.lowercase()
+        val hasClearWesternTags = tags.isNotEmpty() && Regex("\\b(pop|rock|indie|electronic|british|american|uk|usa|english|hip-?hop|rnb|soul|folk|punk|metal|dance|synthpop|disco|new wave)\\b").containsMatchIn(lt)
         val text = (titles + tracks.map { it.path.substringAfterLast("/Música").substringAfterLast("/Discografías") }).joinToString(" ")
-        val japanese = CJK.containsMatchIn(text) || Regex("(?i)j-?pop|j-?rock|anime|japan|vocaloid|enka|city ?pop").containsMatchIn(genres + " " + text)
+        val japanese = CJK.containsMatchIn(titles.joinToString(" ")) || (!hasClearWesternTags && (CJK.containsMatchIn(text) || Regex("(?i)j-?pop|j-?rock|anime|japan|vocaloid|enka|city ?pop").containsMatchIn(genres + " " + text)))
         // Which language its names are in: function words and endings typical of each.
         // Song titles only (an album's name can be a Spanish compilation of English songs), without credits in brackets ("(con Jorja Smith)").
         val words = Regex("[\\p{L}']+").findAll(titles.joinToString(" ") { it.replace(Regex("[(\\[（【][^)\\]）】]*[)\\]）】]"), " ") }.lowercase()).map { it.value }.toList()
@@ -332,14 +364,14 @@ object Builder {
             Regex("(ing|ght|ness|'s|'re|'ll|n't)$"), Regex("^$"))
         val fr = score(setOf("le", "les", "du", "des", "je", "et", "pas", "mon", "ma", "toi", "moi", "est", "une", "qui", "dans", "sur", "avec", "ne", "vous", "nous", "mais", "oui", "rien", "c'est", "j'ai", "l'amour"),
             Regex("(eux|euse|ette|oir|aux)$"), Regex("[èêëàâçœù]"))
-        val spanishPlace = Regex("(?iu)/(español|espanol|españa|movida|80 en españa|fiesta española)/").containsMatchIn(text)
+        val spanishPlace = !hasClearWesternTags && Regex("(?iu)/(español|espanol|españa|movida|80 en españa|fiesta española)/").containsMatchIn(text)
         val french = Regex("(?i)french|chanson|fran[cç]ais").containsMatchIn(genres) || fr >= 2 && fr > es && fr > en
-        val spanish = Regex("(?i)latin|español|espanol|spanish|flamenco|rumba|movida").containsMatchIn(genres) || (es + (if (spanishPlace) 2 else 0)) > en && es + (if (spanishPlace) 2 else 0) >= 2
+        val spanish = (!hasClearWesternTags && Regex("(?i)español|espanol|spanish|flamenco|rumba|movida|latin pop").containsMatchIn(genres)) || (es + (if (spanishPlace) 2 else 0)) > en && es + (if (spanishPlace) 2 else 0) >= 2
         val eighties = Regex("(?iu)movida|80 en españa|ochenta").containsMatchIn(text) || years.isNotEmpty() && years.average() in 1977.0..1992.0
-        val classical = Regex("(?i)classical|clásica|clasica|soundtrack|score|bso|banda sonora").containsMatchIn(genres)
+        val classical = !hasClearWesternTags && Regex("(?i)classical|clásica|clasica|soundtrack|score|bso|banda sonora").containsMatchIn(genres)
         return when {
             japanese -> "JPOP"
-            Regex("(?iu)movida|80 en españa").containsMatchIn(text) -> "80s en España"
+            !hasClearWesternTags && Regex("(?iu)movida|80 en españa").containsMatchIn(text) && es >= en -> "80s en España"
             spanish && eighties -> "80s en España"
             spanish -> "Español"
             french -> "Francés"
@@ -349,7 +381,7 @@ object Builder {
     }
 
     /** Names kept in Latin letters only, without their Japanese spelling after them. */
-    private val LATIN_ONLY = setOf("larcenciel")
+    private val LATIN_ONLY = setOf("larcenciel", "move")
 
     /** One artist under several names (the first is the one shown). */
     private val SAME_PEOPLE = listOf(
@@ -392,13 +424,17 @@ object Builder {
     private val CHANNEL = Regex("(?iu)^(j-?pop|opening theme.*|various artists.*|banda sonora|radio song|realaudio|creacionesjuanmi|cover nation|impact vocals|multi interpr.*|nuevo interprete|late motiv.*|听动漫|群星|tv (ver|size).*|.*\\b(records|music channel|channel|vevo|- topic)|.*\\bexitos music|omegamusic|sonmay.*|nbcuniversal.*)$|^[^(（]*[)）]$")
     private val THEME_MARK = Regex("(?i)[(\\[]\\s*(opening|ending|op|ed)\\s*\\d*\\s*[)\\]]|^\\s*(op|ed)\\s*-\\s*(op|ed)\\s*\\d+\\s*-|-\\s*(op|ed)\\s*$|^\\s*-\\s*")
     private val THEME_BAG = Regex("(?iu)\\b(openings?|endings?|op\\s*(&|y|and|/)\\s*ed|themes?|tv size|主題歌|テーマ)\\b")
-    private val YT_JUNK = Regex("(?iu)[(\\[{]\\s*(official\\s*(music\\s*)?(video|audio|videoclip|lyric video)|lyrics?|hq( lyrics)?|hd|4k|1080p|720p|audio|video|mv|pv|full( song| ver\\.?| version)?( \\(with lyrics\\))?|with lyrics|letra|subtitulad[oa]|sub español|español sub|visualizer|explicit|original song|mp3juices\\.com|[\\w.-]+\\.(com|net|org))\\s*[)\\]}]|\\blyrics in description!?|\\bofficial video\\b|\\bfull song\\b|\\[mp3juices\\.com\\]|\\b4k\\b")
+    private val YT_JUNK = Regex("(?iu)[(\\[{]\\s*(official\\s*(music\\s*)?(video|audio|videoclip|lyric video)|lyrics?|hq( lyrics)?|hd|4k|1080p|720p|320\\s?kbps|audio|video|mv|pv|full( song| ver\\.?| version)?( \\(with lyrics\\))?|with lyrics|letra|subtitulad[oa]|sub español|español sub|visualizer|explicit|original song|mp3juices\\.com|[\\w.-]+\\.(com|net|org))\\s*[)\\]}]|\\blyrics in description!?|\\bofficial video\\b|\\bfull song\\b|\\[mp3juices\\.com\\]|\\b4k\\b")
 
     private val COMPILATION = Regex("(?iu)\\b(best|greatest|hits|singles?|collection|anthology|complete|the very)\\b|ベスト|コレクション|シングルズ")
 
-    private val DISC_DIR = Regex("(?i)^\\s*(?:disc|disk|cd|disco)\\s*0?(\\d{1,2})\\b")
+    private val DISC_DIR = Regex("(?i)^\\s*(?:disc|disk|cd|disco|vol\\.?)\\s*[_-]?\\s*0?(\\d{1,2})(?:\\b|\\s*[-–:])")
 
-    private val KARAOKE = Regex("(?i)karaoke|カラオケ|off[ -]?vocal|instrumental|inst\\.\\)|\\(inst\\)|backing track|オリジナル・カラオケ")
+    /** Always excluded (karaoke / off-vocal / TV-size instrumental). Studio album instrumentals are kept (user decision). */
+    private val KARAOKE = Regex("(?i)karaoke|カラオケ|off[ -]?vocal|without[ -]?vocal|less[ -]?vocal|backing track|オリジナル・カラオケ|tv[ -]?size.*inst")
+    private val INST_TITLE = Regex("(?i)\\binstrumental\\b|inst\\.\\)|\\(inst\\)|\\[inst\\]")
+    private val GAME_HINT = Regex("(?i)\\b(guitar hero|street fighter|solatorobo|harvest moon|harvest|video ?game|vgm|playstation|nintendo|capcom|square ?enix|cyberconnect2|arcade)\\b|/videojuegos?/|/games?/")
+    private val NON_ANIME_SERIES = Regex("(?i)^\\s*(trance|anna|club|dance|eurobeat|house|techno)\\s*$")
 
     /**
      * `<library>/.bitchord-library/quarantine.json`: folders and files that never enter the library
@@ -449,6 +485,19 @@ object Builder {
 
         // 1. Tags as they are (repaired), and who is named in them.
         fun tag(t: Track, k: String) = Words.fix(when (k) { "album_artist" -> t.albumArtist; else -> t.tags[k].orEmpty() })
+        // Detect real bands/duos containing &, , or / from album_artist tags and top folders (e.g. "Earth, Wind & Fire", "MYTH & ROID", "Simon & Garfunkel").
+        run {
+            val bandCounts = HashMap<String, Int>()
+            tracks.forEach { t ->
+                val aa = tag(t, "album_artist").replace(Regex("(?i)\\s+(feat|ft|featuring|with|con)\\.?\\s.*$"), "").trim()
+                if (aa.any { it in ",&/" } && !VARIOUS.matches(aa) && !Words.noArtist(aa)) bandCounts.merge(Words.plain(aa), 1, Int::plus)
+            }
+            for ((s, mine) in bySource) if (s.mode == "all") mine.map { it.path.removePrefix(s.path + "/").substringBefore('/', "") }.distinct().forEach { top ->
+                val f = folderName(Words.fix(top))
+                if (f.any { it in ",&/" } && !GRAB_BAG.matches(f) && !Words.noArtist(f)) bandCounts.merge(Words.plain(f), 3, Int::plus)
+            }
+            wholeBands = bandCounts.filterValues { it >= 2 }.keys
+        }
         tracks.forEach { t -> people.see(firstArtist(tag(t, "artist")), 1.0); people.see(firstArtist(tag(t, "album_artist")), 1.0) }
         val known = people.variants.filter { (_, v) -> v.values.sum() >= 2 }.keys
         fun isKnown(s: String) = !Words.noArtist(s) && pkey(folderName(s)) in known
@@ -526,16 +575,37 @@ object Builder {
                 !Regex("^\\(?(19|20)\\d{2}\\)?$").matches(p) && Words.plain(p) != Words.plain(title) && !Words.noAlbum(p) && !GRAB_BAG.matches(p.trim())
             }?.let { album = it }
             val year = t.year ?: fYear ?: dirs.asReversed().firstNotNullOfOrNull { Regex("^((19|20)\\d{2})\\b").find(it)?.groupValues?.get(1) }
-            // Nothing (or nothing useful) in its tags: what AcoustID heard it is, when it is sure.
+            // Nothing (or nothing useful) in its tags: what AcoustID heard it is, when it agrees with existing hints (or none exist).
             AcoustId.of(t.path)?.let { h ->
-                // A video's name ("Katy Perry (Lyrics) - I Kissed A Girl" under a channel) says less than the sound.
                 val video = YT_JUNK.containsMatchIn(File(t.path).name) || YT_JUNK.containsMatchIn(tag(t, "title"))
-                if (video || tag(t, "title").isBlank() || tag(t, "artist").isBlank() || artist.isEmpty() || Words.noArtist(tag(t, "artist"))) {
+                val missing = tag(t, "title").isBlank() || tag(t, "artist").isBlank() || artist.isEmpty() || Words.noArtist(tag(t, "artist"))
+                val genericAlb = Regex("(?i)\\b(various artists|promo only|mastermix|top\\s*100|greatest hits|modern rock|now that'?s what i call)\\b")
+                val safeAlbum = h.album?.takeUnless { genericAlb.containsMatchIn(it) }
+                // Require at least one significant word overlap with existing artist/title/filename when non-empty hints exist (blocks misidentifications).
+                val existingHints = listOf(title, artist, File(t.path).nameWithoutExtension).joinToString(" ")
+                val hintTokens = Regex("[\\p{L}\\p{N}]{3,}").findAll(Words.nfc(existingHints).lowercase()).map { Words.plain(it.value) }.filter { it.length >= 3 }.toSet()
+                val hitTokens = Regex("[\\p{L}\\p{N}]{3,}").findAll(Words.nfc(h.title + " " + h.artist).lowercase()).map { Words.plain(it.value) }.filter { it.length >= 3 }.toSet()
+                val trulyNameless = Words.noArtist(artist) && Words.noTitle(title)
+                val agrees = trulyNameless || hintTokens.isEmpty() || (hintTokens intersect hitTokens).isNotEmpty()
+                if ((video || missing) && agrees) {
                     title = h.title; artist = h.artist
-                    if (album.isEmpty()) h.album?.let { album = it }
-                } else if (album.isEmpty() && Words.plain(h.title) == Words.plain(title)) h.album?.let { album = it }
+                    if (album.isEmpty()) safeAlbum?.let { album = it }
+                } else if (album.isEmpty() && Words.plain(h.title) == Words.plain(title) && agrees) safeAlbum?.let { album = it }
             }
             ids[t.path] = Id(title.ifBlank { File(t.path).nameWithoutExtension }, artist, albumArtist, various, album, year, t.trackNo ?: fn.no, t.discNo ?: fn.disc ?: discDir?.groupValues?.get(1)?.toIntOrNull())
+        }
+        // Subfolder artist consistency: if >= 80% of tracks in a subfolder share a known artist that contradicts a stale grandparent folder / album_artist (e.g. Beatles inside Monica Naranjo/), trust the tracks' artist.
+        tracks.filter { ids[it.path] != null }.groupBy { File(it.path).parent }.values.filter { it.size >= 3 }.forEach { list ->
+            val dom = list.map { firstArtist(ids[it.path]!!.artist) }.filter { it.isNotBlank() && isKnown(it) }
+                .groupingBy { pkey(it) }.eachCount().maxByOrNull { it.value } ?: return@forEach
+            if (dom.value < list.size * 0.8) return@forEach
+            val domName = list.map { firstArtist(ids[it.path]!!.artist) }.first { pkey(it) == dom.key }
+            list.forEach { t ->
+                val cur = ids[t.path]!!
+                if (cur.albumArtist.isNotBlank() && pkey(firstArtist(cur.albumArtist)) != dom.key) {
+                    ids[t.path] = cur.copy(albumArtist = domName)
+                }
+            }
         }
         // Folders holding one album only: their picture is that album's (a folder of loose songs' isn't anyone's).
         val singleAlbumDirs = tracks.filter { ids[it.path] != null }.groupBy { File(it.path).parent }
@@ -670,12 +740,12 @@ object Builder {
             if (e.value < 2 && (folderVotes[e.key] ?: 0) == 0) return@forEach
             people.union(lat, east)
         }
-        // Names fixed by hand: one artist under several names; and people never joined.
+        // Names fixed by hand: one artist under several names; sets Latin spelling while letting YtMusicNames apply Japanese script.
         for (list in SAME_PEOPLE) {
             val keys = list.map { pkey(it) }.filter { people.parent.containsKey(it) }
             if (keys.isEmpty()) continue
             keys.drop(1).forEach { people.union(keys.first(), it) }
-            people.forced[people.find(keys.first())] = list.first()
+            people.forcedLatin[people.find(keys.first())] = list.first()
         }
 
 
@@ -784,13 +854,50 @@ object Builder {
         }
         val homes = placedCands.map { c -> if (c.homeKind == 2) c.copy(home = familyOf(c.home)) else c }
 
-        // 8. One recording, one place.
-        fun key(c: Cand): String {
-            val title = Words.plain(c.id.title.replace(Regex("[\\[(（【].*?[\\])）】]"), "")).ifEmpty { Words.plain(c.id.title) }
-            val who = gid(c.id.artist).ifEmpty { "?" }
-            return "$title|$who|${((c.track.seconds ?: 0.0) / 3).toInt()}"
+        // 8. One recording, one place: keep distinct versions (live, first take, acoustic, extended, remix, re-recording) separate,
+        // and cluster identical recordings continuously within 3.5 s (never splitting across multiples of 3 s).
+        fun versionTag(t: String): String {
+            val s = Words.nfc(t).lowercase()
+            return buildList {
+                if (Regex("(?iu)\\b(live|en directo|directo|unplugged)\\b|ライブ|ライヴ").containsMatchIn(s)) add("live")
+                if (Regex("(?iu)first\\s+take").containsMatchIn(s)) add("firsttake")
+                if (Regex("(?iu)\\b(acoustic|ac[úu]stic[oa])\\b").containsMatchIn(s)) add("acoustic")
+                if (Regex("(?iu)\\b(extended|club\\s+mix|radio\\s+edit|remix|rmx)\\b|リミックス").containsMatchIn(s)) add("mix")
+                if (Regex("(?iu)re-?record(?:ed|ing)|self\\s*cover|new\\s+take|ニュー・?テイク").containsMatchIn(s)) add("rerec")
+                Regex("(?iu)[(（\\[]\\s*(?:con|feat\\.?|ft\\.?|with)\\s+([^)）\\]]+)[)）\\]]").find(s)?.let { add("ft:" + Words.plain(it.groupValues[1])) }
+            }.joinToString("+")
         }
-        val byKey = homes.groupBy(::key)
+        fun baseKey(c: Cand): String {
+            val title = Words.plain(c.id.title.replace(Regex("[\\[(（【].*?[\\])）】]"), "")).ifEmpty { Words.plain(c.id.title) }
+            val rawWho = gid(c.id.artist).ifEmpty { "?" }
+            // Align vocalist vs subgroup credits inside absorbed projects (e.g. See-Saw vs Chiaki Ishikawa on the same track).
+            val who = if (c.homeKind == 3 && c.home.contains('/')) Words.plain(c.home) else rawWho
+            val v = versionTag(c.id.title)
+            return if (v.isEmpty()) "$title|$who" else "$title|$who|$v"
+        }
+        val byKey = LinkedHashMap<String, List<Cand>>()
+        val candKey = HashMap<Cand, String>()
+        homes.groupBy(::baseKey).forEach { (bk, group) ->
+            val sorted = group.sortedBy { it.track.seconds ?: 0.0 }
+            val clusters = ArrayList<MutableList<Cand>>()
+            for (c in sorted) {
+                val s = c.track.seconds
+                val last = clusters.lastOrNull()
+                val lastS = last?.lastOrNull()?.track?.seconds
+                if (last != null && (s == null && lastS == null || s != null && lastS != null && kotlin.math.abs(s - lastS) <= 3.5)) {
+                    last += c
+                } else {
+                    clusters += mutableListOf(c)
+                }
+            }
+            clusters.forEachIndexed { idx, cl ->
+                val sec = ((cl.first().track.seconds ?: 0.0)).toInt()
+                val k = "$bk|$sec#$idx"
+                byKey[k] = cl
+                cl.forEach { candKey[it] = k }
+            }
+        }
+        fun key(c: Cand): String = candKey[c] ?: (baseKey(c) + "|0")
         val keyOf = HashMap<String, String>()
         byKey.forEach { (k, l) -> l.forEach { keyOf[it.track.path] = k } }
         val rulesOf = cands.filter { it.homeKind == 3 }.map { it.source }.distinct()
@@ -842,7 +949,16 @@ object Builder {
         val placed = if (!Layout.byRelease) placedAll else placedAll.groupBy { (if (it.homeKind == 1) "1|" + gid(ownerOf(it.best.id)) else "${it.homeKind}|" + it.home.lowercase()) }.values.flatMap { group ->
             fun same(c: Cand, p: Placed) = c.homeKind == p.homeKind && c.home == p.home && c.id.album.isNotBlank() && (p.homeKind != 1 || gid(ownerOf(c.id)) == gid(ownerOf(p.best.id)))
             val albums = HashMap<String, MutableSet<String>>()
-            group.forEach { p -> p.copies.filter { same(it, p) }.forEach { c -> albums.getOrPut(albumKey(c.id.album)) { HashSet() }.add(p.k) } }
+            val albumOrigName = HashMap<String, String>()
+            val albumPaths = HashMap<String, MutableList<String>>()
+            group.forEach { p ->
+                p.copies.filter { same(it, p) }.forEach { c ->
+                    val ak = albumKey(c.id.album)
+                    albums.getOrPut(ak) { HashSet() }.add(p.k)
+                    albumOrigName.merge(ak, c.id.album) { a, b -> if (b.length > a.length) b else a }
+                    albumPaths.getOrPut(ak) { ArrayList() }.add(c.track.path)
+                }
+            }
             // Its best-ofs and compilations on MusicBrainz (looked up before planning): each song of theirs found here joins them.
             val g0 = group.first()
             val whose = if (g0.homeKind == 1) shown(ownerOf(g0.best.id)) else g0.home.substringBefore('/')
@@ -874,12 +990,18 @@ object Builder {
             // to singles and EPs (B-sides, songs on no album), and only what is on neither stays in a best-of or compilation.
             // A series (anime, games) keeps its biggest collections first.
             val compTitles = comps.map { Words.plain(it.title) }.toSet()
-            fun kind(a: String, ks: Set<String>) = when {
-                g0.homeKind != 1 -> 0
-                Regex("(?i)[-(\\[]\\s*single\\s*[)\\]]?$|\\bep\\b|シングル$").containsMatchIn(a) -> 1
-                a.startsWith("mb:") || COMPILATION.containsMatchIn(a) || Words.plain(a) in compTitles -> 2
-                ks.size <= 4 || Regex("(?i)\\bsingle\\b|\\bep\\b|シングル").containsMatchIn(a) -> 1
-                else -> 0
+            fun kind(a: String, ks: Set<String>): Int {
+                if (g0.homeKind != 1) return 0
+                val orig = albumOrigName[a] ?: a
+                val paths = albumPaths[a].orEmpty()
+                val inCompDir = paths.any { Regex("(?i)/(compilations?|best( of)?|greatest hits|recopilatorios?)/").containsMatchIn(it) }
+                val inSingleDir = paths.any { Regex("(?i)/singles?/").containsMatchIn(it) }
+                return when {
+                    Regex("(?i)[-(\\[]\\s*single\\s*[)\\]]?$|\\bep\\b|シングル$").containsMatchIn(orig) -> 1
+                    a.startsWith("mb:") || COMPILATION.containsMatchIn(orig) || Words.plain(orig) in compTitles || inCompDir -> 2
+                    ks.size <= 4 || Regex("(?i)\\bsingle\\b|\\bep\\b|シングル").containsMatchIn(orig) || (inSingleDir && ks.size <= 5) -> 1
+                    else -> 0
+                }
             }
             while (left.isNotEmpty()) {
                 val (a, ks) = albums.maxWithOrNull(compareBy({ -kind(it.key, it.value) }, { it.value.count { k -> k in left } }, { it.value.size })) ?: break
@@ -971,7 +1093,13 @@ object Builder {
         // "Otros artistas/<kind>/<artist>": each artist with few songs under its kind of music (JPOP, Español, Inglés…).
         val kindOfOwner = regrouped.filter { it.homeKind < 2 }.groupBy { p -> val g0 = gid(ownerOf(p.best.id).ifBlank { ownerOf(p.chosen.id) }); ownerArtist[g0] ?: g0 }
             .filterKeys { (artistSongs[it] ?: 0) < 5 }
-            .mapValues { (g, l) -> kindOf(l.map { it.best.track }, l.map { it.best.id.title }, l.mapNotNull { it.best.id.year?.toIntOrNull() }, LastFm.tags(shown(ownerOf(l.first().best.id).ifBlank { g }))) }
+            .mapValues { (g, l) ->
+                val displayName = shown(ownerOf(l.first().best.id).ifBlank { g })
+                kindOf(l.map { it.best.track }, l.map { it.best.id.title }, l.mapNotNull { it.best.id.year?.toIntOrNull() }, LastFm.tags(displayName), displayName)
+            }
+        // Homonymous albums (e.g. "ANRI" 2018, "Miho Morikawa") that have >= 3 numbered tracks are real albums, never stripped to loose tracks.
+        val numberedAlbumCount = regrouped.filter { it.chosen.id.album.isNotBlank() && it.chosen.id.no != null }
+            .groupingBy { (if (it.homeKind == 1) gid(ownerOf(it.best.id)) else it.home.lowercase()) to albumKey(it.chosen.id.album) }.eachCount()
         // A collection that is a series: openings and endings known for it, or songs filed as an anime's or a game's.
         val seriesLikeCache = HashMap<String, Boolean>()
         fun seriesLike(series: String) = seriesLikeCache.getOrPut(series) {
@@ -1006,11 +1134,15 @@ object Builder {
             val asSeries = if (p.homeKind < 2 && !nana) (seriesOfArtist(owner) ?: aliases[Words.plain(owner)])?.let { n -> aliases[Words.plain(n)] ?: n } else null
             if (asSeries != null) { folder = asSeries; albumArtist = asSeries; grouping = asSeries }
             val series = if (p.homeKind == 2 || nana || asSeries != null) folder.substringBefore('/') else null
-            // The album: never "Sueltas". Named only as its collection, folder or artist → none; in a collection, without
-            // its series' name in front ("美少女戦士セーラームーン｜S 音楽集" → "S 音楽集").
+            // The album: never "Sueltas". Named only as its artist/folder → keep if it is a real numbered album (>= 3 numbered tracks or on Spotify);
+            // in a collection, without its series' name in front ("美少女戦士セーラームーン｜S 音楽集" → "S 音楽集").
             val lastHome = p.home.substringAfterLast('/')
-            var album = albumBase(id.album).takeUnless { it.isBlank() || Words.plain(it) == Words.plain(lastHome) || Words.plain(it) == Words.plain(albumArtist) ||
-                Words.plain(it) == Words.plain(p.home.substringBefore('/')) || GRAB_BAG.matches(it.trim()) }.orEmpty()
+            val homonymousOk = (numberedAlbumCount[(if (p.homeKind == 1) g else p.home.lowercase()) to albumKey(id.album)] ?: 0) >= 3 ||
+                (Spotify.checked(albumArtist, albumBase(id.album))?.optBoolean("found") == true)
+            var album = albumBase(id.album).takeUnless {
+                it.isBlank() || GRAB_BAG.matches(it.trim()) ||
+                (!homonymousOk && (Words.plain(it) == Words.plain(lastHome) || Words.plain(it) == Words.plain(albumArtist) || Words.plain(it) == Words.plain(p.home.substringBefore('/'))))
+            }.orEmpty()
             // An album named only in Japanese: its Latin name (VGMdb) in front, the Japanese one in brackets.
             if (album.isNotEmpty() && album.none { it in 'A'..'Z' || it in 'a'..'z' } && CJK.containsMatchIn(album)) {
                 val raw = albumBase(id.album)
@@ -1034,20 +1166,24 @@ object Builder {
                     no = m.groupValues[3].toIntOrNull() ?: no
                 }
             }
-            // Kinds of songs inside a collection; an artist's live albums.
+            // Kinds of songs inside a collection; an artist's live/remix albums (mutually exclusive: never Directos/Remixes/).
+            val alreadySub = folder.contains("/Directos") || folder.contains("/Remixes")
+            val isLiveRelease = LIVE.containsMatchIn(id.album) || p.best.track.tags["genre"].equals("Live", ignoreCase = true) ||
+                Regex("(?i)/live( albums)?/").containsMatchIn(p.best.track.path)
+            val isClassicalArtist = LastFm.tags(albumArtist).take(3).any { it in setOf("classical", "baroque", "romantic", "composer") }
             val sub = when {
                 p.homeKind >= 2 && (SPANISH.containsMatchIn(text + " " + p.best.track.path) || SPANISH.containsMatchIn(p.best.id.title) ||
                     SPANISH.containsMatchIn(File(p.best.track.path).nameWithoutExtension)) && !folder.endsWith("Canciones en español") -> "Canciones en español"
                 p.homeKind == 2 && DRAMA.containsMatchIn(id.album) -> "Doramas"
                 p.homeKind == 2 && OST.containsMatchIn(id.album) -> "Bandas sonoras"
-                p.homeKind != 2 && LIVE.containsMatchIn(id.album) && !folder.endsWith("Directos") -> "Directos"
-                // Remix, trance, orchestra and music-box albums apart from the studio ones (Ayumi Hamasaki's ayu-mi-x…).
-                p.homeKind != 2 && REMIX.containsMatchIn(id.album) && !folder.endsWith("Remixes") -> "Remixes"
+                p.homeKind != 2 && !alreadySub && isLiveRelease -> "Directos"
+                // Remix, trance, orchestra and music-box albums apart from studio ones (never concerts or classical composers).
+                p.homeKind != 2 && !alreadySub && !isClassicalArtist && REMIX.containsMatchIn(id.album) -> "Remixes"
                 else -> null
             }
             if (sub != null) folder = "$folder/$sub"
-            album = album.replace(Regex("^[「『](.*)[」』]$"), "$1").trim()
-            album = Regex("\\s*[(\\[（][^)\\]）]*$").replace(album, "").ifBlank { album }
+            album = album.replace(Regex("^[「『](.*)[」』]$"), "$1").trim().replace('（', '(').replace('）', ')')
+            album = Regex("\\s*[(\\[][^)\\]]*$").replace(album, "").ifBlank { album }
             // A series: Openings, Endings (as aired, every version), its characters' songs, and the loose ones in "Otras";
             // its real albums as they are.
             var flat = false
@@ -1101,14 +1237,33 @@ object Builder {
                 }
             }.toSet()
         instrumental.forEach { d -> d.p.copies.forEach { skipped += it.track to "$OUTSIDE (fuera de la Biblioteca)" } }
-        val drafts = draftsAll.filter { it !in themeDupes && it !in instrumental }
-        // Collections of fewer than 10 songs from anime go together in "Anime".
+        // Studio album instrumentals are kept (user decision); only series' soundtracks and single/OST instrumental B-sides are excluded.
+        val draftAlbumSize = draftsAll.groupingBy { it.folder.lowercase() to albumKey(it.album) }.eachCount()
+        val nonAlbumInst = draftsAll.filter { d ->
+            INST_TITLE.containsMatchIn(d.p.best.id.title + " " + File(d.p.best.track.path).nameWithoutExtension) &&
+                (d.p.homeKind >= 2 || OST.containsMatchIn(d.album) || d.album.isEmpty() || (draftAlbumSize[d.folder.lowercase() to albumKey(d.album)] ?: 0) < 5)
+        }.toSet()
+        nonAlbumInst.forEach { d -> d.p.copies.forEach { skipped += it.track to "instrumental (single / banda sonora)" } }
+        val drafts = draftsAll.filter { it !in themeDupes && it !in instrumental && it !in nonAlbumInst }
+        // Small collections (< 10 songs): video games go to "Videojuegos/", anime to "Anime/"; non-anime folders (Trance, anna) stay out of Anime/.
         val seriesSize = drafts.filter { it.series != null }.groupingBy { it.series!! }.eachCount()
-        val animeSeries = drafts.filter { it.series != null && (seriesSize[it.series] ?: 0) < 10 }.groupBy { it.series!! }
-            .filter { (_, l) -> l.any { d -> Regex("(?i)/anime/|\\banime\\b|\\b(op|ed|opening|ending)\\b").containsMatchIn(d.p.best.track.path) || CJK.containsMatchIn(d.p.chosen.id.album + d.p.best.id.title) } }.keys
-        val placed0 = drafts.map { d -> if (d.series in animeSeries) d.copy(folder = "Anime/" + d.folder) else d }
+        val smallSeries = drafts.filter { it.series != null && (seriesSize[it.series] ?: 0) < 10 }.groupBy { it.series!! }
+        val gameSeries = smallSeries.filter { (name, l) ->
+            GAME_HINT.containsMatchIn(name) || l.any { d -> GAME_HINT.containsMatchIn(d.p.best.track.path + " " + d.p.chosen.id.album) }
+        }.keys
+        val animeSeries = smallSeries.filter { (name, l) ->
+            name !in gameSeries && !NON_ANIME_SERIES.matches(name) &&
+                l.any { d -> Regex("(?i)/anime/|\\banime\\b|\\b(op|ed|opening|ending)\\b").containsMatchIn(d.p.best.track.path) || CJK.containsMatchIn(d.p.chosen.id.album + d.p.best.id.title) }
+        }.keys
+        val placed0 = drafts.map { d ->
+            when {
+                d.series in gameSeries -> d.copy(folder = "Videojuegos/" + d.folder)
+                d.series in animeSeries -> d.copy(folder = "Anime/" + d.folder)
+                else -> d
+            }
+        }
         // One album under two names, one of them read in Japanese ("Kalafina LIVE THE BEST 2015 “Blue Day” at 日本武道館" =
-        // "… at Nippon Budokan"): the Latin one.
+        // "… at Nippon Budokan") or same artist + same year (±1) with >= 60% matching tracks by duration ("Hatsukoi" + "初恋"): merge into the larger/Latin one.
         val albumTo = HashMap<Pair<String, String>, String>()
         placed0.groupBy { it.folder.lowercase() }.forEach { (f, l) ->
             val names = l.map { it.album }.filter { it.isNotEmpty() }.distinct()
@@ -1116,6 +1271,32 @@ object Builder {
                 val k = Words.plain(a.replace(CJK, " ").replace(Regex("[「」『』“”]"), " "))
                 if (k.length < 12) continue
                 names.firstOrNull { it != a && !CJK.containsMatchIn(it) && Words.plain(it).startsWith(k) }?.let { albumTo[f to a] = it }
+            }
+            // Cross-script / edition overlap within the same artist folder & year (±1): merge when >= 60% of the smaller album's tracks match by duration (±2 s).
+            val byAlb = l.filter { it.album.isNotEmpty() && !it.flat }.groupBy { albumTo[f to it.album] ?: it.album }
+            val albList = byAlb.entries.filter { it.value.size >= 2 }.sortedByDescending { it.value.size }
+            for (idxA in albList.indices) {
+                val (bigName, bigTracks) = albList[idxA]
+                val bigYear = bigTracks.mapNotNull { it.p.best.id.year?.toIntOrNull() }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+                for (idxB in idxA + 1 until albList.size) {
+                    val (smallName, smallTracks) = albList[idxB]
+                    if (albumTo.containsKey(f to smallName)) continue
+                    val smallYear = smallTracks.mapNotNull { it.p.best.id.year?.toIntOrNull() }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+                    if (bigYear != null && smallYear != null && kotlin.math.abs(bigYear - smallYear) > 1) continue
+                    // Only merge across scripts (one CJK, one Latin) or when one title is a prefix/edition of the other.
+                    val crossScript = CJK.containsMatchIn(bigName) != CJK.containsMatchIn(smallName)
+                    val sameBase = Words.plain(albumBase(bigName)) == Words.plain(albumBase(smallName))
+                    if (!crossScript && !sameBase) continue
+                    val matched = smallTracks.count { st ->
+                        val sd = st.p.best.track.seconds ?: return@count false
+                        bigTracks.any { bt -> bt.p.best.track.seconds?.let { bd -> kotlin.math.abs(bd - sd) <= 2.0 && (st.no == null || bt.no == null || st.no == bt.no) } == true }
+                    }
+                    if (matched * 10 >= smallTracks.size * 6) {
+                        val keep = if (!CJK.containsMatchIn(bigName) || CJK.containsMatchIn(smallName)) bigName else smallName
+                        val drop = if (keep == bigName) smallName else bigName
+                        albumTo[f to drop] = keep
+                    }
+                }
             }
         }
         // One concert under several names ("Consolation Live Tour 2013", "Kalafina Live Tour 2013 Consolation",
@@ -1167,17 +1348,37 @@ object Builder {
         val albumYear = placedDrafts.groupBy { it.folder.lowercase() to albumKey(it.album) }.mapValues { (_, l) ->
             val d0 = l.first()
             val who = d0.albumArtist.ifBlank { d0.p.best.id.artist }
-            val tagged = l.mapNotNull { it.p.chosen.id.year ?: it.p.best.id.year }.groupingBy { it }.eachCount().entries.maxWithOrNull(compareBy({ it.value }, { it.key }))?.key
-            val sp = Spotify.checked(who, d0.album)?.takeIf { it.optBoolean("found") }?.optString("year")?.ifBlank { null }
-            val mb = AlbumYears.of(who, d0.album)
-            // The year it first came out: a reissue's tag ("DEEP RIVER" tagged 2018) gives way to an earlier year Spotify or
-            // MusicBrainz knows (2002); a later one there (a remaster on Spotify) never replaces the tag's.
-            listOfNotNull(tagged, sp, mb).filter { Regex("^(19|20)\\d{2}$").matches(it) }.minOrNull()?.takeIf { y -> tagged == null || tagged.toInt() - y.toInt() >= 2 } ?: tagged ?: mb ?: sp
+            val isNumericTitle = Regex("^(19|20)\\d{2}$").matches(d0.album.trim())
+            val isCompOrLive = COMPILATION.containsMatchIn(d0.album) || d0.folder.contains("/Directos")
+            val validYears = l.mapNotNull { it.p.chosen.id.year ?: it.p.best.id.year }.filter { Regex("^(19|20)\\d{2}$").matches(it) }
+            val taggedAll = validYears.groupingBy { it }.eachCount().entries.maxWithOrNull(compareBy({ it.value }, { it.key }))
+            // Ignore impossible pre-1960 years (e.g. "Lost/1957") unless the majority of tracks explicitly agree on it.
+            val tagged = taggedAll?.takeIf { it.key.toInt() >= 1960 || it.value * 2 >= l.size }?.key
+                ?: validYears.filter { it.toInt() >= 1960 }.groupingBy { it }.eachCount().entries.maxWithOrNull(compareBy({ it.value }, { it.key }))?.key
+            val spObj = Spotify.checked(who, d0.album)?.takeIf { it.optBoolean("found") }
+            val spCount = spObj?.optJSONArray("tracks")?.length() ?: 0
+            // Ignore Spotify hits returning a 1–3 track single when our local album has >= 6 tracks.
+            val sp = spObj?.takeIf { !(l.size >= 6 && spCount in 1..3) }?.optString("year")?.ifBlank { null }?.takeIf { !isNumericTitle || it != d0.album.trim() }
+            val mb = AlbumYears.of(who, d0.album)?.takeIf { !isNumericTitle || it != d0.album.trim() }
+            // Compilations and live concerts keep their own release year (never pulled down by older constituent songs).
+            if (isCompOrLive) {
+                val safeTagged = tagged?.takeIf { !isNumericTitle || it != d0.album.trim() }
+                safeTagged ?: sp ?: mb
+            } else {
+                val safeTagged = tagged?.takeIf { !isNumericTitle || it != d0.album.trim() }
+                // The year it first came out: a reissue's tag ("DEEP RIVER" tagged 2018) gives way to an earlier year Spotify or
+                // MusicBrainz knows (2002); a later one there (a remaster on Spotify) never replaces the tag's.
+                listOfNotNull(safeTagged, sp, mb).filter { Regex("^(19|20)\\d{2}$").matches(it) && it.toInt() >= 1960 }
+                    .minOrNull()?.takeIf { y -> safeTagged == null || safeTagged.toInt() - y.toInt() >= 2 } ?: safeTagged ?: mb ?: sp
+            }
         }
         placedDrafts.groupBy { it.folder.lowercase() to albumKey(it.album) }.forEach { (k, l) ->
             if (k.second.isNotEmpty() && albumYear[k] == null && l.size >= 3) l.first().let { d -> yearless += (d.albumArtist.ifBlank { d.p.best.id.artist }) to d.album }
         }
         val albumCount = placedDrafts.groupingBy { it.folder.lowercase() to albumKey(it.album) }.eachCount()
+        // Distinct discs actually present in each destination album folder: only prefix "2-NN" when the folder holds > 1 disc.
+        val albumDiscs = placedDrafts.groupBy { it.folder.lowercase() to albumKey(it.album) }
+            .mapValues { (_, l) -> l.map { it.p.chosen.id.disc ?: 1 }.toSet() }
         // How many of the songs kept here each release has (also those kept on another album): a single whose A-side is on its
         // album still gets its folder for its B-sides.
         val releaseSongs = HashMap<Pair<String, String>, MutableSet<String>>()
@@ -1193,20 +1394,30 @@ object Builder {
             val id = p.chosen.id
             val k = d.folder.lowercase() to albumKey(d.album)
             val album = if (d.album.isEmpty()) "" else albumShown[k] ?: d.album
-            val year = if (album.isEmpty() || d.flat) (p.best.id.year ?: id.year) else listOfNotNull(familyYear[d.folder.lowercase() to editionOf(album)], albumYear[k]).filter { Regex("^\\d{4}$").matches(it) }.minOrNull() ?: albumYear[k]
+            val isCompOrLive = COMPILATION.containsMatchIn(album) || d.folder.contains("/Directos")
+            val year = if (album.isEmpty() || d.flat) (p.best.id.year ?: id.year)
+                else if (isCompOrLive) albumYear[k]
+                else listOfNotNull(familyYear[d.folder.lowercase() to editionOf(album)], albumYear[k]).filter { Regex("^\\d{4}$").matches(it) && it.toInt() >= 1960 }.minOrNull() ?: albumYear[k]
             // A collection's name with an edition is no singer ("Operación triunfo 1a ed").
             fun noSinger(a: String) = d.series != null && (Words.plain(a) == Words.plain(d.series) ||
                 Words.plain(a).startsWith(Words.plain(d.series)) && Regex("(?iu)\\b\\d+\\s*(a|er|ª|º|st|nd|rd|th)?\\s*(ed|edici[oó]n|disco|edition)\\b").containsMatchIn(a))
             val rawArtist = p.best.id.artist.ifBlank { id.artist }.takeUnless { noSinger(it) }.orEmpty().ifBlank { d.artistHint.orEmpty() }
             val artist = if (Regex("[,&、;/×]|\\s(feat|ft)\\.?\\s", RegexOption.IGNORE_CASE).containsMatchIn(rawArtist)) Words.nfc(rawArtist) else shown(rawArtist)
-            val ownFolder = !d.flat && album.isNotEmpty() && ((albumCount[k] ?: 0) >= 3 ||
-                Layout.byRelease && d.p.homeKind == 1 && (releaseSongs[k]?.size ?: 0) > (albumCount[k] ?: 0) && (releaseSongs[k]?.size ?: 0) >= 2)
-            // A single or an EP (4 songs or fewer, some of them kept on their album): in the artist's "Singles".
-            val single = ownFolder && Layout.byRelease && d.p.homeKind == 1 && !d.folder.endsWith("/Directos") && !d.folder.endsWith("/Remixes") &&
-                (releaseSongs[k]?.size ?: 0) in 1..4 && !COMPILATION.containsMatchIn(album) &&
-                ((releaseSongs[k]?.size ?: 0) > (albumCount[k] ?: 0) || Regex("(?i)\\bsingles?\\b|\\bep\\b|シングル").containsMatchIn(album + " " + p.best.track.path))
+            val relSize = releaseSongs[k]?.size ?: 0
+            val ownCount = albumCount[k] ?: 0
+            val spTracks = Spotify.checked(d.albumArtist.ifBlank { artist }, album)?.takeIf { it.optBoolean("found") }?.optJSONArray("tracks")?.length() ?: 0
+            val looksStudioOrComp = spTracks >= 6 || COMPILATION.containsMatchIn(album) || Regex("\\b(19|20)\\d{2}\\s*[-–]\\s*(19|20)\\d{2}\\b").containsMatchIn(album)
+            val explicitSingle = Regex("(?i)\\bsingles?\\b|\\bep\\b|シングル").containsMatchIn(album)
+            val singleCandidate = !d.flat && album.isNotEmpty() && Layout.byRelease && d.p.homeKind == 1 &&
+                !d.folder.contains("/Directos") && !d.folder.contains("/Remixes") && !looksStudioOrComp &&
+                ((relSize in 1..4 && (relSize > ownCount || explicitSingle || Regex("(?i)/singles?/").containsMatchIn(p.best.track.path))) ||
+                 (relSize == 5 && explicitSingle))
+            val ownFolder = !d.flat && album.isNotEmpty() && (ownCount >= 3 ||
+                (Layout.byRelease && d.p.homeKind == 1 && relSize >= 2 && (relSize > ownCount || (singleCandidate && ownCount >= 2))))
+            val single = ownFolder && singleCandidate
             val albumDir = if (ownFolder) (if (single) "Singles/" else "") + clean(listOfNotNull(year, album).joinToString(" - ")) else ""
-            val num = d.no?.let { n -> (id.disc?.takeIf { it > 1 }?.let { "$it-" } ?: "") + n.toString().padStart(2, '0') }
+            val multiDisc = (albumDiscs[k]?.size ?: 0) > 1
+            val num = d.no?.let { n -> (id.disc?.takeIf { multiDisc && it > 1 }?.let { "$it-" } ?: "") + n.toString().padStart(2, '0') }
             val title = d.title ?: p.best.id.title
             val name = listOfNotNull(num, title, artist.ifBlank { null }, album.ifBlank { null }, year).joinToString(" - ") { clean(it) }
             alternatives[p.k] = p.copies.map { it.albumDir }.distinct().filter { it != p.chosen.albumDir }
@@ -1245,37 +1456,69 @@ object Builder {
         }
         dedupe(items.groupBy { it.target.substringBeforeLast('.').lowercase().replace(Regex(" \\(\\d\\)$"), "") }.values, "repetida (la misma canción con el mismo nombre)")
         // A phone download (JioSaavn, YouTube Music) of a song your own folders (Discografías…) have by the same singer must
-        // sound like it: if not, it is another song or version given that name ("Remember Summer Days" on "Timely!!" was
-        // Shane Mesa's English cover) and is left out. Your folders are the reference.
+        // sound like it (always verified by audio fingerprint, no ±1s bypass) and offer a real quality gain. If a phone download
+        // fails verification, try other BitChord candidates in i.copies and ALWAYS fall back to the local copy (never dropping the song).
         fun downloaded(path: String) = path.contains("/Music/BitChord/")
         fun songKey(id: Id) = pkey(firstArtist(id.artist.ifBlank { id.albumArtist })) + "|" + Themes.core(id.title)
         val reference = tracks.filter { !downloaded(it.path) }.mapNotNull { t -> ids[t.path]?.let { songKey(it) to t } }.groupBy({ it.first }, { it.second })
-        for (i in items) {
-            if (i in twins || !downloaded(i.track.path)) continue
-            val id = ids[i.track.path] ?: continue
-            if (VERSION.containsMatchIn(id.title)) continue
-            val refs = reference[songKey(id)]?.filter { !VERSION.containsMatchIn(ids[it.path]?.title.orEmpty()) } ?: continue
-            if (refs.isEmpty()) continue
-            val close = refs.any { r -> r.seconds != null && i.track.seconds != null && kotlin.math.abs(r.seconds - i.track.seconds) <= 1.0 }
-            if (close) continue
-            val r = refs.minBy { r -> kotlin.math.abs((r.seconds ?: 0.0) - (i.track.seconds ?: 0.0)) }
-            val sim = runCatching { Fingerprint.similarity(r.path, i.track.path) }.getOrNull()
-            if (sim != null && sim >= Fingerprint.SAME) continue
+        val verifiedItems = items.mapNotNull { i ->
+            if (i in twins) return@mapNotNull i
+            if (!downloaded(i.track.path)) return@mapNotNull i
+            val id = ids[i.track.path] ?: return@mapNotNull i
+            val localCopies = i.copies.filter { !downloaded(it) }.mapNotNull { trackByPath[it] }
+                .sortedWith(compareByDescending<Track> { rank(it) }.thenByDescending { richness(it) }.thenByDescending { it.bitrate })
+            val bestLocal = localCopies.firstOrNull()
+            val refs = (localCopies + reference[songKey(id)].orEmpty().filter {
+                val rt = ids[it.path]?.title.orEmpty()
+                versionTag(rt) == versionTag(id.title) && VERSION.containsMatchIn(rt) == VERSION.containsMatchIn(id.title)
+            }).distinctBy { it.path }
+            if (refs.isEmpty()) return@mapNotNull i
+            val bcCopies = (listOf(i.track) + i.copies.filter { downloaded(it) && it != i.track.path }.mapNotNull { trackByPath[it] })
+                .distinctBy { it.path }
+                .sortedWith(compareByDescending<Track> { rank(it) }.thenByDescending { it.bitrate })
+            var chosenBc: Track? = null
+            var lastRef: Track = refs.first()
+            for (bc in bcCopies) {
+                val r = refs.minBy { kotlin.math.abs((it.seconds ?: 0.0) - (bc.seconds ?: 0.0)) }
+                lastRef = r
+                // Never let a phone download replace lossless, real MP3 320, AAC >= 290, or a local copy with < 32 kbps gain.
+                if (bestLocal != null && (bestLocal.lossless || bestLocal.mp3_320 && bestLocal.fake320 != true || (bestLocal.codec == "aac" && bestLocal.bitrate >= 290) || (bc.bitrate - bestLocal.bitrate < 32 && rank(bc) <= rank(bestLocal)))) {
+                    continue
+                }
+                val sim = runCatching { Fingerprint.similarity(r.path, bc.path) }.getOrNull()
+                if (sim != null && sim >= Fingerprint.SAME) { chosenBc = bc; break }
+            }
+            if (chosenBc != null) {
+                val ext = Formats.extOf(chosenBc) ?: return@mapNotNull i
+                return@mapNotNull if (chosenBc.path == i.track.path) i else i.copy(track = chosenBc, target = i.target.substringBeforeLast('.') + "." + ext)
+            }
+            skipped += i.track to "descarga que no suena como tu copia (${lastRef.path.substringAfterLast('/')})"
+            if (bestLocal != null) {
+                val ext = Formats.extOf(bestLocal) ?: return@mapNotNull null
+                val newReason = when {
+                    bestLocal.lossless -> if (Formats.native) "sin pérdida → AAC 320" else "sin pérdida → MP3 320"
+                    bestLocal.codec == "aac" -> if (bestLocal.bitrate >= 290) "AAC ${bestLocal.bitrate} kbps" else "AAC ${bestLocal.bitrate} kbps (a la to-do, poca prioridad)"
+                    bestLocal.codec == "opus" -> "Opus → AAC 320 (a la to-do: buscar mejor copia)"
+                    rank(bestLocal) == 3 -> "MP3 320"
+                    else -> "MP3 ${bestLocal.kbps} kbps (mientras tanto; a la to-do)"
+                }
+                return@mapNotNull i.copy(track = bestLocal, target = i.target.substringBeforeLast('.') + "." + ext, reason = newReason)
+            }
             twins += i
-            skipped += i.track to "descarga que no suena como tu copia (${r.path.substringAfterLast('/')})"
+            null
         }
         val LIVE_OR_MIX = Regex("(?i)/(directos|remixes)/|\\b(live|remix|mix|ver\\.?|version|versión|acoustic|instrumental|tv size|karaoke)\\b")
-        dedupe(items.filter { it !in twins && !LIVE_OR_MIX.containsMatchIn(it.target.removePrefix(targetRoot)) }.groupBy { i ->
+        dedupe(verifiedItems.filter { it !in twins && !LIVE_OR_MIX.containsMatchIn(it.target.removePrefix(targetRoot)) }.groupBy { i ->
             val rel = i.target.removePrefix(targetRoot).trimStart('/').split('/')
             val owner = if (rel.firstOrNull() == "Otros artistas") rel.take(3).joinToString("/") else rel.first()
             owner.lowercase() + "|" + Words.plain(i.title) + "|" + pkey(firstArtist(i.artist))
         }.values, "repetida (la misma canción del mismo artista, suelta y en su álbum)")
         val seen = HashMap<String, Int>()
-        val unique = items.filter { it !in twins }.sortedBy { it.target }.map { i ->
+        val unique = verifiedItems.filter { it !in twins }.sortedBy { it.target }.map { i ->
             val n = seen.merge(i.target.lowercase(), 1, Int::plus)!!
             if (n == 1) i else i.target.substringAfterLast('.').let { e -> i.copy(target = i.target.removeSuffix(".$e") + " ($n).$e") }
         }
-        return Plan(unique, skipped, alternatives, keyOf, japaneseAlbums, yearless, sidecars(unique, targetRoot))
+        return Plan(unique, skipped, alternatives, keyOf, japaneseAlbums, yearless, sidecars(unique, targetRoot), people.scriptPairs())
     }
 
     const val SIDECAR_M3U = "00 - Lista completa.m3u"
@@ -1289,35 +1532,47 @@ object Builder {
         val groups = HashMap<Pair<String, String>, MutableList<Pair<Item, Release>>>()
         for (i in items) for (r in i.releases) if (r.album.isNotBlank()) groups.getOrPut(owner(i.target) to albumKey(r.album)) { ArrayList() }.add(i to r)
         val out = LinkedHashMap<String, String>()
+        val compCoverRoot = Compilations.coverRoot.path
         for ((key, l0) in groups) {
             val l = l0.distinctBy { it.first.target }
-            val home = l.filter { (i, _) -> albumKey(i.album) == key.second }.map { it.first.target.substringBeforeLast('/') }
-                .filter { d -> d.substringAfterLast('/').let { Regex("^(\\d{4} - )?").replace(it, "") }.let { albumKey(it) == key.second } }
-                .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: continue
-            val elsewhere = l.count { (i, _) -> i.target.substringBeforeLast('/') != home }
-            if (elsewhere == 0 || l.size < 2) continue
+            if (l.size < 2) continue
             val r0 = l.first().second
+            val existingHome = l.filter { (i, _) -> albumKey(i.album) == key.second }.map { it.first.target.substringBeforeLast('/') }
+                .filter { d -> d.substringAfterLast('/').let { Regex("^(\\d{4} - )?").replace(it, "") }.let { albumKey(it) == key.second } }
+                .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+            // Also create sidecars for local singles/compilations whose tracks all moved to original albums (never for synthetic MB-only comps).
+            val home = existingHome ?: run {
+                val fromLocalRelease = l.any { (_, r) -> r.folder.isNotBlank() && !r.folder.startsWith(compCoverRoot) }
+                val isSingleOrComp = COMPILATION.containsMatchIn(r0.album) || l.size in 2..5
+                if (!fromLocalRelease || !isSingleOrComp || key.first.startsWith("Otros artistas/")) null
+                else {
+                    val sub = if (!COMPILATION.containsMatchIn(r0.album) && l.size <= 4) "Singles/" else ""
+                    "$root/${key.first}/$sub" + clean(listOfNotNull(r0.year, r0.album).joinToString(" - "))
+                }
+            } ?: continue
+            val elsewhere = l.count { (i, _) -> i.target.substringBeforeLast('/') != home }
+            if (elsewhere == 0) continue
             val sorted = l.sortedWith(compareBy({ it.second.disc ?: 1 }, { it.second.no ?: 999 }, { it.first.title.lowercase() }))
-            val dir = java.nio.file.Paths.get(home)
+            val dir = java.nio.file.Paths.get(Words.nfc(home))
             val m3u = buildString {
-                append("#EXTM3U\n#PLAYLIST:").append(r0.album).append("\n")
+                append("#EXTM3U\n#PLAYLIST:").append(Words.nfc(r0.album)).append("\n")
                 for ((i, _) in sorted) {
-                    append("#EXTINF:").append((i.track.seconds ?: 0.0).toInt()).append(',').append(i.artist).append(" - ").append(i.title).append('\n')
-                    append(dir.relativize(java.nio.file.Paths.get(i.target)).toString()).append('\n')
+                    append("#EXTINF:").append((i.track.seconds ?: 0.0).toInt()).append(',').append(Words.nfc(i.artist)).append(" - ").append(Words.nfc(i.title)).append('\n')
+                    append(Words.nfc(dir.relativize(java.nio.file.Paths.get(Words.nfc(i.target))).toString())).append('\n')
                 }
             }
             val txt = buildString {
-                append(r0.album).append(r0.year?.let { " ($it)" } ?: "").append("\n\n")
+                append(Words.nfc(r0.album)).append(r0.year?.let { " ($it)" } ?: "").append("\n\n")
                 append("Aquí solo están las canciones que no salieron en ningún álbum. Las demás están guardadas una vez, en su álbum:\n\n")
                 for ((i, r) in sorted) {
                     val n = listOfNotNull(r.disc?.takeIf { it > 1 }?.let { "$it-" }, r.no?.toString()?.padStart(2, '0')).joinToString("")
                     val where = i.target.substringBeforeLast('/')
-                    append(if (n.isNotEmpty()) "$n. " else "· ").append(i.title)
-                    append(if (where == home) "  (aquí)" else "  → ${rel(where)}").append('\n')
+                    append(if (n.isNotEmpty()) "$n. " else "· ").append(Words.nfc(i.title))
+                    append(if (where == home) "  (aquí)" else "  → ${Words.nfc(rel(where))}").append('\n')
                 }
             }
-            out["$home/$SIDECAR_M3U"] = m3u
-            out["$home/$SIDECAR_TXT"] = txt
+            out[Words.nfc("$home/$SIDECAR_M3U")] = m3u
+            out[Words.nfc("$home/$SIDECAR_TXT")] = txt
         }
         return out
     }
@@ -1365,9 +1620,10 @@ object Builder {
         Live.phase = "buscando nombres en romaji y openings/endings de las series"; Live.write()
         val r = runCatching { Romaji.fill(japaneseOnly) }.getOrDefault(0)
         val t = runCatching { Themes.fill(series) }.getOrDefault(0)
-        // Japanese artists' names as YouTube Music writes them.
+        // Japanese artists' names as YouTube Music writes them (hl=ja, gl=JP), including Latin+Japanese pairs discovered in People.
         val yt = runCatching {
-            YtMusicNames.fill(plan.copy.flatMap { listOf(it.albumArtist, it.artist) }.filter { it.isNotBlank() }.distinct().mapNotNull { YtMusicNames.split(it) })
+            val fromNames = plan.copy.flatMap { listOf(it.albumArtist, it.artist) }.filter { it.isNotBlank() }.distinct().mapNotNull { YtMusicNames.split(it) }
+            YtMusicNames.fill((plan.scriptPairs + fromNames).distinct())
         }.getOrDefault(0)
         val a = runCatching { AlbumNames.fill(plan.japaneseAlbums) }.getOrDefault(0) + runCatching { AlbumYears.fill(plan.yearless) }.getOrDefault(0)
         val c = if (!Layout.compilationsFirst) 0 else runCatching {

@@ -136,8 +136,10 @@ object Sources {
  */
 class Covers(root: String) {
     private val dir = File(root, ".bitchord-library/covers").apply { mkdirs() }
+    private val localFile = File(Live.dir, "covers-" + Integer.toHexString(Words.nfc(root).hashCode()) + ".json")
     private val dbFile = File(root, ".bitchord-library/covers.json")
-    private val db: JSONObject = runCatching { JSONObject(dbFile.readText()) }.getOrDefault(JSONObject())
+    private val db: JSONObject = listOf(localFile, dbFile).filter { it.isFile }.sortedByDescending { it.lastModified() }
+        .firstNotNullOfOrNull { f -> runCatching { JSONObject(f.readText()) }.getOrNull() } ?: JSONObject()
     private val folders = db.optJSONObject("folders") ?: JSONObject().also { db.put("folders", it) }
     private val songs = db.optJSONObject("songs") ?: JSONObject().also { db.put("songs", it) }
 
@@ -195,7 +197,19 @@ class Covers(root: String) {
         songs.optJSONObject(key)?.optJSONObject("alternatives")?.optJSONObject(cover)?.put("status", if (approve) "approved" else "rejected")
     }
 
-    @Synchronized fun save() = dbFile.writeText(db.toString())
+    @Synchronized fun save(publish: ((File) -> Unit)? = null) = runCatching {
+        val text = db.toString()
+        val tmp = File(localFile.parentFile, localFile.name + "." + java.util.UUID.randomUUID() + ".tmp")
+        tmp.writeText(text)
+        check(tmp.length() > 0 && runCatching { JSONObject(tmp.readText()) }.isSuccess) { "covers.json incompleto" }
+        java.nio.file.Files.move(tmp.toPath(), localFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        if (publish != null) publish(localFile) else {
+            dbFile.parentFile.mkdirs()
+            val libTmp = File(dbFile.parentFile, ".tmp-" + java.util.UUID.randomUUID() + "-covers.json")
+            libTmp.writeText(text)
+            if (!libTmp.renameTo(dbFile)) { dbFile.writeText(text); libTmp.delete() }
+        }
+    }
 }
 
 /**

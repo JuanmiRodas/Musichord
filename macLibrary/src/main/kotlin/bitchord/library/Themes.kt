@@ -48,6 +48,7 @@ object Themes {
             Live.current = s; Live.done.incrementAndGet(); Live.write()
             val list = JSONArray()
             val r = AlbumArt.json("https://api.jikan.moe/v4/anime?q=${URLEncoder.encode(s, "UTF-8")}&type=tv&limit=10&order_by=members&sort=desc", 1200)
+            if (r == null) continue // never cache network/rate-limit failure as empty forever
             val p = Words.plain(s)
             val shows = r?.optJSONArray("data")?.let { d -> (0 until d.length()).map { d.getJSONObject(it) } }.orEmpty()
                 .filter { a -> listOf(a.optString("title"), a.optString("title_english")).any { Words.plain(it).startsWith(p) } }
@@ -96,8 +97,8 @@ object AlbumNames {
             Live.current = a; Live.done.incrementAndGet(); Live.write()
             if (Live.done.get() % 20 == 0) runCatching { file.writeText(o.toString(1)) }
             val q = a.replace(Regex("[〜～~「」『』【】]"), " ").replace(Regex("\\s+"), " ").trim()
-            val res = AlbumArt.json("https://vgmdb.info/search/albums/${URLEncoder.encode(q, "UTF-8").replace("+", "%20")}?format=json", 1500)
-                ?.optJSONObject("results")?.optJSONArray("albums")
+            val raw = AlbumArt.json("https://vgmdb.info/search/albums/${URLEncoder.encode(q, "UTF-8").replace("+", "%20")}?format=json", 1500) ?: continue
+            val res = raw.optJSONObject("results")?.optJSONArray("albums")
             val want = Words.plain(q)
             val hit = res?.let { r -> (0 until r.length()).map { r.getJSONObject(it) } }.orEmpty().firstOrNull { x ->
                 val t = x.optJSONObject("titles")
@@ -245,8 +246,11 @@ object Compilations {
             if (art == null) { save(); continue }
             val rgs = AlbumArt.json("https://musicbrainz.org/ws/2/release-group?artist=${art.getString("id")}&type=compilation&fmt=json&limit=100")
                 ?.optJSONArray("release-groups")?.let { x -> (0 until x.length()).map { x.getJSONObject(it) } }.orEmpty()
-                .filter { it.optJSONArray("secondary-types")?.length() == 1 } // compilations only (not live, remix or soundtrack ones)
-                .take(12)
+                .filter { rg ->
+                    val st = rg.optJSONArray("secondary-types")?.let { arr -> (0 until arr.length()).map { arr.getString(it).lowercase() } }.orEmpty()
+                    "compilation" in st && st.none { it in setOf("live", "remix", "soundtrack", "spokenword", "interview") }
+                }
+                .take(40)
             for (rg in rgs) {
                 if (Live.stop || System.currentTimeMillis() > until) break
                 release(rg.getString("id"), true)?.let { add(Words.plain(a), it, rg.optString("title"), rg.optString("first-release-date").take(4).ifBlank { null }) }

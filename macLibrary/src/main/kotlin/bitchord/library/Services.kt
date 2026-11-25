@@ -117,8 +117,10 @@ object AcoustId {
             val rec = best?.getJSONArray("recordings")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }?.firstOrNull { it.has("title") }
             if (rec == null) { cache.o.put(p, JSONObject()); continue }
             val artists = rec.optJSONArray("artists")?.let { a -> (0 until a.length()).joinToString(", ") { a.getJSONObject(it).optString("name") } }.orEmpty()
-            // Its album: the release group of type Album first, else the first one.
+            // Its album: the release group of type Album first, skipping generic compilation grab-bags.
+            val genericComp = Regex("(?i)\\b(various artists|promo only|mastermix|top\\s*100|greatest hits|modern rock|now that'?s what i call|club hits|party hits)\\b")
             val groups = rec.optJSONArray("releasegroups")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty()
+                .filter { !genericComp.containsMatchIn(it.optString("title")) }
             val g = groups.firstOrNull { it.optString("type") == "Album" && it.optJSONArray("secondarytypes") == null } ?: groups.firstOrNull()
             cache.o.put(p, JSONObject().put("title", rec.getString("title")).put("artist", artists).put("album", g?.optString("title") ?: "")
                 .put("score", best.optDouble("score")))
@@ -133,7 +135,7 @@ object AcoustId {
 /** Last.fm: an artist's tags (genres, language, decade), for "Otros artistas/<kind>". */
 object LastFm {
     private val cache = Cache("lastfm-tags.json")
-    fun tags(artist: String): List<String> = cache.o.optJSONArray(Words.plain(artist))?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+    fun tags(artist: String): List<String> = cache.o.optJSONArray(Words.plain(artist.substringBefore(" (").trim()))?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
 
     fun fill(artists: Collection<String>, minutes: Int = 3): Int {
         val key = Keys.get(Keys.LASTFM) ?: return 0
@@ -242,7 +244,7 @@ object Fingerprint {
         val k = Words.nfc(path) + "|" + f.length()
         cache[k]?.let { return it }
         val fp = AcoustId.fpcalc ?: return null
-        val (code, out) = Tools.run(fp, "-raw", "-length", "120", "-plain", path, timeoutSec = 120)
+        val (code, out) = Tools.run(fp, "-raw", "-length", "180", "-plain", path, timeoutSec = 120)
         if (code != 0) return null
         val ints = out.trim().split(',').mapNotNull { it.trim().toLongOrNull()?.toInt() }.toIntArray()
         if (ints.size < 30) return null
@@ -250,12 +252,12 @@ object Fingerprint {
         return ints
     }
 
-    /** How alike (0 to 1): 1 − the share of differing bits, at the offset where they line up best. */
+    /** How alike (0 to 1): 1 − the share of differing bits, at the offset where they line up best (up to ±17 s lag for video intros). */
     fun similarity(a: String, b: String): Double? {
         val x = of(a) ?: return null
         val y = of(b) ?: return null
         var best = 0.0
-        for (off in -40..40) {
+        for (off in -140..140) {
             var bits = 0; var n = 0
             for (i in x.indices) {
                 val j = i + off
@@ -279,16 +281,22 @@ object Fingerprint {
  * ("Ayumi Hamasaki (浜崎あゆみ)"). Kept in `<app data>/ytmusic-artists.json`; "" means looked up and not found.
  */
 object YtMusicNames {
+    private const val CACHE_VERSION = "ja2"
     private val file get() = File(Store.dir, "ytmusic-artists.json")
     private val cache: MutableMap<String, String> by lazy {
-        runCatching { JSONObject(file.readText()).let { o -> o.keySet().associateWith { o.getString(it) }.toMutableMap() } }.getOrDefault(HashMap())
+        runCatching {
+            val o = JSONObject(file.readText())
+            if (o.optString("_v") != CACHE_VERSION) HashMap<String, String>().apply { put("_v", CACHE_VERSION) }
+            else o.keySet().associateWith { o.getString(it) }.toMutableMap()
+        }.getOrElse { HashMap<String, String>().apply { put("_v", CACHE_VERSION) } }
     }
     private val CJK = Regex("[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}]")
+    private val BAD_RESULT = Regex("(?iu)\\bcv[.:：]|[(（]cv\\b")
     // The Japanese name says who it is; only without one, the Latin name.
     private fun key(lat: String?, east: String?) = east?.let { Words.nfc(it).trim() } ?: ("|" + Words.plain(lat.orEmpty()))
 
     /** YouTube Music's name for this artist, if looked up and found. */
-    @Synchronized fun of(lat: String?, east: String?): String? = cache[key(lat, east)]?.ifBlank { null }
+    @Synchronized fun of(lat: String?, east: String?): String? = cache[key(lat, east)]?.ifBlank { null }?.takeUnless { BAD_RESULT.containsMatchIn(it) }
 
     /** "Anri (杏里)" → ("Anri", "杏里"); "宇多田ヒカル" → (null, "宇多田ヒカル"). */
     fun split(name: String): Pair<String?, String?>? {
@@ -297,12 +305,25 @@ object YtMusicNames {
         return if (CJK.containsMatchIn(n) && n.count { it in 'A'..'Z' || it in 'a'..'z' } < 3) null to n else null
     }
 
+    private fun validResult(r: String, lat: String?, east: String?): Boolean {
+        val t = Words.nfc(r).trim()
+        if (t.isBlank() || BAD_RESULT.containsMatchIn(t)) return false
+        val q = (east ?: lat).orEmpty()
+        // Reject multi-artist cast credits when querying a single artist (e.g. Suzumiya Haruhi 5-seiyuu list).
+        if (!q.contains('、') && t.count { it == '、' } >= 1) return false
+        if (!q.contains(',') && t.count { it == ',' } >= 2) return false
+        // Reject duplicated bilingual strings like "派偉俊 - Patrick Brasca".
+        if (!q.contains(" - ") && t.contains(" - ")) return false
+        return true
+    }
+
     private fun search(q: String): List<String> {
-        val body = JSONObject().put("context", JSONObject().put("client", JSONObject().put("clientName", "WEB_REMIX").put("clientVersion", "1.20260707.12.00").put("hl", "en").put("gl", "JP")))
+        val body = JSONObject().put("context", JSONObject().put("client", JSONObject().put("clientName", "WEB_REMIX").put("clientVersion", "1.20260707.12.00").put("hl", "ja").put("gl", "JP")))
             .put("query", q).put("params", "EgWKAQIgAWoKEAkQChAFEAMQBA==") // artists only
         val c = URL("https://music.youtube.com/youtubei/v1/search?prettyPrint=false").openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15000; c.readTimeout = 20000
         c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Origin", "https://music.youtube.com")
+        c.setRequestProperty("Accept-Language", "ja-JP,ja;q=0.9")
         c.setRequestProperty("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         val o = JSONObject(c.inputStream.bufferedReader().readText())
@@ -335,15 +356,22 @@ object YtMusicNames {
             if (Live.stop || System.currentTimeMillis() > until) break
             Live.current = "YouTube Music: " + (east ?: lat); Live.done.incrementAndGet(); Live.write()
             val romaji = east?.let { Romaji.of(it) }
-            fun fits(r: String) = Words.nfc(r).trim() == east || (lat != null && Words.plain(r) == Words.plain(lat)) ||
+            fun fits(r: String) = validResult(r, lat, east) && (
+                Words.nfc(r).trim() == east || (lat != null && Words.plain(r) == Words.plain(lat)) ||
                 (romaji != null && Words.plain(r) == Words.plain(romaji)) || (east != null && Words.nfc(r).contains(east))
-            val hit = runCatching { (east?.let { search(it) }.orEmpty().take(3).firstOrNull(::fits) ?: lat?.let { search(it) }.orEmpty().take(3).firstOrNull(::fits)) }
-                .onFailure { if (it is java.io.IOException) Thread.sleep(2000) }.getOrNull()
-            synchronized(this) { cache[key(lat, east)] = hit.orEmpty() }
+            )
+            var ok = false
+            val hit = runCatching {
+                val resE = east?.let { search(it) }
+                if (resE != null) ok = true
+                resE.orEmpty().take(3).firstOrNull(::fits) ?: lat?.let { val r2 = search(it); ok = true; r2 }.orEmpty().take(3).firstOrNull(::fits)
+            }.onFailure { if (it is java.io.IOException) Thread.sleep(2000) }.getOrNull()
+            // Never cache "" permanently on network/rate-limit failure; only cache a verified empty response.
+            if (hit != null || ok) synchronized(this) { cache["_v"] = CACHE_VERSION; cache[key(lat, east)] = hit.orEmpty() }
             if (hit != null) found++
             Thread.sleep(300)
         }
-        synchronized(this) { runCatching { file.writeText(JSONObject(cache as Map<*, *>).toString(1)) } }
+        synchronized(this) { cache["_v"] = CACHE_VERSION; runCatching { file.writeText(JSONObject(cache as Map<*, *>).toString(1)) } }
         return found
     }
 }

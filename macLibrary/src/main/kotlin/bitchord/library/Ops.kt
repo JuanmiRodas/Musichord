@@ -79,8 +79,20 @@ class Ops(val root: String) {
                 JSONObject().put("group", it.group).put("what", it.what).put("reason", it.reason).put("count", it.count)
                     .put("paths", JSONArray(it.paths.take(50).map(::rel)))
             }))
-        File(state, "report.json").writeText(r.toString(2))
-        File(state, "todo.csv").writeText(Todos.csv(todos))
+        val reportJson = r.toString(2)
+        val todoCsv = Todos.csv(todos)
+        val tmpR = File(Live.dir, "report-" + java.util.UUID.randomUUID() + ".json")
+        val tmpC = File(Live.dir, "todo-" + java.util.UUID.randomUUID() + ".csv")
+        tmpR.writeText(reportJson)
+        tmpC.writeText(todoCsv)
+        val pc = if (PCloud.isDrive(root)) PCloudLib.open(root) else null
+        if (pc != null) {
+            if (pc.put(tmpR, ".bitchord-library/report.json") != null) tmpR.delete()
+            if (pc.put(tmpC, ".bitchord-library/todo.csv") != null) tmpC.delete()
+        } else {
+            runCatching { java.nio.file.Files.move(tmpR.toPath(), File(state, "report.json").toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) }.onFailure { File(state, "report.json").writeText(reportJson); tmpR.delete() }
+            runCatching { java.nio.file.Files.move(tmpC.toPath(), File(state, "todo.csv").toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) }.onFailure { File(state, "todo.csv").writeText(todoCsv); tmpC.delete() }
+        }
         return r
     }
 

@@ -87,6 +87,14 @@ class Manifest(root: String) {
         while (removed.size > 5000) removed.removeAt(0)
     }
 
+    /** Drops stale entries whose files no longer exist on storage (reconciles built.json 1:1 with disk/pCloud). */
+    @Synchronized fun pruneMissing(presentNfc: Set<String>): Int {
+        if (presentNfc.isEmpty()) return 0
+        val stale = entries.keys.filter { it !in presentNfc }
+        stale.forEach { entries.remove(it) }
+        return stale.size
+    }
+
     /** The cover file (in `.bitchord-library/covers/`) of an album's source folder, when known. */
     @Volatile var coverOf: ((String) -> String?)? = null
 
@@ -224,27 +232,32 @@ object Engine {
         val bySource = HashMap<String, Builder.Item>()
         plan.copy.forEach { i -> i.copies.forEach { bySource[Words.nfc(it)] = i } }
         val byTarget = plan.copy.associateBy { rel(it.target).lowercase() }
+        val byTargetStem = plan.copy.associateBy { rel(it.target).substringBeforeLast('.').lowercase() }
         val skippedPaths = plan.skipped.mapTo(HashSet()) { Words.nfc(it.first.path) }
         // Instrumentals of series' soundtracks: out of the library, into a folder beside it (to decide on later).
         val outside = plan.skipped.filter { it.second.startsWith(Builder.OUTSIDE) }.mapTo(HashSet()) { Words.nfc(it.first.path) }
         val known = tracks.associateBy { Words.nfc(it.path) }
         val temp = File(System.getProperty("user.home"), "Music/.bitchord-staging").apply { mkdirs() }
-        // built.json goes into the library through the same way as the songs (pCloud's API there).
+        // built.json and covers.json go into the library through the same way as the songs (pCloud's API there).
         val publish: (File) -> Unit = { f -> val t = File(temp, "built-" + java.util.UUID.randomUUID() + ".json"); f.copyTo(t, true); lib.put(t, ".bitchord-library/built.json"); t.delete() }
+        val publishCovers: (File) -> Unit = { f -> val t = File(temp, "covers-" + java.util.UUID.randomUUID() + ".json"); f.copyTo(t, true); lib.put(t, ".bitchord-library/covers.json"); t.delete() }
 
         // What the library holds now.
         Live.phase = "mirando lo que ya hay (${lib.name})"
         val present = runCatching { lib.list() }.getOrElse { val msg = "No se pudo leer la biblioteca: ${it.message}"; Live.end(msg); return msg }
+        runCatching { covers.save(publishCovers) }
         val held = HashMap<String, LibFile>() // item's target → file holding it
         val unwanted = ArrayList<LibFile>()
+        // NFD vs NFC duplicate files already present on pCloud Drive: queued for clean removal.
+        unwanted += lib.duplicates()
         val leftovers = ArrayList<LibFile>()
         for (f in present.values.sortedBy { it.rel }) {
             val src = manifest.source(f.rel)
-            val item = src?.let { bySource[it] } ?: byTarget[f.rel.lowercase()]
+            val item = src?.let { bySource[it] } ?: byTarget[f.rel.lowercase()] ?: byTargetStem[f.rel.substringBeforeLast('.').lowercase()]
             when {
                 item == null && src != null && src in skippedPaths -> unwanted += f // made by the app, now left out (karaoke, quarantine…)
                 item == null -> leftovers += f
-                held.containsKey(item.target) -> unwanted += f // a second copy of one song (or a pCloud "(1)" copy)
+                held.containsKey(item.target) -> unwanted += f // a second copy of one song (or a pCloud "(1)" / .mp3+.m4a twin)
                 else -> held[item.target] = f
             }
         }
@@ -311,14 +324,26 @@ object Engine {
             // Kept now in another format (an MP3 320 whose FLAC is here: AAC 320): written anew, the old file goes after.
             if (cur.rel.substringAfterLast('.').lowercase() != target.substringAfterLast('.').lowercase()) { reformat[i.target] = cur; Live.done.incrementAndGet(); continue }
             val curSource = manifest.source(cur.rel)
-            var better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (known[curSource]?.let { Builder.rank(it) } ?: 9)
-            // A better copy replaces the song only if it sounds the same (another version may share its name and length).
+            val curTrack = curSource?.let { known[it] }
+            var better = curSource != null && curSource != Words.nfc(i.track.path) && Builder.rank(i.track) > (curTrack?.let { Builder.rank(it) } ?: 9)
+            // A phone download must represent a real quality gain (never swap AAC 263k -> 268k or overwrite MP3 320 / lossless).
+            if (better && i.track.path.contains("/Music/BitChord/") && curTrack != null) {
+                if (curTrack.lossless || curTrack.mp3_320 && curTrack.fake320 != true || (curTrack.codec == "aac" && curTrack.bitrate >= 290) || (i.track.bitrate - curTrack.bitrate) < 32) {
+                    better = false
+                }
+            }
+            // A better copy replaces the song only if it sounds the same (fail-closed if fingerprint cannot be computed).
             if (better) {
                 val old = curSource?.takeIf { File(it).isFile } ?: lib.local(cur)?.path
                 val s = old?.let { Fingerprint.similarity(it, i.track.path) }
-                if (s != null && s < Fingerprint.SAME) {
-                    better = false; notSame += "%.0f %% · $target ← ${i.track.path}".format(s * 100)
-                    ops.log("app", "kept $target: ${i.track.path} sounds ${"%.0f".format(s * 100)} % alike")
+                if (s == null || s < Fingerprint.SAME) {
+                    better = false
+                    if (s != null) {
+                        notSame += "%.0f %% · $target ← ${i.track.path}".format(s * 100)
+                        ops.log("app", "kept $target: ${i.track.path} sounds ${"%.0f".format(s * 100)} % alike")
+                    } else {
+                        ops.log("app", "kept $target: could not verify audio fingerprint for ${i.track.path}")
+                    }
                 }
             }
             if (cur.actual == target) {
@@ -368,16 +393,32 @@ object Engine {
                 (t["date"] ?: t["year"]).orEmpty().take(4) == i.year.orEmpty() && t["track"]?.substringBefore('/')?.trim()?.toIntOrNull() == i.trackNo)
         }
         // New songs whose best copy is a phone download (JioSaavn, YouTube Music): written from it only if it sounds
-        // like the copy found elsewhere; if not, from that other copy.
+        // like the copy found elsewhere (fail-closed if fingerprint is null); tries all BitChord candidates before falling back.
         val missing = plan.copy.filter { it.target !in held && !lib.exists(rel(it.target)) }.map { i ->
             if (!i.track.path.contains("/Music/BitChord/")) return@map i
             val other = i.copies.filter { !it.contains("/Music/BitChord/") }.mapNotNull { Scanner.get(it) }
                 .maxWithOrNull(compareBy({ Builder.rank(it) }, { it.kbps })) ?: return@map i
+            val bcCandidates = (listOf(i.track) + i.copies.filter { it.contains("/Music/BitChord/") && it != i.track.path }.mapNotNull { Scanner.get(it) })
+                .distinctBy { it.path }
+                .sortedWith(compareByDescending<Track> { Builder.rank(it) }.thenByDescending { it.bitrate })
             Live.current = "comparando cómo suena: " + i.target.substringAfterLast('/'); Live.write()
-            val s = Fingerprint.similarity(other.path, i.track.path)
-            if (s == null || s >= Fingerprint.SAME) return@map i
-            notSame += "%.0f %% · ${rel(i.target)} ← ${i.track.path}".format(s * 100)
-            ops.log("app", "${i.track.path} sounds different from ${other.path}: written from the latter")
+            var lastSim: Double? = null
+            for (cand in bcCandidates) {
+                val realGain = !(other.lossless || other.mp3_320 && other.fake320 != true || (other.codec == "aac" && other.bitrate >= 290)) && (cand.bitrate - other.bitrate >= 32 || Builder.rank(cand) > Builder.rank(other))
+                if (!realGain) continue
+                val s = Fingerprint.similarity(other.path, cand.path)
+                lastSim = s
+                if (s != null && s >= Fingerprint.SAME) {
+                    val ext = Builder.Formats.extOf(cand) ?: continue
+                    return@map i.copy(track = cand, target = i.target.substringBeforeLast('.') + "." + ext)
+                }
+            }
+            if (lastSim != null) {
+                notSame += "%.0f %% · ${rel(i.target)} ← ${i.track.path}".format(lastSim * 100)
+                ops.log("app", "${i.track.path} sounds different from ${other.path} (${"%.0f".format(lastSim * 100)} %): written from local copy")
+            } else {
+                ops.log("app", "could not verify ${i.track.path} against ${other.path}: written from local copy")
+            }
             val ext = Builder.Formats.extOf(other) ?: return@map i
             i.copy(track = other, target = i.target.substringBeforeLast('.') + "." + ext)
         }
@@ -409,7 +450,7 @@ object Engine {
                 } else { Live.error("no se pudo escribir $target: $err"); ops.log("app", "error writing $target: $err") }
             }.onFailure { Live.error("${i.track.path}: ${it.message}"); ops.log("app", "error converting ${i.track.path}: ${it.message}") }
             tmp.delete()
-            if (Live.done.incrementAndGet() % 100 == 0) { manifest.save(publish); synchronized(covers) { covers.save() } }
+            if (Live.done.incrementAndGet() % 100 == 0) { manifest.save(publish); synchronized(covers) { covers.save(publishCovers) } }
             Live.write()
         }
         pool.shutdown()
@@ -433,7 +474,15 @@ object Engine {
             record.writeText(org.json.JSONArray(now.keys.toList()).toString())
             ops.log("app", "track lists for singles and compilations: $written written, ${before.count { it !in now }} removed")
         }
-        manifest.save(publish); covers.save(); Scanner.saveIndex()
+        // Reconcile built.json against actual live files so stale/ghost entries never accumulate.
+        if (!Live.stop) {
+            val liveKeys = lib.currentKeys()
+            if (liveKeys.size >= plan.copy.size * 0.7) {
+                val pruned = manifest.pruneMissing(liveKeys)
+                if (pruned > 0) ops.log("app", "manifest: pruned $pruned stale entries")
+            }
+        }
+        manifest.save(publish); covers.save(publishCovers); Scanner.saveIndex()
         // What would be better at 320 (AAC under 290 kbps, MP3 under 320, false 320s, Opus): a list for the phone,
         // which can download those songs at 320 into Music/BitChord — the next build swaps them in by itself.
         runCatching {

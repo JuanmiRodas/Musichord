@@ -61,23 +61,59 @@ object Spotify {
 
     data class Album(val id: String, val name: String, val artist: String, val year: String?, val tracks: List<String>, val cover: String?, val market: String)
 
+    private val SPURIOUS_WORDS = Regex("(?i)\\b(best|collection|commentary|radio release|broadway|musical|karaoke|tribute)\\b")
+    private val TRAILING_VOL = Regex("(?i)(?:^|\\s)(vol\\.?\\s*\\d+|\\d+|ii|iii|iv|v)\\s*$")
+
+    private fun validAlbumMatch(wantTitle: String, gotTitle: String): Boolean {
+        // Reject when Spotify returns a Best-Of, Commentary, Musical, etc. that the local album didn't ask for.
+        val wantSpurious = SPURIOUS_WORDS.findAll(wantTitle).map { it.value.lowercase() }.toSet()
+        val gotSpurious = SPURIOUS_WORDS.findAll(gotTitle).map { it.value.lowercase() }.toSet()
+        if ((gotSpurious - wantSpurious).isNotEmpty()) return false
+        // Reject sequel/volume mismatch ("ayu trance" vs "ayu trance 2", "Sugarless" vs "Sugarless III").
+        val wantVol = TRAILING_VOL.find(wantTitle.trim())?.groupValues?.get(1)?.lowercase()
+        val gotVol = TRAILING_VOL.find(gotTitle.trim())?.groupValues?.get(1)?.lowercase()
+        if (gotVol != null && wantVol != gotVol) return false
+        return true
+    }
+
     /** The album [title] by [artist] on Spotify (Japan, then Spain), if one matches its name and artist. */
     fun album(artist: String, title: String): Album? {
         val who = artist.substringBefore(" (").trim()
+        val jp = Regex("\\(([^)]*[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}][^)]*)\\)").find(artist)?.groupValues?.get(1)?.trim()
         val base = title.replace(Regex("\\s*[(\\[].*$"), "").trim().ifBlank { title }
-        for (market in listOf("JP", "ES")) {
-            val q = URLEncoder.encode("album:$base artist:$who", "UTF-8")
-            val items = get("search?q=$q&type=album&market=$market&limit=8")?.optJSONObject("albums")?.optJSONArray("items") ?: continue
+        val queries = listOfNotNull(
+            jp?.let { "JP" to it },
+            "JP" to who,
+            "ES" to who,
+        )
+        for ((market, qArtist) in queries) {
+            val q = URLEncoder.encode("album:$base artist:$qArtist", "UTF-8")
+            val items = get("search?q=$q&type=album&market=$market&limit=10")?.optJSONObject("albums")?.optJSONArray("items") ?: continue
             val hit = (0 until items.length()).map { items.getJSONObject(it) }.firstOrNull { a ->
+                val aName = a.optString("name")
                 val names = a.optJSONArray("artists")?.let { x -> (0 until x.length()).map { x.getJSONObject(it).optString("name") } }.orEmpty()
-                (Builder.albumKey(a.optString("name")) == Builder.albumKey(title) || Words.plain(a.optString("name")).startsWith(Words.plain(base)) && Words.plain(base).length >= 4) &&
-                    names.any { n -> Builder.pkey(n) == Builder.pkey(who) || Words.plain(n).contains(Words.plain(who)) && Words.plain(who).length >= 3 }
+                val titleOk = validAlbumMatch(title, aName) &&
+                    (Builder.albumKey(aName) == Builder.albumKey(title) || Words.plain(aName).startsWith(Words.plain(base)) && Words.plain(base).length >= 4)
+                val artistOk = names.any { n ->
+                    Words.plain(n) == Words.plain(qArtist) || Words.plain(n) == Words.plain(who) ||
+                    (jp != null && Words.plain(n) == Words.plain(jp)) ||
+                    Builder.pkey(n) == Builder.pkey(who) ||
+                    (Words.plain(who).length >= 3 && Words.plain(n).contains(Words.plain(who)))
+                }
+                titleOk && artistOk
             } ?: continue
             val full = get("albums/${hit.getString("id")}?market=$market") ?: continue
-            val tr = full.optJSONObject("tracks")?.optJSONArray("items")
+            val trackNames = ArrayList<String>()
+            var tracksPage = full.optJSONObject("tracks")
+            var pages = 0
+            while (tracksPage != null && pages++ < 5) {
+                val arr = tracksPage.optJSONArray("items")
+                if (arr != null) for (i in 0 until arr.length()) trackNames += arr.getJSONObject(i).optString("name")
+                val next = tracksPage.optString("next").ifBlank { null }?.substringAfter("/v1/", "")?.ifBlank { null }
+                tracksPage = if (next != null) get(next) else null
+            }
             return Album(hit.getString("id"), full.optString("name"), who, full.optString("release_date").take(4).ifBlank { null },
-                tr?.let { x -> (0 until x.length()).map { x.getJSONObject(it).optString("name") } }.orEmpty(),
-                full.optJSONArray("images")?.optJSONObject(0)?.optString("url"), market)
+                trackNames, full.optJSONArray("images")?.optJSONObject(0)?.optString("url"), market)
         }
         return null
     }

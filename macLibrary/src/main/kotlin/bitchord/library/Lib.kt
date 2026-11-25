@@ -31,6 +31,10 @@ interface Lib {
     /** A readable copy on this Mac (to read its tags), if there is one. */
     fun local(f: LibFile): File?
     fun exists(rel: String): Boolean
+    /** Extra files on the storage that collide with another file in NFC form (e.g. NFD + NFC twins on pCloud). */
+    fun duplicates(): List<LibFile> = emptyList()
+    /** Normalized NFC paths currently held in the library (for reconciling built.json). */
+    fun currentKeys(): Set<String> = emptySet()
     /** Removes folders left empty. */
     fun tidy()
     val name: String
@@ -41,29 +45,53 @@ private fun nfc(s: String) = Words.nfc(s)
 class LocalLib(private val root: String) : Lib {
     override val name = "disco"
     private val rootFile = File(root)
-    override fun list(): Map<String, LibFile> = rootFile.walkTopDown().onEnter { !it.name.startsWith(".") }
-        .filter { it.isFile && it.extension.lowercase() in Builder.Formats.LIBRARY && !it.name.startsWith(".") }
-        .associate { f -> val r = f.path.removePrefix(root).trimStart('/'); nfc(r) to LibFile(nfc(r), r, f.length()) }
+    private val dupes = ArrayList<LibFile>()
+    private val live = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    override fun list(): Map<String, LibFile> {
+        dupes.clear(); live.clear()
+        val out = LinkedHashMap<String, LibFile>()
+        rootFile.walkTopDown().onEnter { !it.name.startsWith(".") }
+            .filter { it.isFile && it.extension.lowercase() in Builder.Formats.LIBRARY && !it.name.startsWith(".") }
+            .forEach { f ->
+                val r = f.path.removePrefix(root).trimStart('/')
+                val k = nfc(r)
+                val lf = LibFile(k, r, f.length())
+                val prev = out[k]
+                if (prev == null) { out[k] = lf; live += k }
+                else if (lf.actual == k && prev.actual != k) { dupes += prev; out[k] = lf }
+                else dupes += lf
+            }
+        return out
+    }
+    override fun duplicates(): List<LibFile> = dupes.toList()
+    override fun currentKeys(): Set<String> = HashSet(live)
     override fun move(from: LibFile, toRel: String): String? = runCatching {
-        val to = File(rootFile, toRel); to.parentFile.mkdirs()
-        Files.move(File(rootFile, from.actual).toPath(), to.toPath()); null
+        val k = nfc(toRel)
+        val to = File(rootFile, k); to.parentFile.mkdirs()
+        Files.move(File(rootFile, from.actual).toPath(), to.toPath())
+        live.remove(from.rel); live += k; null
     }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
-    override fun delete(f: LibFile): String? = runCatching { Files.delete(File(rootFile, f.actual).toPath()); null }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
-    override fun deletePath(rel: String): String? = runCatching { Files.deleteIfExists(File(rootFile, rel).toPath()); null }.getOrElse { it.message }
+    override fun delete(f: LibFile): String? = runCatching { Files.delete(File(rootFile, f.actual).toPath()); live.remove(f.rel); null }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+    override fun deletePath(rel: String): String? = runCatching { Files.deleteIfExists(File(rootFile, nfc(rel)).toPath()); null }.getOrElse { it.message }
     override fun moveOut(from: LibFile, outRel: String): String? = runCatching {
-        val to = File(rootFile.parentFile, outRel); to.parentFile.mkdirs()
-        Files.move(File(rootFile, from.actual).toPath(), to.toPath()); null
+        val to = File(rootFile.parentFile, nfc(outRel)); to.parentFile.mkdirs()
+        Files.move(File(rootFile, from.actual).toPath(), to.toPath()); live.remove(from.rel); null
     }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
     override fun put(local: File, toRel: String): String? = runCatching {
-        val to = File(rootFile, toRel); to.parentFile.mkdirs()
-        Files.move(local.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING); null
+        val k = nfc(toRel)
+        val to = File(rootFile, k); to.parentFile.mkdirs()
+        Files.move(local.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        if (k.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) live += k
+        null
     }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
     override fun local(f: LibFile) = File(rootFile, f.actual)
-    override fun exists(rel: String) = File(rootFile, rel).exists()
+    override fun exists(rel: String) = File(rootFile, nfc(rel)).exists()
     override fun tidy() {
         rootFile.walkBottomUp().filter { it.isDirectory && it != rootFile && !it.path.contains("/.") }.forEach { d ->
             val left = d.listFiles().orEmpty()
-            if (left.all { it.name == ".DS_Store" }) { left.forEach { it.delete() }; d.delete() }
+            left.filter { it.isFile && it.name.startsWith(".aparte-") }.forEach { it.delete() }
+            val rem = d.listFiles().orEmpty()
+            if (rem.all { it.name == ".DS_Store" }) { rem.forEach { it.delete() }; d.delete() }
         }
     }
 }
@@ -193,9 +221,10 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
     private val folders = java.util.concurrent.ConcurrentHashMap<String, Long>() // rel (one form, lower case) → folder id
     private val folderNames = java.util.concurrent.ConcurrentHashMap<String, String>() // rel (one form, lower case) → its name as pCloud has it
     private val files = java.util.concurrent.ConcurrentHashMap<String, LibFile>()
+    private val dupes = java.util.concurrent.CopyOnWriteArrayList<LibFile>()
 
     override fun list(): Map<String, LibFile> {
-        files.clear(); folders.clear(); folderNames.clear()
+        files.clear(); folders.clear(); folderNames.clear(); dupes.clear()
         val o = api.call("listfolder", mapOf("path" to remoteRoot, "recursive" to "1")).getJSONObject("metadata")
         folders[""] = o.getLong("folderid")
         fun walk(m: JSONObject, rel: String) {
@@ -206,15 +235,32 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
                 if (n.startsWith(".")) continue
                 val r = if (rel.isEmpty()) n else "$rel/$n"
                 if (x.optBoolean("isfolder")) { folders.putIfAbsent(nfc(r).lowercase(), x.getLong("folderid")); folderNames.putIfAbsent(nfc(r).lowercase(), n); walk(x, r) }
-                else if (n.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) files[nfc(r)] = LibFile(nfc(r), r, x.optLong("size"), x.getLong("fileid"))
+                else if (n.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) {
+                    val key = nfc(r)
+                    val lf = LibFile(key, r, x.optLong("size"), x.getLong("fileid"))
+                    val prev = files[key]
+                    if (prev == null) files[key] = lf
+                    else {
+                        // Two files in pCloud differing only in Unicode form (NFD vs NFC): keep the NFC (or newer fileid) one, mark the twin for removal.
+                        val keepNew = (lf.actual == key && prev.actual != key) || (lf.actual == prev.actual && (lf.id ?: 0L) > (prev.id ?: 0L)) ||
+                            (lf.actual != key && prev.actual != key && (lf.id ?: 0L) > (prev.id ?: 0L))
+                        if (keepNew) { dupes += prev; files[key] = lf } else dupes += lf
+                    }
+                }
             }
         }
         walk(o, "")
         return HashMap(files)
     }
 
+    override fun duplicates(): List<LibFile> = dupes.toList()
+    override fun currentKeys(): Set<String> = HashSet(files.keys)
+
     @Synchronized private fun folder(rel: String): Long {
-        if (rel.isEmpty()) return folders[""]!!
+        val rootId = folders.computeIfAbsent("") {
+            api.call("listfolder", mapOf("path" to remoteRoot, "nofiles" to "1")).getJSONObject("metadata").getLong("folderid")
+        }
+        if (rel.isEmpty()) return rootId
         folders[nfc(rel).lowercase()]?.let { id ->
             // Same folder, other capitals ("Buck-Tick" for "BUCK-TICK"): renamed to the plan's spelling.
             val want = nfc(rel.substringAfterLast('/'))
@@ -230,13 +276,18 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
     }
 
     override fun move(from: LibFile, toRel: String): String? = runCatching {
-        val to = folder(toRel.substringBeforeLast('/', ""))
-        api.call("renamefile", mapOf("fileid" to from.id.toString(), "tofolderid" to to.toString(), "toname" to nfc(toRel.substringAfterLast('/'))))
-        files.remove(from.rel); files[nfc(toRel)] = from.copy(rel = nfc(toRel), actual = toRel); null
+        val k = nfc(toRel)
+        val to = folder(k.substringBeforeLast('/', ""))
+        api.call("renamefile", mapOf("fileid" to from.id.toString(), "tofolderid" to to.toString(), "toname" to k.substringAfterLast('/')))
+        files.remove(from.rel); files[k] = from.copy(rel = k, actual = k); null
     }.getOrElse { it.message ?: it.javaClass.simpleName }
 
-    override fun delete(f: LibFile): String? = runCatching { api.call("deletefile", mapOf("fileid" to f.id.toString())); files.remove(f.rel); null }.getOrElse { it.message }
-    override fun deletePath(rel: String): String? = runCatching { api.call("deletefile", mapOf("path" to "$remoteRoot/$rel")); null }.getOrElse { it.message }
+    override fun delete(f: LibFile): String? = runCatching {
+        api.call("deletefile", mapOf("fileid" to f.id.toString()))
+        if (files[f.rel]?.id == f.id) files.remove(f.rel)
+        null
+    }.getOrElse { it.message }
+    override fun deletePath(rel: String): String? = runCatching { api.call("deletefile", mapOf("path" to "$remoteRoot/${nfc(rel)}")); null }.getOrElse { it.message }
 
     override fun moveOut(from: LibFile, outRel: String): String? = runCatching {
         var parent = remoteRoot.substringBeforeLast('/').ifEmpty { "" }
@@ -245,13 +296,32 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
             id = api.call("createfolderifnotexists", mapOf("folderid" to id.toString(), "name" to nfc(seg))).getJSONObject("metadata").getLong("folderid")
         }
         api.call("renamefile", mapOf("fileid" to from.id.toString(), "tofolderid" to id.toString(), "toname" to nfc(outRel.substringAfterLast('/'))))
-        files.remove(from.rel); null
+        if (files[from.rel]?.id == from.id) files.remove(from.rel); null
     }.getOrElse { it.message ?: it.javaClass.simpleName }
 
     override fun put(local: File, toRel: String): String? = runCatching {
-        val dir = folder(toRel.substringBeforeLast('/', ""))
-        val m = api.upload(dir, nfc(toRel.substringAfterLast('/')), local).getJSONArray("metadata").getJSONObject(0)
-        if (toRel.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) files[nfc(toRel)] = LibFile(nfc(toRel), toRel, m.optLong("size"), m.getLong("fileid"))
+        val k = nfc(toRel)
+        val dir = folder(k.substringBeforeLast('/', ""))
+        val name = k.substringAfterLast('/')
+        val isMeta = k.startsWith(".bitchord-library/") && (k.endsWith(".json") || k.endsWith(".csv"))
+        if (isMeta) {
+            // Upload under a fresh temp name then swap to assign a new fileid: prevents pCloud Drive FUSE from splicing stale cached blocks into overwritten JSON metadata.
+            val tmpName = ".tmp-" + java.util.UUID.randomUUID() + "-" + name
+            val m = api.upload(dir, tmpName, local).getJSONArray("metadata").getJSONObject(0)
+            val newId = m.getLong("fileid")
+            runCatching { api.call("deletefile", mapOf("path" to "$remoteRoot/$k")) }
+            api.call("renamefile", mapOf("fileid" to newId.toString(), "tofolderid" to dir.toString(), "toname" to name))
+            local.delete(); return@runCatching null
+        }
+        val prev = files[k] ?: files.values.firstOrNull { it.rel.equals(k, ignoreCase = true) }
+        val m = api.upload(dir, name, local).getJSONArray("metadata").getJSONObject(0)
+        val newId = m.getLong("fileid")
+        // If an older file existed in NFD or different casing, pCloud kept both (different fileid): remove the stale twin.
+        if (prev != null && prev.id != null && prev.id != newId) {
+            runCatching { api.call("deletefile", mapOf("fileid" to prev.id.toString())) }
+            if (prev.rel != k) files.remove(prev.rel)
+        }
+        if (k.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) files[k] = LibFile(k, k, m.optLong("size"), newId)
         local.delete(); null
     }.getOrElse { it.message ?: it.javaClass.simpleName }
 
@@ -270,6 +340,8 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
                 if (x.optBoolean("isfolder")) {
                     if (n.startsWith(".")) { empty = false; continue }
                     if (walk(x)) runCatching { api.call("deletefolderrecursive", mapOf("folderid" to x.getLong("folderid").toString())) } else empty = false
+                } else if (n.startsWith(".aparte-")) {
+                    runCatching { api.call("deletefile", mapOf("fileid" to x.getLong("fileid").toString())) }
                 } else if (n != ".DS_Store") empty = false
             }
             return empty
