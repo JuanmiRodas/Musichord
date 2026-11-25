@@ -2076,9 +2076,11 @@ private fun BitChordApp(
      * same way a batch download is.
      */
     val queueSongs: (List<Song>, Boolean) -> Unit = { all, next ->
-        val songs = all.filterNot { com.music.bitchord.data.AlbumReference.isMissing(it) }
-        if (songs.isNotEmpty()) {
+        if (all.isNotEmpty()) {
             scope.launch {
+                // BitChord Audio: an album's tracks you lack, found to play (or left out).
+                val songs = com.music.bitchord.data.AlbumReference.playable(all, 0).first
+                if (songs.isEmpty()) return@launch
                 if (refusedByHost()) return@launch
                 val c = controller
                 if (c == null || c.mediaItemCount == 0) {

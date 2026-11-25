@@ -168,8 +168,9 @@ suspend fun MediaController.playBoundedContext(
     continuationToken: String?,
     shuffle: Boolean = QueueShuffle.enabled.value,
 ) {
-    val (playable, from) = songs.withoutMissing(startIndex)
-    if (playable.size != songs.size) {
+    // BitChord Audio: an album's tracks you lack, found to play (or left out).
+    if (songs.any { com.music.bitchord.data.AlbumReference.isMissing(it) }) {
+        val (playable, from) = com.music.bitchord.data.AlbumReference.playable(songs, startIndex)
         if (playable.isNotEmpty()) playBoundedContext(playable, from, source, continuationToken, shuffle)
         return
     }
@@ -1060,8 +1061,8 @@ fun mediaIdIn(uri: Uri): String? = if (uri.authority == "source") {
  */
 suspend fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
     if (songs.isEmpty()) return
-    val (playable, from) = songs.withoutMissing(startIndex)
-    if (playable.size != songs.size) {
+    if (songs.any { com.music.bitchord.data.AlbumReference.isMissing(it) }) {
+        val (playable, from) = com.music.bitchord.data.AlbumReference.playable(songs, startIndex)
         if (playable.isNotEmpty()) playSongs(playable, from)
         return
     }

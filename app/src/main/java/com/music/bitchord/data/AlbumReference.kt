@@ -12,6 +12,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,8 +28,10 @@ import java.util.concurrent.TimeUnit
  * are put in their place on it, discs included, and the ones you are missing show greyed in
  * theirs: a tap looks for one to play.
  *
- * Only asked when such an album is opened, and kept (a month) for the next time. A list is
- * only taken when most of your songs of the album are on it — never another album's.
+ * Only asked when such an album is opened, and kept for good — on the phone and in your
+ * pCloud (`.bitchord-audio/album-references.json`, merged both ways), so any phone of yours
+ * has it. Tracks you lack are found to play (and that kept too) when the album plays. A
+ * list is only taken when most of your songs of the album are on it — never another album's.
  */
 object AlbumReference {
     private const val TAG = "BitChord"
@@ -48,9 +52,67 @@ object AlbumReference {
 
     fun init(context: Context) {
         file = File(context.applicationContext.filesDir, "album_references.json")
+        syncScope.launch {
+            delay(25_000)
+            runCatching { pullFromCloud() }.onFailure { TrackLog.w(TAG, "album references: pCloud not read: ${it.message}") }
+        }
     }
 
-    private fun save() = synchronized(cache) { runCatching { file?.writeText(cache.toString()) } }
+    private fun save() {
+        synchronized(cache) { runCatching { file?.writeText(cache.toString()) } }
+        pushSoon()
+    }
+
+    // ── Kept in pCloud too ──
+
+    private val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    @Volatile private var pushJob: kotlinx.coroutines.Job? = null
+
+    private fun cloudDir(): String? {
+        val base = AppSettings.webdavUrl.value
+        if (!com.music.bitchord.data.webdav.WebDavConfig.isConfigured(base)) return null
+        return com.music.bitchord.data.webdav.WebDavConfig.normalizeUrl(base).trimEnd('/') + "/.bitchord-audio/"
+    }
+
+    /** pCloud's copy merged in: what this phone lacks (or only knows as a miss) taken from it. */
+    private suspend fun pullFromCloud() {
+        val dir = cloudDir() ?: return
+        val text = com.music.bitchord.data.webdav.WebDavClient.readText(dir + CLOUD_FILE, AppSettings.webdavUsername.value, AppSettings.webdavPassword.value, 32 * 1024 * 1024).getOrNull()
+        val remote = text?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        var taken = 0
+        var ours = 0
+        synchronized(cache) {
+            remote.keys().forEach { k ->
+                val r = remote.optJSONObject(k) ?: return@forEach
+                val l = cache.optJSONObject(k)
+                val rHas = (r.optJSONArray("t")?.length() ?: 0) > 0 || r.has("p")
+                if (l == null || ((l.optJSONArray("t")?.length() ?: 0) == 0 && rHas)) { cache.put(k, r); taken++ }
+                else l.optJSONObject("p")?.let { lp -> r.optJSONObject("p")?.let { rp -> rp.keys().forEach { pk -> if (!lp.has(pk)) lp.put(pk, rp.get(pk)) } } }
+            }
+            cache.keys().forEach { k -> if (!remote.has(k)) ours++ }
+            runCatching { file?.writeText(cache.toString()) }
+        }
+        if (taken > 0) TrackLog.d(TAG, "album references: $taken taken from pCloud")
+        if (ours > 0) pushSoon()
+    }
+
+    private fun pushSoon() {
+        if (cloudDir() == null) return
+        pushJob?.cancel()
+        pushJob = syncScope.launch {
+            delay(8_000)
+            val dir = cloudDir() ?: return@launch
+            val user = AppSettings.webdavUsername.value
+            val pass = AppSettings.webdavPassword.value
+            runCatching {
+                com.music.bitchord.data.webdav.WebDavClient.ensureCollection(dir, user, pass)
+                val bytes = synchronized(cache) { cache.toString() }.toByteArray(Charsets.UTF_8)
+                com.music.bitchord.data.webdav.WebDavClient.putFile(dir + CLOUD_FILE, bytes.inputStream(), bytes.size.toLong(), "application/json", user, pass, overwrite = true)
+            }.onFailure { TrackLog.w(TAG, "album references: not sent to pCloud: ${it.message}") }
+        }
+    }
+
+    private const val CLOUD_FILE = "album-references.json"
 
     private fun get(url: String, headers: Map<String, String> = emptyMap()): String? = runCatching {
         val b = Request.Builder().url(url).header("User-Agent", UA)
@@ -131,8 +193,7 @@ object AlbumReference {
 
     private fun cached(album: String): Reference? {
         val o = synchronized(cache) { cache.optJSONObject(key(album)) } ?: return null
-        if (System.currentTimeMillis() - o.optLong("at") > TTL_MS) return null
-        val a = o.optJSONArray("t") ?: return null
+        val a = o.optJSONArray("t")?.takeIf { it.length() > 0 } ?: return null
         return Reference(o.optString("s"), (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
             Track(it.optInt("d", 1), it.optInt("n"), it.optString("t"), it.optInt("l").takeIf { l -> l > 0 })
         })
@@ -140,6 +201,7 @@ object AlbumReference {
 
     private fun keep(album: String, ref: Reference?) {
         val o = JSONObject().put("at", System.currentTimeMillis()).put("s", ref?.source.orEmpty())
+        synchronized(cache) { cache.optJSONObject(key(album))?.optJSONObject("p") }?.let { o.put("p", it) }
         o.put("t", JSONArray().apply {
             ref?.tracks?.forEach { put(JSONObject().put("d", it.disc).put("n", it.number).put("t", it.title).put("l", it.seconds ?: 0)) }
         })
@@ -149,8 +211,11 @@ object AlbumReference {
 
     /** The first catalogue whose list fits your songs (kept, a miss too). */
     suspend fun find(album: String, artist: String?, songs: List<Song>): Reference? = withContext(Dispatchers.IO) {
-        synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf { System.currentTimeMillis() - it.optLong("at") < TTL_MS }?.let {
-            return@withContext cached(album)?.takeIf { r -> r.tracks.isNotEmpty() && fits(r, songs) }
+        // A list found is kept for good; a miss is asked again after a month.
+        synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf {
+            (it.optJSONArray("t")?.length() ?: 0) > 0 || System.currentTimeMillis() - it.optLong("at") < TTL_MS
+        }?.let {
+            return@withContext cached(album)?.takeIf { r -> fits(r, songs) }
         }
         val tries = listOf<suspend () -> List<Reference>>(
             { itunes(album, artist) },
@@ -291,6 +356,11 @@ object AlbumReference {
 
     /** Somewhere [missing] plays (YouTube Music: same title in any script, length within 6 s when known). */
     suspend fun findPlayable(missing: Song): Song? = withContext(Dispatchers.IO) {
+        val albumKey = key(missing.albumName.orEmpty())
+        val trackKey = missing.videoId.removePrefix(MISSING).substringAfter(':')
+        synchronized(cache) { cache.optJSONObject(albumKey)?.optJSONObject("p")?.optJSONObject(trackKey) }?.let { p ->
+            return@withContext missing.copy(videoId = p.optString("v"), title = p.optString("t", missing.title), artist = p.optString("a", missing.artist))
+        }
         val q = "${missing.title} ${missing.artist}".trim()
         val want = secondsOf(missing)
         val keys = OwnFileMatcher.allKeys(missing.title) + key(missing.title)
@@ -299,6 +369,38 @@ object AlbumReference {
         hits.firstOrNull { s ->
             val k = OwnFileMatcher.allKeys(s.title) + key(s.title)
             k.any { it.isNotEmpty() && it in keys } && (want == null || secondsOf(s)?.let { kotlin.math.abs(it - want) <= 6 } != false)
-        }.also { TrackLog.d(TAG, "missing '${missing.title}': " + (it?.let { s -> "plays from YouTube Music (${s.videoId})" } ?: "nowhere found")) }
+        }.also { found ->
+            TrackLog.d(TAG, "missing '${missing.title}': " + (found?.let { s -> "plays from YouTube Music (${s.videoId})" } ?: "nowhere found"))
+            if (found != null) {
+                synchronized(cache) {
+                    val entry = cache.optJSONObject(albumKey) ?: JSONObject().also { cache.put(albumKey, it) }
+                    val p = entry.optJSONObject("p") ?: JSONObject().also { entry.put("p", it) }
+                    p.put(trackKey, JSONObject().put("v", found.videoId).put("t", found.title).put("a", found.artist))
+                }
+                save()
+            }
+        }?.let { found -> missing.copy(videoId = found.videoId, title = found.title, artist = found.artist, thumbnailUrl = found.thumbnailUrl ?: missing.thumbnailUrl) }
+    }
+
+    /**
+     * [songs] ready to play: each greyed track swapped for where it plays (kept from before,
+     * or found now — all at once, a few seconds at most); the ones found nowhere left out.
+     */
+    suspend fun playable(songs: List<Song>, start: Int): Pair<List<Song>, Int> {
+        if (songs.none(::isMissing)) return songs to start
+        val found = withTimeoutOrNull(8_000) {
+            kotlinx.coroutines.coroutineScope {
+                songs.filter(::isMissing).map { m -> async { m.videoId to runCatching { findPlayable(m) }.getOrNull() } }.map { it.await() }.toMap()
+            }
+        }.orEmpty()
+        val out = ArrayList<Song>()
+        var at = 0
+        songs.forEachIndexed { i, s ->
+            val real = if (isMissing(s)) found[s.videoId] else s
+            if (i == start) at = out.size
+            if (real != null) out += real
+        }
+        TrackLog.d(TAG, "album play: ${songs.count(::isMissing)} you lack, ${found.values.count { it != null }} found to play")
+        return out to at.coerceAtMost((out.size - 1).coerceAtLeast(0))
     }
 }

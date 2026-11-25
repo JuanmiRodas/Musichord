@@ -907,15 +907,8 @@ fun DetailScreen(
                             onClick = {
                                 when {
                                     picking -> ReleaseSelection.toggle(song)
-                                    // BitChord Audio: a track you lack — found somewhere to play, if it can be.
-                                    com.music.bitchord.data.AlbumReference.isMissing(song) -> missingScope.launch {
-                                        val found = com.music.bitchord.data.AlbumReference.findPlayable(song)
-                                        if (found != null) {
-                                            com.music.bitchord.playback.MusicLink.request(com.music.bitchord.playback.LinkRequest.Track(found.videoId))
-                                        } else {
-                                            android.widget.Toast.makeText(missingContext, missingContext.getString(R.string.missing_track_not_found, song.title), android.widget.Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
+                                    // BitChord Audio: a track you lack plays too — the album is played
+                                    // from it, each track you lack found to play as the queue is made.
                                     else -> onSongClick(queue, position)
                                 }
                             },
