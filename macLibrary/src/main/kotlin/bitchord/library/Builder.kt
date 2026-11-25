@@ -289,7 +289,7 @@ object Builder {
             set(v) { field = v; runCatching { file.writeText(org.json.JSONObject().put("compilationsFirst", v).toString()) } }
     }
 
-    private val VERSION = Regex("(?iu)\\b(ver(sion)?|remix|mix|live|acoustic|instrumental|inst|edit|tv size|tv-size|off vocal|karaoke|demo|remaster(ed)?)\\b|-[a-z]-version|バージョン|ヴァージョン|リミックス|ライブ")
+    private val VERSION = Regex("(?iu)\\b(ver(sion)?|remix|mix|live|acoustic|instrumental|inst|edit|tv size|tv-size|off vocal|karaoke|demo|remaster(ed)?)\\b|-[a-z]-version|バージョン|ヴァージョン|リミックス|ライブ|ニュー・?テイク|new take|re-?recorded|self ?cover|セルフカバー|featuring|\\bfeat\\.")
 
     const val OUTSIDE = "instrumental de banda sonora de serie"
     /** Beside the library (in its parent folder): the series' soundtrack instrumentals taken out of it. */
@@ -852,6 +852,14 @@ object Builder {
                     inComp["mb:${c.id}|${p.k}"] = c to t
                 }
             }
+            // Each song of a compilation takes one copy: the one lasting most like it (then the better file). The other versions
+            // found for it (a re-recording, another album's take, "(ニュー・テイク)") stay on their own albums.
+            val byPlace = group.associateBy { it.k }
+            inComp.entries.groupBy { (key, v) -> Triple(key.substringBefore('|'), v.second.disc ?: 1, v.second.no) }.values.filter { it.size > 1 }.forEach { l ->
+                val best = l.minWith(compareBy({ (key, v) -> val p = byPlace[key.substringAfter('|')]; val a = v.second.seconds; val b = p?.best?.track?.seconds
+                    if (a == null || b == null) 999.0 else kotlin.math.abs(a - b) }, { (key, _) -> -(byPlace[key.substringAfter('|')]?.let { rank(it.best.track) } ?: 0) }))
+                l.filter { it !== best }.forEach { (key, _) -> inComp.remove(key); albums[key.substringBefore('|')]?.remove(key.substringAfter('|')) }
+            }
             val pick = HashMap<String, String>()
             val left = group.filter { p -> p.copies.any { same(it, p) } }.map { it.k }.toMutableSet()
             while (left.isNotEmpty()) {
@@ -1191,6 +1199,26 @@ object Builder {
             }
         }
         dedupe(items.groupBy { it.target.substringBeforeLast('.').lowercase().replace(Regex(" \\(\\d\\)$"), "") }.values, "repetida (la misma canción con el mismo nombre)")
+        // A phone download (JioSaavn, YouTube Music) of a song your own folders (Discografías…) have by the same singer must
+        // sound like it: if not, it is another song or version given that name ("Remember Summer Days" on "Timely!!" was
+        // Shane Mesa's English cover) and is left out. Your folders are the reference.
+        fun downloaded(path: String) = path.contains("/Music/BitChord/")
+        fun songKey(id: Id) = pkey(firstArtist(id.artist.ifBlank { id.albumArtist })) + "|" + Themes.core(id.title)
+        val reference = tracks.filter { !downloaded(it.path) }.mapNotNull { t -> ids[t.path]?.let { songKey(it) to t } }.groupBy({ it.first }, { it.second })
+        for (i in items) {
+            if (i in twins || !downloaded(i.track.path)) continue
+            val id = ids[i.track.path] ?: continue
+            if (VERSION.containsMatchIn(id.title)) continue
+            val refs = reference[songKey(id)]?.filter { !VERSION.containsMatchIn(ids[it.path]?.title.orEmpty()) } ?: continue
+            if (refs.isEmpty()) continue
+            val close = refs.any { r -> r.seconds != null && i.track.seconds != null && kotlin.math.abs(r.seconds - i.track.seconds) <= 1.0 }
+            if (close) continue
+            val r = refs.minBy { r -> kotlin.math.abs((r.seconds ?: 0.0) - (i.track.seconds ?: 0.0)) }
+            val sim = runCatching { Fingerprint.similarity(r.path, i.track.path) }.getOrNull()
+            if (sim != null && sim >= Fingerprint.SAME) continue
+            twins += i
+            skipped += i.track to "descarga que no suena como tu copia (${r.path.substringAfterLast('/')})"
+        }
         val LIVE_OR_MIX = Regex("(?i)/(directos|remixes)/|\\b(live|remix|mix|ver\\.?|version|versión|acoustic|instrumental|tv size|karaoke)\\b")
         dedupe(items.filter { it !in twins && !LIVE_OR_MIX.containsMatchIn(it.target.removePrefix(targetRoot)) }.groupBy { i ->
             val rel = i.target.removePrefix(targetRoot).trimStart('/').split('/')
