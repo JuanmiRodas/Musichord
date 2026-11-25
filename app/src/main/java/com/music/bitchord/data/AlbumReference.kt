@@ -258,7 +258,6 @@ object AlbumReference {
     fun coverOf(album: String): String? =
         synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf { it.optInt("v") == VERSION && (it.optJSONArray("t")?.length() ?: 0) > 0 }
             ?.optString("c")?.takeIf { it.isNotBlank() }
-    }
 
     private fun keep(album: String, ref: Reference?) {
         val o = JSONObject().put("at", System.currentTimeMillis()).put("s", ref?.source.orEmpty()).put("v", VERSION)
@@ -457,11 +456,13 @@ object AlbumReference {
         val q = "${missing.title} ${missing.artist}".trim()
         val want = secondsOf(missing)
         val keys = OwnFileMatcher.allKeys(missing.title) + key(missing.title)
-        val hits = YtMusicRepository.search(q, SearchFilter.SONGS).getOrNull().orEmpty()
-            .mapNotNull { (it as? SearchResult.Track)?.song }
+        val live = OwnFileMatcher.isLiveRelease(missing.albumName.orEmpty())
+        // For a live album the concert's own name is asked first (its take, if YouTube Music has it).
+        val hits = (if (live) listOf("$q ${missing.albumName}", q) else listOf(q)).flatMap { query ->
+            YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull().orEmpty().mapNotNull { (it as? SearchResult.Track)?.song }
+        }.distinctBy { it.videoId }
         // The same artist; and for a live album, a live recording of it — a studio cut is
         // another track, and a same-titled song by someone else is not this one.
-        val live = OwnFileMatcher.isLiveRelease(missing.albumName.orEmpty())
         hits.firstOrNull { s ->
             val k = OwnFileMatcher.allKeys(s.title) + key(s.title)
             k.any { it.isNotEmpty() && it in keys } &&
