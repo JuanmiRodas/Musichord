@@ -185,7 +185,7 @@ object AlbumReference {
             if (mine != null) { left.remove(mine); linked[t] = mine }
         }
         // By context: a listed track still unlinked, and one of yours (here or kept elsewhere)
-        // by the same artist, the same length (±5 s), that no other unlinked track could be —
+        // by the very same artist credit, the same length (±3 s), that no other unlinked track could be —
         // the same song under another name (a romanisation, a translation: "Taipu: wairudo"
         // for your "TYPE:WILD"). Never on a live album.
         if (!live) {
@@ -194,12 +194,15 @@ object AlbumReference {
                 val a = t.seconds ?: return false
                 val b = secondsOf(s) ?: return false
                 val by = t.artist ?: artist ?: return false
-                return kotlin.math.abs(a - b) <= 5 && artistNear(by, s.artist)
+                return kotlin.math.abs(a - b) <= 3 && strictArtist(by, s.artist)
             }
             for (t in open) {
                 val cands = (left + elsewhere.filter { it.videoId !in used }).filter { near(t, it) }.distinctBy { it.videoId }
                 val one = cands.singleOrNull() ?: continue
                 if (open.count { it !in linked && near(it, one) } != 1) continue
+                // Not one whose name is another listed track's.
+                if (ref.tracks.any { o -> o != t && (keysOf(o.title).any { it.isNotEmpty() && it in keysOf(one.title) } ||
+                        variants(o.title).any { x -> variants(one.title).any { y -> soundsAlike(x, y) } }) }) continue
                 linked[t] = one
                 if (!left.remove(one)) used += one.videoId
                 TrackLog.d(TAG, "album '$album': '${t.title}' taken to be your '${one.title}' (same artist and length)")
@@ -256,9 +259,19 @@ object AlbumReference {
     }
 
     /** Both names written the same way somewhere (one isn't only in a script the other lacks). */
-    private fun comparable(a: String, b: String): Boolean {
-        val va = variants(a); val vb = variants(b)
-        return va.any { x -> vb.any { y -> CJK.containsMatchIn(x) == CJK.containsMatchIn(y) } }
+    private fun comparable(a: String, b: String): Boolean = artistTokens(a).isNotEmpty() && artistTokens(b).isNotEmpty()
+
+    /** An artist credit's names as sounds, one sorted list per way it's written (松本梨香 read as matsumoto rika). */
+    private fun artistTokens(a: String): List<List<String>> = variants(a).mapNotNull { v ->
+        val words = if (CJK.containsMatchIn(v)) com.music.bitchord.data.sources.JapaneseReading.romajiWords(v)?.toList().orEmpty()
+        else v.split(Regex("""[\s,&＆×・/]+"""))
+        words.map { skeleton(it) }.filter { it.isNotEmpty() }.sorted().takeIf { it.isNotEmpty() }
+    }
+
+    /** The very same artist credit — every name in it, in any order — not merely one of them in common. */
+    private fun strictArtist(a: String, b: String): Boolean {
+        val ta = artistTokens(a); val tb = artistTokens(b)
+        return ta.any { it in tb }
     }
 
     /** One artist, however written: any of their names alike, given name and family name in either order. */
@@ -270,13 +283,8 @@ object AlbumReference {
     private fun artistNearOf(a: String, b: String): Boolean {
         if (OwnFileMatcher.sameArtist(a, b) || com.music.bitchord.data.sources.ArtistLinks.linked(a, b)) return true
         val va = variants(a); val vb = variants(b)
-        for (x in va) for (y in vb) {
-            if (OwnFileMatcher.sameArtist(x, y)) return true
-            val sx = x.split(Regex("""[\s,&]+""")).map { skeleton(it) }.filter { it.isNotEmpty() }.sorted()
-            val sy = y.split(Regex("""[\s,&]+""")).map { skeleton(it) }.filter { it.isNotEmpty() }.sorted()
-            if (sx.isNotEmpty() && sx == sy) return true
-        }
-        return false
+        for (x in va) for (y in vb) if (OwnFileMatcher.sameArtist(x, y)) return true
+        return strictArtist(a, b)
     }
 
     /**
@@ -287,8 +295,7 @@ object AlbumReference {
     private fun skeleton(t: String): String = skeletonMemo.getOrPut(t) { skeletonOf(t) }
 
     private fun skeletonOf(t: String): String {
-        var x = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "").lowercase()
-        if (CJK.containsMatchIn(x)) return ""
+        var x = latin(t)
         x = x.replace(Regex("""[^a-z0-9]"""), "")
             .replace("ch", "\u0001").replace("ck", "k").replace('c', 'k').replace("\u0001", "ch")
             .replace("ph", "f").replace('l', 'r').replace('v', 'b').replace(Regex("""m(?=[bpm])"""), "n")
@@ -296,8 +303,25 @@ object AlbumReference {
         return x.replace(Regex("""(.)\1+"""), "$1")
     }
 
+    /** [t] in Latin letters: kana and kanji read (アローラ → arora), accents gone; "" when it can't be read. */
+    private fun latin(t: String): String {
+        var x = t
+        if (CJK.containsMatchIn(x)) x = com.music.bitchord.data.sources.JapaneseReading.romaji(x) ?: com.music.bitchord.data.sources.TrackMatcher.romajiOf(x)
+        x = java.text.Normalizer.normalize(x, java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "").lowercase()
+        return if (CJK.containsMatchIn(x)) "" else x
+    }
+
+    /** As heard, vowels kept: arora for both アローラ and "Alola". */
+    private fun sounds(t: String): String = latin(t).replace(Regex("""[^a-z0-9]"""), "")
+        .replace('l', 'r').replace("ck", "k").replace('c', 'k').replace('v', 'b')
+        .replace(Regex("""ou|oo"""), "o").replace(Regex("""(.)\1+"""), "$1")
+
     private fun soundsAlike(x: String, y: String): Boolean {
+        val sx = sounds(x)
+        if (sx.length >= 3 && sx == sounds(y)) return true
         val a = skeleton(x); val b = skeleton(y)
+        // A short name ("Raibaru!" / "Rival!": rbr) must sound the very same.
+        if (a.length == 3 && a == b) return true
         if (a.length < 4 || b.length < 4) return false
         if (a == b) return true
         val d = levenshtein(a, b)
