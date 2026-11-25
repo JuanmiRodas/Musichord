@@ -739,7 +739,7 @@ private fun SettingsPane(state: LibraryState) {
         var comps by remember { mutableStateOf(Builder.Layout.compilationsFirst) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(comps, { comps = it; Builder.Layout.compilationsFirst = it })
-            Text("Menos álbumes: cada canción se guarda una vez, en el recopilatorio o best-of más grande donde está (MusicBrainz); el móvil la sigue mostrando en su álbum original.", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+            Text("Una vez por canción: cada canción se guarda en su álbum original (la edición más completa); los singles guardan sus caras B y los recopilatorios solo lo que no está en ningún álbum, con su lista completa (.m3u y .txt). El móvil sigue mostrando cada canción en todos sus álbumes.", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
         }
         Button(onClick = {
             val s = Store.Settings(Paths.resolve(root.trim()), extra.lines().map { Paths.resolve(it.trim()) }.filter { it.isNotEmpty() }, Paths.resolve(phone.trim()))

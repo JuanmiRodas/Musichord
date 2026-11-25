@@ -26,6 +26,8 @@ interface Lib {
     fun moveOut(from: LibFile, outRel: String): String?
     fun delete(f: LibFile): String?
     fun put(local: File, toRel: String): String?
+    /** Deletes a file that is not a song (a playlist or note the app wrote), by its path. */
+    fun deletePath(rel: String): String?
     /** A readable copy on this Mac (to read its tags), if there is one. */
     fun local(f: LibFile): File?
     fun exists(rel: String): Boolean
@@ -47,6 +49,7 @@ class LocalLib(private val root: String) : Lib {
         Files.move(File(rootFile, from.actual).toPath(), to.toPath()); null
     }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
     override fun delete(f: LibFile): String? = runCatching { Files.delete(File(rootFile, f.actual).toPath()); null }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+    override fun deletePath(rel: String): String? = runCatching { Files.deleteIfExists(File(rootFile, rel).toPath()); null }.getOrElse { it.message }
     override fun moveOut(from: LibFile, outRel: String): String? = runCatching {
         val to = File(rootFile.parentFile, outRel); to.parentFile.mkdirs()
         Files.move(File(rootFile, from.actual).toPath(), to.toPath()); null
@@ -233,6 +236,7 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
     }.getOrElse { it.message ?: it.javaClass.simpleName }
 
     override fun delete(f: LibFile): String? = runCatching { api.call("deletefile", mapOf("fileid" to f.id.toString())); files.remove(f.rel); null }.getOrElse { it.message }
+    override fun deletePath(rel: String): String? = runCatching { api.call("deletefile", mapOf("path" to "$remoteRoot/$rel")); null }.getOrElse { it.message }
 
     override fun moveOut(from: LibFile, outRel: String): String? = runCatching {
         var parent = remoteRoot.substringBeforeLast('/').ifEmpty { "" }
@@ -247,7 +251,7 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
     override fun put(local: File, toRel: String): String? = runCatching {
         val dir = folder(toRel.substringBeforeLast('/', ""))
         val m = api.upload(dir, nfc(toRel.substringAfterLast('/')), local).getJSONArray("metadata").getJSONObject(0)
-        files[nfc(toRel)] = LibFile(nfc(toRel), toRel, m.optLong("size"), m.getLong("fileid"))
+        if (toRel.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) files[nfc(toRel)] = LibFile(nfc(toRel), toRel, m.optLong("size"), m.getLong("fileid"))
         local.delete(); null
     }.getOrElse { it.message ?: it.javaClass.simpleName }
 

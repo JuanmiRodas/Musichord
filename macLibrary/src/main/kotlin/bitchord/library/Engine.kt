@@ -418,6 +418,21 @@ object Engine {
             File(Live.dir, "no-sustituidas.txt").writeText("Copias mejores que no se usaron porque no suenan igual (${notSame.size}; % de parecido: 97–100 misma grabación, 60–80 dudosa — otra velocidad o mezcla —, menos de 60 otra versión o canción):\n" + notSame.joinToString("\n"))
             ops.log("app", "${notSame.size} better copies not used: they sound like another recording (no-sustituidas.txt)")
         }
+        // Beside each single's or compilation's own songs: its whole track list (.m3u playlist and .txt). Lists from an
+        // earlier build whose folder no longer needs one are taken away.
+        if (!Live.stop) runCatching {
+            val record = File(Live.dir, "sidecars.json")
+            val before = runCatching { org.json.JSONArray(record.readText()).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrDefault(emptyList())
+            val now = plan.sidecars.mapKeys { rel(it.key) }
+            var written = 0
+            for ((r, text) in now) {
+                val tmpS = File.createTempFile("sidecar", "." + r.substringAfterLast('.'))
+                try { tmpS.writeText(text); if (lib.put(tmpS, r) == null) written++ } finally { tmpS.delete() }
+            }
+            before.filter { it !in now }.forEach { lib.deletePath(it) }
+            record.writeText(org.json.JSONArray(now.keys.toList()).toString())
+            ops.log("app", "track lists for singles and compilations: $written written, ${before.count { it !in now }} removed")
+        }
         manifest.save(publish); covers.save(); Scanner.saveIndex()
         // What would be better at 320 (AAC under 290 kbps, MP3 under 320, false 320s, Opus): a list for the phone,
         // which can download those songs at 320 into Music/BitChord — the next build swaps them in by itself.
