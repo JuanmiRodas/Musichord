@@ -1204,7 +1204,7 @@ object Builder {
             // A single or an EP (4 songs or fewer, some of them kept on their album): in the artist's "Singles".
             val single = ownFolder && Layout.byRelease && d.p.homeKind == 1 && !d.folder.endsWith("/Directos") && !d.folder.endsWith("/Remixes") &&
                 (releaseSongs[k]?.size ?: 0) in 1..4 && !COMPILATION.containsMatchIn(album) &&
-                ((releaseSongs[k]?.size ?: 0) > (albumCount[k] ?: 0) || Regex("(?i)\\bsingle\\b|\\bep\\b|シングル").containsMatchIn(album + " " + p.best.track.path))
+                ((releaseSongs[k]?.size ?: 0) > (albumCount[k] ?: 0) || Regex("(?i)\\bsingles?\\b|\\bep\\b|シングル").containsMatchIn(album + " " + p.best.track.path))
             val albumDir = if (ownFolder) (if (single) "Singles/" else "") + clean(listOfNotNull(year, album).joinToString(" - ")) else ""
             val num = d.no?.let { n -> (id.disc?.takeIf { it > 1 }?.let { "$it-" } ?: "") + n.toString().padStart(2, '0') }
             val title = d.title ?: p.best.id.title
