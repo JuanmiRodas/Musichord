@@ -175,9 +175,13 @@ object AlbumReference {
     private fun matches(t: Track, s: Song): Boolean {
         val kt = OwnFileMatcher.allKeys(t.title) + key(t.title)
         val ks = OwnFileMatcher.allKeys(s.title) + key(s.title)
+        val a = t.seconds
+        val b = secondsOf(s)
+        // Same title, other recording: a live take against the studio cut runs a different
+        // length — not this track.
+        if (a != null && b != null && kotlin.math.abs(a - b) > 20) return false
         if (kt.any { it.isNotEmpty() && it in ks }) return true
-        val a = t.seconds ?: return false
-        val b = secondsOf(s) ?: return false
+        if (a == null || b == null) return false
         if (kotlin.math.abs(a - b) > 3) return false
         return (words(t.title) + kt).any { it in (words(s.title) + ks) }
     }
