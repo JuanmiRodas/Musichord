@@ -41,7 +41,7 @@ object AlbumReference {
     /** Lists kept before this were picked too loosely (a concert video's for its CD): asked again. */
     private const val VERSION = 3
 
-    data class Track(val disc: Int, val number: Int, val title: String, val seconds: Int?, val artist: String? = null)
+    data class Track(val disc: Int, val number: Int, val title: String, val seconds: Int?, val artist: String? = null, val videoId: String? = null)
     data class Reference(val source: String, val tracks: List<Track>, val cover: String? = null)
 
     @Volatile private var file: File? = null
@@ -267,7 +267,7 @@ object AlbumReference {
         val o = synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf { it.optInt("v") == VERSION } ?: return null
         val a = o.optJSONArray("t")?.takeIf { it.length() > 0 } ?: return null
         return Reference(o.optString("s"), (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
-            Track(it.optInt("d", 1), it.optInt("n"), it.optString("t"), it.optInt("l").takeIf { l -> l > 0 }, it.optString("a").takeIf { x -> x.isNotBlank() })
+            Track(it.optInt("d", 1), it.optInt("n"), it.optString("t"), it.optInt("l").takeIf { l -> l > 0 }, it.optString("a").takeIf { x -> x.isNotBlank() }, it.optString("y").takeIf { x -> x.isNotBlank() })
         }, o.optString("c").takeIf { it.isNotBlank() })
     }
 
@@ -281,7 +281,7 @@ object AlbumReference {
         ref?.cover?.let { o.put("c", it) }
         synchronized(cache) { cache.optJSONObject(key(album))?.takeIf { it.optInt("v") == VERSION }?.optJSONObject("p") }?.let { o.put("p", it) }
         o.put("t", JSONArray().apply {
-            ref?.tracks?.forEach { put(JSONObject().put("d", it.disc).put("n", it.number).put("t", it.title).put("l", it.seconds ?: 0).also { t -> it.artist?.let { a -> t.put("a", a) } }) }
+            ref?.tracks?.forEach { put(JSONObject().put("d", it.disc).put("n", it.number).put("t", it.title).put("l", it.seconds ?: 0).also { t -> it.artist?.let { a -> t.put("a", a) }; it.videoId?.let { v -> t.put("y", v) } }) }
         })
         synchronized(cache) { cache.put(key(album), o) }
         save()
@@ -295,7 +295,14 @@ object AlbumReference {
         }?.let {
             return@withContext cached(album)?.takeIf { r -> fits(r, songs) }
         }
-        // Every catalogue asked (at once), and the list that fits your songs best taken.
+        // YouTube Music first (fast, and each of its tracks plays as it is): taken when it fits.
+        val yt = runCatching { youTubeMusic(album, artist) }.getOrDefault(emptyList())
+        yt.mapNotNull { r -> score(r, songs)?.let { r to it } }.maxByOrNull { it.second }?.first?.let { best ->
+            TrackLog.d(TAG, "album '$album': YouTube Music's list fits (${best.tracks.size} tracks)")
+            keep(album, best)
+            return@withContext best
+        }
+        // Else every other catalogue asked (at once), and the list that fits your songs best taken.
         val all = kotlinx.coroutines.coroutineScope {
             listOf(
                 async { runCatching { itunes(album, artist) }.getOrDefault(emptyList()) },
@@ -329,6 +336,24 @@ object AlbumReference {
         if (years.findAll(a).map { it.value }.toSet() != years.findAll(b).map { it.value }.toSet()) return false
         val sa = ta.toSet(); val sb = tb.toSet()
         return (sa intersect sb).size.toDouble() / (sa union sb).size >= 0.6
+    }
+
+    /** YouTube Music's album of that name (its tracks, numbered as on the album). */
+    private suspend fun youTubeMusic(album: String, artist: String?): List<Reference> {
+        val q = listOfNotNull(album, artist).joinToString(" ")
+        val albums = YtMusicRepository.search(q, SearchFilter.ALBUMS).getOrNull().orEmpty()
+            .mapNotNull { (it as? SearchResult.Browse)?.item }
+            .filter { it.browseId.startsWith("MPREb") && sameTitle(album, it.title) }
+            .filter { a -> artist == null || OwnFileMatcher.sameArtist(artist, a.subtitle.substringAfterLast(" • ")) || a.subtitle.contains(artist, ignoreCase = true) }
+        val out = ArrayList<Reference>()
+        for (a in albums.take(2)) {
+            val page = YtMusicRepository.browseSongs(a.browseId).getOrNull() ?: continue
+            val tracks = page.songs.mapIndexed { i, s ->
+                Track(1, s.trackNumber ?: (i + 1), s.title, secondsOf(s), s.artist.takeIf { it.isNotBlank() }, s.videoId)
+            }
+            if (tracks.isNotEmpty()) out += Reference("YouTube Music", tracks, a.thumbnailUrl)
+        }
+        return out
     }
 
     /** Apple Music's catalogue (Japan's store first, then the US one). */
@@ -493,6 +518,10 @@ object AlbumReference {
         val trackKey = missing.videoId.removePrefix(MISSING).substringAfter(':')
         // A talk between songs ("MC", "トーク") is no song to find elsewhere.
         if (TALK.containsMatchIn(missing.title)) return@withContext null
+        // Listed by YouTube Music: its own track there.
+        cached(missing.albumName.orEmpty())?.tracks?.firstOrNull { "${it.disc}:${it.number}" == trackKey && it.videoId != null }?.let { t ->
+            return@withContext missing.copy(videoId = t.videoId!!)
+        }
         synchronized(cache) { cache.optJSONObject(albumKey)?.takeIf { it.optInt("v") == VERSION }?.optJSONObject("p")?.optJSONObject(trackKey) }?.let { p ->
             return@withContext missing.copy(videoId = p.optString("v"), title = p.optString("t", missing.title), artist = p.optString("a", missing.artist))
         }
