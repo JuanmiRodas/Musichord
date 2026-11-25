@@ -324,6 +324,7 @@ object AlbumReference {
                 async { runCatching { vgmdb(album) }.getOrDefault(emptyList()) },
                 async { runCatching { musicBrainz(album, artist) }.getOrDefault(emptyList()) },
                 async { runCatching { discogs(album, artist) }.getOrDefault(emptyList()) },
+                async { runCatching { spotify(album, artist) }.getOrDefault(emptyList()) },
             ).flatMap { it.await() }
         }
         (yt + all).forEach { TrackLog.d(TAG, "album '$album': " + explain(it, songs)) }
@@ -403,6 +404,70 @@ object AlbumReference {
                 Track(1, s.trackNumber ?: (i + 1), s.title, secondsOf(s), s.artist.takeIf { it.isNotBlank() }, s.videoId.takeIf { local })
             }
             if (tracks.isNotEmpty()) out += Reference("YouTube Music", tracks, a.thumbnailUrl)
+        }
+        return out
+    }
+
+    /**
+     * Spotify's album of that name: with your Spotify sign-in if you gave one, else the
+     * token open.spotify.com gives anyone. Its full list, page by page (50 at a time).
+     */
+    private suspend fun spotify(album: String, artist: String?): List<Reference> {
+        val token = com.music.bitchord.data.canvas.SpotifyToken.accessToken()
+            ?: com.music.bitchord.data.canvas.SpotifyToken.anonymousToken() ?: return emptyList()
+        val headers = buildMap {
+            put("Authorization", "Bearer $token")
+            com.music.bitchord.data.canvas.SpotifyToken.clientToken()?.let { put("Client-Token", it) }
+        }
+        fun ask(url: String): JSONObject? {
+            repeat(3) { attempt ->
+                val req = Request.Builder().url(url).header("User-Agent", UA)
+                headers.forEach { (k, v) -> req.header(k, v) }
+                val res = runCatching {
+                    http.newCall(req.build()).execute().use { r ->
+                        when {
+                            r.isSuccessful -> r.body?.string()?.let { JSONObject(it) }
+                            r.code == 429 -> { Thread.sleep(((r.header("Retry-After")?.toLongOrNull() ?: 2L) * 1000).coerceAtMost(10_000)); null }
+                            else -> { TrackLog.d(TAG, "Spotify: HTTP ${r.code} for ${url.substringBefore('?')}"); return null }
+                        }
+                    }
+                }.getOrNull()
+                if (res != null) return res
+                if (attempt == 2) return null
+            }
+            return null
+        }
+        val plain = java.text.Normalizer.normalize(album, java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "")
+            .replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim()
+        val out = ArrayList<Reference>()
+        val seen = HashSet<String>()
+        for (term in listOf(listOfNotNull(album, artist).joinToString(" "), plain).distinct()) {
+            val found = ask("https://api.spotify.com/v1/search?type=album&limit=10&q=${enc(term)}")
+                ?.optJSONObject("albums")?.optJSONArray("items") ?: continue
+            TrackLog.d(TAG, "Spotify '$term': ${found.length()} albums")
+            for (i in 0 until found.length()) {
+                val a = found.optJSONObject(i) ?: continue
+                if (!nearTitle(album, a.optString("name"))) continue
+                val id = a.optString("id").takeIf { it.isNotBlank() && seen.add(it) } ?: continue
+                val tracks = ArrayList<Track>()
+                var offset = 0
+                while (offset < 500) {
+                    val page = ask("https://api.spotify.com/v1/albums/$id/tracks?limit=50&offset=$offset") ?: break
+                    val items = page.optJSONArray("items") ?: break
+                    for (j in 0 until items.length()) {
+                        val t = items.optJSONObject(j) ?: continue
+                        val by = t.optJSONArray("artists")?.let { ar -> (0 until ar.length()).mapNotNull { ar.optJSONObject(it)?.optString("name") }.joinToString(", ") }
+                        tracks += Track(t.optInt("disc_number", 1), t.optInt("track_number"), t.optString("name"),
+                            (t.optLong("duration_ms") / 1000).toInt().takeIf { it > 0 }, by?.takeIf { it.isNotBlank() })
+                    }
+                    if (page.isNull("next") || items.length() == 0) break
+                    offset += 50
+                }
+                val art = a.optJSONArray("images")?.optJSONObject(0)?.optString("url")?.takeIf { it.startsWith("http") }
+                if (tracks.isNotEmpty()) out += Reference("Spotify", tracks, art)
+                if (out.size >= 3) return out
+            }
+            if (out.isNotEmpty()) break
         }
         return out
     }
