@@ -148,6 +148,16 @@ object OwnLibrary {
      * compilation word in it — so songs of several artists under it are one album. A short
      * common title ("Greatest Hits", "Love") stays each artist's own.
      */
+    /**
+     * An album's cover: the one you picked, else the catalogue's (Apple Music, VGMdb,
+     * MusicBrainz, Discogs — the release itself, not whatever art one of its files carries),
+     * else the first file's.
+     */
+    fun albumCover(name: String, tracks: List<Song>): String? {
+        tracks.firstOrNull()?.let { com.music.bitchord.data.covers.CoverOverrides.get(it) }?.let { return it }
+        return com.music.bitchord.data.AlbumReference.coverOf(name) ?: tracks.firstNotNullOfOrNull { it.thumbnailUrl }
+    }
+
     fun isCompilationName(name: String): Boolean {
         val key = OwnFileMatcher.key(name)
         if (key.length >= 20) return true
@@ -163,7 +173,9 @@ object OwnLibrary {
 
     fun compilationSongs(name: String): List<Song> {
         if (!isCompilationName(name)) return emptyList()
-        val pool = WebDavRepository.library() + _uploads.value
+        // Your songs of it wherever they are: pCloud, uploads, and the ones saved on the phone.
+        val saved = runCatching { com.music.bitchord.download.Downloads.savedMetadataSongs() }.getOrDefault(emptyList())
+        val pool = (WebDavRepository.library() + _uploads.value + saved).distinctBy { it.videoId }
         val k = OwnFileMatcher.key(name)
         compilationCache[k]?.takeIf { it.first == pool.size }?.let { return it.second }
         val songs = pool.filter { s -> OwnFileMatcher.sameAlbum(name, s.albumName) }
@@ -235,7 +247,7 @@ object OwnLibrary {
             // Only the very same name: "LIVE vol.#19" is not "LIVE vol.#21".
             .filter { (_, t) -> shownNames.none { OwnFileMatcher.key(it) == OwnFileMatcher.key(t.first().albumName!!) } }
             .entries.sortedByDescending { it.value.size }
-            .map { (id, t) -> ShelfItem(t.first().albumName!!, t.first().artist.split(PARTS).first(), t.firstNotNullOfOrNull { it.thumbnailUrl }, null, id) }
+            .map { (id, t) -> ShelfItem(t.first().albumName!!, t.first().artist.split(PARTS).first(), albumCover(t.first().albumName!!, t), null, id) }
     }
 
     // ── BitChord Audio: the Library tab with your music in it ─────────────────────────
@@ -263,7 +275,7 @@ object OwnLibrary {
                 val compilation = OwnFileMatcher.key(name) in compilations
                 val id = (if (compilation) OWN_ALBUM + ALL_ARTISTS + SEP + name else pageOf(name, tracks)) ?: return@mapNotNull null
                 val by = if (compilation) VARIOUS else tracks.first().artist.split(PARTS).first()
-                ShelfItem(name, "$CLOUD $by", tracks.firstNotNullOfOrNull { it.thumbnailUrl }, null, id)
+                ShelfItem(name, "$CLOUD $by", albumCover(name, tracks), null, id)
             }.sortedBy { it.subtitle.lowercase() + it.title.lowercase() }
         val artists = WebDavRepository.library().mapNotNull { s -> WebDavRepository.artistFolderOf(s.videoId) ?: s.artist.split(PARTS).firstOrNull() }
             .map { it.trim() }.filter { it.isNotEmpty() }
@@ -331,7 +343,7 @@ object OwnLibrary {
                 ShelfItem(
                     title = name,
                     subtitle = "$CLOUD " + tracks.first().artist + " · " + if (tracks.any(::isPcloud)) "pCloud" else "YouTube Music",
-                    thumbnailUrl = tracks.firstNotNullOfOrNull { it.thumbnailUrl },
+                    thumbnailUrl = albumCover(name, tracks),
                     videoId = null,
                     browseId = id,
                 )
@@ -400,7 +412,7 @@ object OwnLibrary {
                 ShelfItem(
                     title = name,
                     subtitle = "$CLOUD $source",
-                    thumbnailUrl = tracks.firstNotNullOfOrNull { it.thumbnailUrl },
+                    thumbnailUrl = albumCover(name, tracks),
                     videoId = null,
                     browseId = id,
                 )

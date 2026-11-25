@@ -39,10 +39,10 @@ object AlbumReference {
     private const val TTL_MS = 30L * 24 * 3600 * 1000
     const val MISSING = "missing:"
     /** Lists kept before this were picked too loosely (a concert video's for its CD): asked again. */
-    private const val VERSION = 2
+    private const val VERSION = 3
 
-    data class Track(val disc: Int, val number: Int, val title: String, val seconds: Int?)
-    data class Reference(val source: String, val tracks: List<Track>)
+    data class Track(val disc: Int, val number: Int, val title: String, val seconds: Int?, val artist: String? = null)
+    data class Reference(val source: String, val tracks: List<Track>, val cover: String? = null)
 
     @Volatile private var file: File? = null
     private val cache: JSONObject by lazy {
@@ -50,6 +50,7 @@ object AlbumReference {
     }
     private val http by lazy { Http.client.newBuilder().callTimeout(12, TimeUnit.SECONDS).build() }
     private val brainz = Mutex()
+    private val CJK = Regex("""[\p{IsHan}\p{IsHiragana}\p{IsKatakana}\p{IsHangul}]""")
     private val TALK = Regex("""(?i)^\s*(mc|talk|トーク|ＭＣ)\b|^\s*mc\s*[-#]?\s*\d*\s*$""")
     @Volatile private var lastBrainz = 0L
 
@@ -137,17 +138,41 @@ object AlbumReference {
      */
     suspend fun complete(album: String, songs: List<Song>, waitMs: Long = 6_000): List<Song> {
         if (songs.isEmpty() || album.isBlank()) return songs
-        val artist = songs.groupingBy { it.artist.split(',', '&', '、').first().trim() }.eachCount().maxByOrNull { it.value }?.key
+        val byArtist = songs.groupingBy { it.artist.split(',', '&', '、').first().trim() }.eachCount()
+        // A compilation (several artists) is looked up by its name alone.
+        val artist = if (byArtist.size > 1 && byArtist.values.max() * 2 < songs.size) null else byArtist.maxByOrNull { it.value }?.key
         val ref = withTimeoutOrNull(waitMs) { find(album, artist, songs) } ?: cached(album)?.takeIf { fits(it, songs) } ?: return songs
         return layOut(ref, album, artist, songs)
     }
 
     private fun layOut(ref: Reference, album: String, artist: String?, songs: List<Song>): List<Song> {
         val left = songs.toMutableList()
-        val cover = songs.firstNotNullOfOrNull { it.thumbnailUrl }
+        val cover = ref.cover ?: songs.firstNotNullOfOrNull { it.thumbnailUrl }
         val out = ArrayList<Song>()
+        // The same song kept under another album name (downloaded on the phone from YouTube
+        // Music, a single or a best-of in pCloud): shown — and played — in its place, when it is
+        // surely that recording: same artist, same length (±6 s). Never for a live album, whose
+        // takes only its own files are.
+        val live = OwnFileMatcher.isLiveRelease(album)
+        val elsewhere: List<Song> by lazy {
+            if (live) emptyList() else {
+                val saved = runCatching { com.music.bitchord.download.Downloads.savedMetadataSongs() }.getOrDefault(emptyList())
+                val ids = songs.mapTo(HashSet()) { it.videoId }
+                (saved + com.music.bitchord.data.webdav.WebDavRepository.library()).filter { it.videoId !in ids && !OwnFileMatcher.isLiveRelease(it.albumName.orEmpty()) }
+            }
+        }
+        fun sameSong(t: Track, s: Song): Boolean {
+            val a = t.seconds ?: return false
+            val b = secondsOf(s) ?: return false
+            if (kotlin.math.abs(a - b) > 6) return false
+            val by = t.artist ?: artist ?: return false
+            val sameBy = OwnFileMatcher.sameArtist(by, s.artist) || com.music.bitchord.data.sources.ArtistLinks.linked(by, s.artist)
+            return sameBy && matches(t, s)
+        }
+        val used = HashSet<String>()
         for (t in ref.tracks) {
             val mine = left.firstOrNull { matches(t, it) }
+                ?: elsewhere.firstOrNull { it.videoId !in used && sameSong(t, it) }?.also { used += it.videoId }
             if (mine != null) {
                 left.remove(mine)
                 out += mine.copy(trackNumber = t.number)
@@ -155,7 +180,7 @@ object AlbumReference {
                 out += Song(
                     videoId = MISSING + key(album) + ":" + t.disc + ":" + t.number,
                     title = t.title,
-                    artist = artist ?: "",
+                    artist = t.artist ?: artist ?: "",
                     thumbnailUrl = cover,
                     albumName = album,
                     durationText = t.seconds?.let { "%d:%02d".format(it / 60, it % 60) },
@@ -178,6 +203,11 @@ object AlbumReference {
     private fun matches(t: Track, s: Song): Boolean {
         val kt = OwnFileMatcher.allKeys(t.title) + key(t.title)
         val ks = OwnFileMatcher.allKeys(s.title) + key(s.title)
+        // A listed artist (a compilation's songs each have theirs) must be this one's.
+        // (Only within one script: a Japanese store's 松本梨香 can't be told from Rica Matsumoto here.)
+        if (!t.artist.isNullOrBlank() && CJK.containsMatchIn(t.artist) == CJK.containsMatchIn(s.artist) &&
+            !OwnFileMatcher.sameArtist(t.artist, s.artist) && !com.music.bitchord.data.sources.ArtistLinks.linked(t.artist, s.artist)
+        ) return false
         val a = t.seconds
         val b = secondsOf(s)
         // Same title, other recording: a live take against the studio cut runs a different
@@ -220,15 +250,22 @@ object AlbumReference {
         val o = synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf { it.optInt("v") == VERSION } ?: return null
         val a = o.optJSONArray("t")?.takeIf { it.length() > 0 } ?: return null
         return Reference(o.optString("s"), (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
-            Track(it.optInt("d", 1), it.optInt("n"), it.optString("t"), it.optInt("l").takeIf { l -> l > 0 })
-        })
+            Track(it.optInt("d", 1), it.optInt("n"), it.optString("t"), it.optInt("l").takeIf { l -> l > 0 }, it.optString("a").takeIf { x -> x.isNotBlank() })
+        }, o.optString("c").takeIf { it.isNotBlank() })
+    }
+
+    /** The album's real cover from the catalogue whose list was taken (null when none is kept yet). */
+    fun coverOf(album: String): String? =
+        synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf { it.optInt("v") == VERSION && (it.optJSONArray("t")?.length() ?: 0) > 0 }
+            ?.optString("c")?.takeIf { it.isNotBlank() }
     }
 
     private fun keep(album: String, ref: Reference?) {
         val o = JSONObject().put("at", System.currentTimeMillis()).put("s", ref?.source.orEmpty()).put("v", VERSION)
+        ref?.cover?.let { o.put("c", it) }
         synchronized(cache) { cache.optJSONObject(key(album))?.takeIf { it.optInt("v") == VERSION }?.optJSONObject("p") }?.let { o.put("p", it) }
         o.put("t", JSONArray().apply {
-            ref?.tracks?.forEach { put(JSONObject().put("d", it.disc).put("n", it.number).put("t", it.title).put("l", it.seconds ?: 0)) }
+            ref?.tracks?.forEach { put(JSONObject().put("d", it.disc).put("n", it.number).put("t", it.title).put("l", it.seconds ?: 0).also { t -> it.artist?.let { a -> t.put("a", a) } }) }
         })
         synchronized(cache) { cache.put(key(album), o) }
         save()
@@ -262,8 +299,21 @@ object AlbumReference {
         null
     }
 
-    private fun sameTitle(a: String, b: String) =
-        OwnFileMatcher.isLiveRelease(a) == OwnFileMatcher.isLiveRelease(b) && (key(a) == key(b) || OwnFileMatcher.sameAlbum(a, b))
+    private fun sameTitle(a: String, b: String): Boolean {
+        if (OwnFileMatcher.isLiveRelease(a) != OwnFileMatcher.isLiveRelease(b)) return false
+        if (key(a) == key(b) || OwnFileMatcher.sameAlbum(a, b)) return true
+        // A long title worded a little differently by each catalogue ("Pokémon TV Anime Theme
+        // Song BEST OF BEST OF BEST 1997-2023" / "TV Anime "Pokemon" Theme song collection BEST
+        // OF BEST OF BEST 1997-2023"): the same years, and most of the words in common.
+        fun toks(t: String) = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD)
+            .replace(Regex("""\p{M}+"""), "").lowercase().split(Regex("""[^\p{L}\p{N}]+""")).filter { it.length >= 2 }
+        val ta = toks(a); val tb = toks(b)
+        if (ta.size < 5 || tb.size < 5) return false
+        val years = Regex("""\b(19|20)\d\d\b""")
+        if (years.findAll(a).map { it.value }.toSet() != years.findAll(b).map { it.value }.toSet()) return false
+        val sa = ta.toSet(); val sb = tb.toSet()
+        return (sa intersect sb).size.toDouble() / (sa union sb).size >= 0.6
+    }
 
     /** Apple Music's catalogue (Japan's store first, then the US one). */
     private fun itunes(album: String, artist: String?): List<Reference> {
@@ -280,11 +330,12 @@ object AlbumReference {
                 val items = runCatching { JSONObject(list).optJSONArray("results") }.getOrNull() ?: continue
                 val tracks = (0 until items.length()).mapNotNull { items.optJSONObject(it) }
                     .filter { it.optString("wrapperType") == "track" }
-                    .map { Track(it.optInt("discNumber", 1), it.optInt("trackNumber"), it.optString("trackName"), (it.optLong("trackTimeMillis") / 1000).toInt().takeIf { s -> s > 0 }) }
+                    .map { Track(it.optInt("discNumber", 1), it.optInt("trackNumber"), it.optString("trackName"), (it.optLong("trackTimeMillis") / 1000).toInt().takeIf { s -> s > 0 }, it.optString("artistName").takeIf { a -> a.isNotBlank() }) }
                     .sortedWith(compareBy({ it.disc }, { it.number }))
-                if (tracks.isNotEmpty()) out += Reference("Apple Music", tracks)
+                val art = r.optString("artworkUrl100").takeIf { it.isNotBlank() }?.replace(Regex("""/\d+x\d+bb\."""), "/1200x1200bb.")
+                if (tracks.isNotEmpty()) out += Reference("Apple Music", tracks, art)
             }
-            if (out.isNotEmpty()) break
+            // Both stores asked: the best-fitting list is chosen by its track numbers.
         }
         return out
     }
@@ -301,7 +352,8 @@ object AlbumReference {
             if (names.none { sameTitle(album, it) }) continue
             val link = a.optString("link").takeIf { it.isNotBlank() } ?: continue
             val page = get("https://vgmdb.info/$link?format=json") ?: continue
-            val discs = runCatching { JSONObject(page).optJSONArray("discs") }.getOrNull() ?: continue
+            val pageJson = runCatching { JSONObject(page) }.getOrNull() ?: continue
+            val discs = pageJson.optJSONArray("discs") ?: continue
             val tracks = ArrayList<Track>()
             for (d in 0 until discs.length()) {
                 val disc = discs.optJSONObject(d) ?: continue
@@ -315,7 +367,8 @@ object AlbumReference {
                     tracks += Track(d + 1, t + 1, title, len)
                 }
             }
-            if (tracks.isNotEmpty()) out += Reference("VGMdb", tracks)
+            val art = listOf("picture_full", "picture_small").firstNotNullOfOrNull { k -> pageJson.optString(k).takeIf { it.startsWith("http") && "nocover" !in it } }
+            if (tracks.isNotEmpty()) out += Reference("VGMdb", tracks, art)
         }
         return out
     }
@@ -336,18 +389,21 @@ object AlbumReference {
         for (i in 0 until minOf(releases.length(), 3)) {
             val r = releases.optJSONObject(i) ?: continue
             if (!sameTitle(album, r.optString("title"))) continue
-            val page = ask("https://musicbrainz.org/ws/2/release/${r.optString("id")}?inc=recordings&fmt=json") ?: continue
-            val media = runCatching { JSONObject(page).optJSONArray("media") }.getOrNull() ?: continue
+            val page = ask("https://musicbrainz.org/ws/2/release/${r.optString("id")}?inc=recordings+artist-credits&fmt=json") ?: continue
+            val rel = runCatching { JSONObject(page) }.getOrNull() ?: continue
+            val media = rel.optJSONArray("media") ?: continue
             val tracks = ArrayList<Track>()
             for (m in 0 until media.length()) {
                 val disc = media.optJSONObject(m) ?: continue
                 val list = disc.optJSONArray("tracks") ?: continue
                 for (t in 0 until list.length()) {
                     val tr = list.optJSONObject(t) ?: continue
-                    tracks += Track(disc.optInt("position", m + 1), tr.optInt("position", t + 1), tr.optString("title"), (tr.optLong("length") / 1000).toInt().takeIf { it > 0 })
+                    val credit = tr.optJSONArray("artist-credit")?.let { ac -> (0 until ac.length()).joinToString("") { i -> ac.optJSONObject(i)?.let { c -> c.optString("name") + c.optString("joinphrase") }.orEmpty() } }
+                    tracks += Track(disc.optInt("position", m + 1), tr.optInt("position", t + 1), tr.optString("title"), (tr.optLong("length") / 1000).toInt().takeIf { it > 0 }, credit?.takeIf { it.isNotBlank() })
                 }
             }
-            if (tracks.isNotEmpty()) out += Reference("MusicBrainz", tracks)
+            val art = if (rel.optJSONObject("cover-art-archive")?.optBoolean("front") == true) "https://coverartarchive.org/release/${rel.optString("id")}/front-1200" else null
+            if (tracks.isNotEmpty()) out += Reference("MusicBrainz", tracks, art)
         }
         return out
     }
@@ -364,7 +420,8 @@ object AlbumReference {
             val title = r.optString("title").substringAfter(" - ")
             if (!sameTitle(album, title)) continue
             val page = get("https://api.discogs.com/releases/${r.optLong("id")}?token=${enc(token)}") ?: continue
-            val list = runCatching { JSONObject(page).optJSONArray("tracklist") }.getOrNull() ?: continue
+            val rel = runCatching { JSONObject(page) }.getOrNull() ?: continue
+            val list = rel.optJSONArray("tracklist") ?: continue
             var lastDisc = 1
             var n = 0
             val tracks = ArrayList<Track>()
@@ -378,7 +435,10 @@ object AlbumReference {
                 val len = tr.optString("duration").split(':').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 }?.let { it[0] * 60 + it[1] }
                 tracks += Track(disc, n, tr.optString("title"), len)
             }
-            if (tracks.isNotEmpty()) out += Reference("Discogs", tracks)
+            val images = rel.optJSONArray("images")
+            val art = images?.let { im -> (0 until im.length()).mapNotNull { im.optJSONObject(it) }.let { all -> all.firstOrNull { it.optString("type") == "primary" } ?: all.firstOrNull() } }
+                ?.optString("uri")?.takeIf { it.startsWith("http") }
+            if (tracks.isNotEmpty()) out += Reference("Discogs", tracks, art)
         }
         return out
     }

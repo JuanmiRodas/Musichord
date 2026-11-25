@@ -3956,6 +3956,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (subtitle.isBlank()) credit = (record?.subtitle ?: group?.subtitle)?.ifBlank { null }
                 // BitChord Audio: an album of your pCloud files: the cover you
                 // picked, else the one inside its first file.
+                // The album's real cover from the catalogues (unless you picked one): a file's
+                // art is often another release's, or a single's.
+                (com.music.bitchord.data.OwnLibrary.albumNameOf(browseId) ?: LocalGroups.albumNameOf(browseId))?.let { album ->
+                    val first = (group?.songs ?: local.data).firstOrNull { !com.music.bitchord.data.AlbumReference.isMissing(it) }
+                    if (first == null || com.music.bitchord.data.covers.CoverOverrides.get(first) == null) {
+                        com.music.bitchord.data.AlbumReference.coverOf(album)?.let { artwork = it }
+                    }
+                }
                 if (thumbnailUrl == null && artwork == null) {
                     val first = (group?.songs ?: local.data).firstOrNull()
                     if (first != null) {
