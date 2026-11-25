@@ -36,10 +36,10 @@ import java.util.concurrent.TimeUnit
 object AlbumReference {
     private const val TAG = "BitChord"
     private const val UA = "BitChordAudio/1.0 (https://github.com/JuanmiRodas/Musichord)"
-    private const val TTL_MS = 30L * 24 * 3600 * 1000
+    private const val TTL_MS = 3L * 24 * 3600 * 1000
     const val MISSING = "missing:"
     /** Lists kept before this were picked too loosely (a concert video's for its CD): asked again. */
-    private const val VERSION = 3
+    private const val VERSION = 4
 
     data class Track(val disc: Int, val number: Int, val title: String, val seconds: Int?, val artist: String? = null, val videoId: String? = null)
     data class Reference(val source: String, val tracks: List<Track>, val cover: String? = null)
@@ -229,6 +229,11 @@ object AlbumReference {
         if (a != null && b != null && kotlin.math.abs(a - b) > 20) return false
         if (kt.any { it.isNotEmpty() && it in ks }) return true
         if (a == null || b == null) return false
+        // Named in another script (a Japanese store's アローラ!! for your "Alola!!"): the same
+        // length to the second or two, by the same artist, is it.
+        if (CJK.containsMatchIn(t.title) != CJK.containsMatchIn(s.title) && kotlin.math.abs(a - b) <= 2 &&
+            !t.artist.isNullOrBlank() && (OwnFileMatcher.sameArtist(t.artist, s.artist) || com.music.bitchord.data.sources.ArtistLinks.linked(t.artist, s.artist))
+        ) return true
         if (kotlin.math.abs(a - b) > 3) return false
         return (words(t.title) + kt).any { it in (words(s.title) + ks) }
     }
@@ -238,7 +243,16 @@ object AlbumReference {
      * one) are on it, and where your files carry track numbers, they are at those numbers on
      * it — a concert video's list (talks, encores) or another edition puts them elsewhere.
      */
-    private fun score(ref: Reference, songs: List<Song>): Int? {
+    private fun score(ref: Reference, songs: List<Song>): Int? = score(ref, songs, null)
+
+    /** Why a list was or wasn't taken, for the log. */
+    private fun explain(ref: Reference, songs: List<Song>): String {
+        val why = StringBuilder()
+        score(ref, songs, why)
+        return "${ref.source} (${ref.tracks.size} tracks): $why"
+    }
+
+    private fun score(ref: Reference, songs: List<Song>, why: StringBuilder?): Int? {
         if (ref.tracks.isEmpty()) return null
         var hit = 0
         var placed = 0
@@ -253,6 +267,7 @@ object AlbumReference {
             numbered++
             if (n == t.number) placed++
         }
+        why?.append("$hit of your ${songs.size} found, $placed of $numbered numbered at their number")
         if (hit == 0 || hit * 10 < songs.size * 6) return null
         if (numbered >= 2 && placed * 10 < numbered * 7) return null
         // Most placed, then most found, then the list closest in size to what you have.
@@ -311,6 +326,7 @@ object AlbumReference {
                 async { runCatching { discogs(album, artist) }.getOrDefault(emptyList()) },
             ).flatMap { it.await() }
         }
+        (yt + all).forEach { TrackLog.d(TAG, "album '$album': " + explain(it, songs)) }
         val best = all.mapNotNull { r -> score(r, songs)?.let { r to it } }.maxByOrNull { it.second }?.first
         if (best != null) {
             TrackLog.d(TAG, "album '$album': ${all.size} lists found, ${best.source}'s fits best (${best.tracks.size} tracks)")
