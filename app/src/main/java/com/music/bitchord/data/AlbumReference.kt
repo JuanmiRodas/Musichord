@@ -234,7 +234,19 @@ object AlbumReference {
      * A name and the names it carries: "Raibaru! (ライバル!)" is both "Raibaru!" and "ライバル!",
      * "ポケットにファンタジー - Pocket ni Fantasy" both halves, "Matsumoto rika (松本梨香)" both.
      */
-    private fun variants(name: String): List<String> {
+    private val variantsMemo = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+    private val keysMemo = java.util.concurrent.ConcurrentHashMap<String, Set<String>>()
+    private val skeletonMemo = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val artistMemo = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    /** A title's match keys, all its names' (worked out once per title). */
+    private fun keysOf(title: String): Set<String> = keysMemo.getOrPut(title) {
+        variants(title).flatMap { OwnFileMatcher.allKeys(it) + key(it) }.toSet()
+    }
+
+    private fun variants(name: String): List<String> = variantsMemo.getOrPut(name) { variantsOf(name) }
+
+    private fun variantsOf(name: String): List<String> {
         val out = linkedSetOf(name.trim())
         Regex("""^(.+?)\s*[(（\[【]([^)）\]】]+)[)）\]】]\s*$""").find(name.trim())?.let { m ->
             out += m.groupValues[1].trim(); out += m.groupValues[2].trim()
@@ -251,6 +263,11 @@ object AlbumReference {
 
     /** One artist, however written: any of their names alike, given name and family name in either order. */
     private fun artistNear(a: String, b: String): Boolean {
+        if (artistMemo.size > 50_000) artistMemo.clear()
+        return artistMemo.getOrPut("$a\u0000$b") { artistNearOf(a, b) }
+    }
+
+    private fun artistNearOf(a: String, b: String): Boolean {
         if (OwnFileMatcher.sameArtist(a, b) || com.music.bitchord.data.sources.ArtistLinks.linked(a, b)) return true
         val va = variants(a); val vb = variants(b)
         for (x in va) for (y in vb) {
@@ -267,7 +284,9 @@ object AlbumReference {
      * drops — "pokemommasutaa"/"Pokémon Master", "Taipu: wairudo"/"TYPE:WILD") and doubled
      * letters gone, l/r, c/k, v/b, m/n before a lip sound made one.
      */
-    private fun skeleton(t: String): String {
+    private fun skeleton(t: String): String = skeletonMemo.getOrPut(t) { skeletonOf(t) }
+
+    private fun skeletonOf(t: String): String {
         var x = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "").lowercase()
         if (CJK.containsMatchIn(x)) return ""
         x = x.replace(Regex("""[^a-z0-9]"""), "")
@@ -304,8 +323,8 @@ object AlbumReference {
 
     /** One of yours is this listed track: the title in any script, or a shared word and the same length (±3 s). */
     private fun matches(t: Track, s: Song): Boolean {
-        val kt = variants(t.title).flatMap { OwnFileMatcher.allKeys(it) + key(it) }.toSet()
-        val ks = variants(s.title).flatMap { OwnFileMatcher.allKeys(it) + key(it) }.toSet()
+        val kt = keysOf(t.title)
+        val ks = keysOf(s.title)
         // A listed artist (a compilation's songs each have theirs) must be this one's — when the
         // two can be compared at all (a Japanese store's bare 松本梨香 can't be told from Rica
         // Matsumoto here; "Matsumoto rika (松本梨香)" can).
@@ -411,15 +430,27 @@ object AlbumReference {
             return@withContext best
         }
         // Else every other catalogue asked (at once), and the list that fits your songs best taken.
-        val all = kotlinx.coroutines.coroutineScope {
-            listOf(
-                async { runCatching { itunes(album, artist) }.getOrDefault(emptyList()) },
-                async { runCatching { vgmdb(album) }.getOrDefault(emptyList()) },
-                async { runCatching { musicBrainz(album, artist) }.getOrDefault(emptyList()) },
-                async { runCatching { discogs(album, artist) }.getOrDefault(emptyList()) },
-                async { runCatching { spotify(album, artist) }.getOrDefault(emptyList()) },
-            ).flatMap { it.await() }
+        // Each catalogue on its own, given 25 s: one that hangs (a store holding back with
+        // "try later", a slow sign-in) can't keep the others' lists from being used.
+        val all = listOf("Apple Music", "VGMdb", "MusicBrainz", "Discogs", "Spotify").map { name ->
+            name to syncScope.async {
+                runCatching {
+                    when (name) {
+                        "Apple Music" -> itunes(album, artist)
+                        "VGMdb" -> vgmdb(album)
+                        "MusicBrainz" -> musicBrainz(album, artist)
+                        "Discogs" -> discogs(album, artist)
+                        else -> spotify(album, artist)
+                    }
+                }.getOrDefault(emptyList())
+            }
         }
+            .flatMap { (name, job) ->
+                withTimeoutOrNull(25_000) { job.await() } ?: run {
+                    if (!job.isCompleted) TrackLog.d(TAG, "album '$album': $name didn't answer in 25 s")
+                    emptyList()
+                }
+            }
         (yt + all).forEach { TrackLog.d(TAG, "album '$album': " + explain(it, songs)) }
         val best = all.mapNotNull { r -> score(r, songs)?.let { r to it } }.maxByOrNull { it.second }?.first
         if (best != null) {
@@ -520,11 +551,16 @@ object AlbumReference {
                     http.newCall(req.build()).execute().use { r ->
                         when {
                             r.isSuccessful -> r.body?.string()?.let { JSONObject(it) }
-                            r.code == 429 -> { Thread.sleep(((r.header("Retry-After")?.toLongOrNull() ?: 2L) * 1000).coerceAtMost(10_000)); null }
+                            r.code == 429 -> {
+                                val wait = r.header("Retry-After")?.toLongOrNull() ?: 2L
+                                TrackLog.d(TAG, "Spotify: try again in ${wait}s")
+                                if (wait > 5) return null
+                                Thread.sleep(wait * 1000); null
+                            }
                             else -> { TrackLog.d(TAG, "Spotify: HTTP ${r.code} for ${url.substringBefore('?')}"); return null }
                         }
                     }
-                }.getOrNull()
+                }.onFailure { TrackLog.d(TAG, "Spotify: ${it.javaClass.simpleName} ${it.message}") }.getOrNull()
                 if (res != null) return res
                 if (attempt == 2) return null
             }
