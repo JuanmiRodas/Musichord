@@ -1198,6 +1198,14 @@ object Innertube {
 
     // ---- Request plumbing ---------------------------------------------------
 
+    /**
+     * BitChord Audio: asks made inside `withContext(AskedFrom("JP"))` are made as from that
+     * country — an album YouTube Music doesn't offer here still has its track list there.
+     */
+    class AskedFrom(val gl: String) : kotlin.coroutines.AbstractCoroutineContextElement(AskedFrom) {
+        companion object Key : kotlin.coroutines.CoroutineContext.Key<AskedFrom>
+    }
+
     private suspend fun postMusic(
         endpoint: String,
         query: Map<String, String> = emptyMap(),
@@ -1208,6 +1216,7 @@ object Innertube {
         bodyExtras: JsonObjectBuilder.() -> Unit,
     ): JsonObject {
         val hl = language ?: currentLanguage
+        val gl = kotlinx.coroutines.currentCoroutineContext()[AskedFrom]?.gl ?: region
         // This is the common authenticated request path: Home, Library,
         // likes, playlists, account menus and all their continuations pass
         // through it. Waiting here makes restoration process-wide rather than
@@ -1247,7 +1256,7 @@ object Innertube {
                                 put("clientName", "WEB_REMIX")
                                 put("clientVersion", clientVersion)
                                 put("hl", hl)
-                                region?.let { put("gl", it) }
+                                gl?.let { put("gl", it) }
                                 visitorData?.let { put("visitorData", it) }
                             }
                             putJsonObject("user") {
@@ -1291,6 +1300,7 @@ object Innertube {
         clientVersion: String = webRemixVersion,
         bodyExtras: JsonObjectBuilder.() -> Unit,
     ): JsonObject {
+        val gl = kotlinx.coroutines.currentCoroutineContext()[AskedFrom]?.gl ?: region
         return withRetry {
             client.post("$MUSIC_BASE/$endpoint") {
                 contentType(ContentType.Application.Json)
@@ -1311,7 +1321,7 @@ object Innertube {
                                 put("clientName", clientName)
                                 put("clientVersion", clientVersion)
                                 put("hl", currentLanguage)
-                                region?.let { put("gl", it) }
+                                gl?.let { put("gl", it) }
                                 visitorData?.let { put("visitorData", it) }
                             }
                             putJsonObject("user") {

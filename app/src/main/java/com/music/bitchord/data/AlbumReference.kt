@@ -296,7 +296,7 @@ object AlbumReference {
             return@withContext cached(album)?.takeIf { r -> fits(r, songs) }
         }
         // YouTube Music first (fast, and each of its tracks plays as it is): taken when it fits.
-        val yt = runCatching { youTubeMusic(album, artist) }.getOrDefault(emptyList())
+        val yt = runCatching { youTubeMusic(album, artist, songs) }.getOrDefault(emptyList())
         yt.mapNotNull { r -> score(r, songs)?.let { r to it } }.maxByOrNull { it.second }?.first?.let { best ->
             TrackLog.d(TAG, "album '$album': YouTube Music's list fits (${best.tracks.size} tracks)")
             keep(album, best)
@@ -338,8 +338,24 @@ object AlbumReference {
         return (sa intersect sb).size.toDouble() / (sa union sb).size >= 0.6
     }
 
-    /** YouTube Music's album of that name (its tracks, numbered as on the album). */
-    private suspend fun youTubeMusic(album: String, artist: String?): List<Reference> {
+    /**
+     * YouTube Music's album of that name (its tracks, numbered as on the album) — asked here,
+     * then as from Japan and the US: an album not offered in your country still has its full
+     * list there. Only this country's tracks are kept to play (the others wouldn't play here).
+     */
+    private suspend fun youTubeMusic(album: String, artist: String?, songs: List<Song>): List<Reference> {
+        for (region in listOf<String?>(null, "JP", "US")) {
+            val found = if (region == null) youTubeMusicIn(album, artist, local = true)
+            else withContext(com.music.bitchord.data.innertube.Innertube.AskedFrom(region)) { youTubeMusicIn(album, artist, local = false) }
+            if (found.any { score(it, songs) != null }) {
+                if (region != null) TrackLog.d(TAG, "album '$album': listed by YouTube Music as from $region")
+                return found
+            }
+        }
+        return emptyList()
+    }
+
+    private suspend fun youTubeMusicIn(album: String, artist: String?, local: Boolean): List<Reference> {
         val q = listOfNotNull(album, artist).joinToString(" ")
         val albums = YtMusicRepository.search(q, SearchFilter.ALBUMS).getOrNull().orEmpty()
             .mapNotNull { (it as? SearchResult.Browse)?.item }
@@ -349,7 +365,7 @@ object AlbumReference {
         for (a in albums.take(2)) {
             val page = YtMusicRepository.browseSongs(a.browseId).getOrNull() ?: continue
             val tracks = page.songs.mapIndexed { i, s ->
-                Track(1, s.trackNumber ?: (i + 1), s.title, secondsOf(s), s.artist.takeIf { it.isNotBlank() }, s.videoId)
+                Track(1, s.trackNumber ?: (i + 1), s.title, secondsOf(s), s.artist.takeIf { it.isNotBlank() }, s.videoId.takeIf { local })
             }
             if (tracks.isNotEmpty()) out += Reference("YouTube Music", tracks, a.thumbnailUrl)
         }
