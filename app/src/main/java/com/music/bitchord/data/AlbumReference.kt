@@ -50,6 +50,7 @@ object AlbumReference {
     }
     private val http by lazy { Http.client.newBuilder().callTimeout(12, TimeUnit.SECONDS).build() }
     private val brainz = Mutex()
+    private val running = HashMap<String, kotlinx.coroutines.Deferred<Reference?>>()
     private val CJK = Regex("""[\p{IsHan}\p{IsHiragana}\p{IsKatakana}\p{IsHangul}]""")
     private val TALK = Regex("""(?i)^\s*(mc|talk|トーク|ＭＣ)\b|^\s*mc\s*[-#]?\s*\d*\s*$""")
     @Volatile private var lastBrainz = 0L
@@ -141,7 +142,15 @@ object AlbumReference {
         val byArtist = songs.groupingBy { it.artist.split(',', '&', '、').first().trim() }.eachCount()
         // A compilation (several artists) is looked up by its name alone.
         val artist = if (byArtist.size > 1 && byArtist.values.max() * 2 < songs.size) null else byArtist.maxByOrNull { it.value }?.key
-        val ref = withTimeoutOrNull(waitMs) { find(album, artist, songs) } ?: cached(album)?.takeIf { fits(it, songs) } ?: return songs
+        // The look-up carries on past the wait (one per album at a time) and is kept: a slow
+        // catalogue fills the page the next time it opens instead of never.
+        val job = synchronized(running) {
+            running[key(album)]?.takeIf { it.isActive } ?: syncScope.async { find(album, artist, songs) }.also { j ->
+                running[key(album)] = j
+                j.invokeOnCompletion { synchronized(running) { running.remove(key(album), j) } }
+            }
+        }
+        val ref = withTimeoutOrNull(waitMs) { job.await() } ?: cached(album)?.takeIf { fits(it, songs) } ?: return songs
         return layOut(ref, album, artist, songs)
     }
 
@@ -171,7 +180,7 @@ object AlbumReference {
         }
         val used = HashSet<String>()
         for (t in ref.tracks) {
-            val mine = left.firstOrNull { matches(t, it) }
+            val mine = closest(t, left.filter { matches(t, it) })
                 ?: elsewhere.firstOrNull { it.videoId !in used && sameSong(t, it) }?.also { used += it.videoId }
             if (mine != null) {
                 left.remove(mine)
@@ -198,6 +207,11 @@ object AlbumReference {
     private fun secondsOf(s: Song) = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }?.fold(0) { a, p -> a * 60 + p }
 
     private fun words(t: String) = t.lowercase().split(Regex("""[^\p{L}\p{N}]+""")).filter { it.length >= 3 }.toSet()
+
+    /** Of several of yours matching [t] (one song recorded twice, "1・2・3" by two acts), the nearest in length. */
+    private fun closest(t: Track, candidates: List<Song>): Song? =
+        if (candidates.size <= 1 || t.seconds == null) candidates.firstOrNull()
+        else candidates.minByOrNull { s -> secondsOf(s)?.let { kotlin.math.abs(it - t.seconds) } ?: Int.MAX_VALUE }
 
     /** One of yours is this listed track: the title in any script, or a shared word and the same length (±3 s). */
     private fun matches(t: Track, s: Song): Boolean {
@@ -230,7 +244,10 @@ object AlbumReference {
         var placed = 0
         var numbered = 0
         for (s in songs) {
-            val t = ref.tracks.firstOrNull { matches(it, s) } ?: continue
+            val t = ref.tracks.filter { matches(it, s) }.let { ts ->
+                val b = secondsOf(s)
+                if (ts.size <= 1 || b == null) ts.firstOrNull() else ts.minByOrNull { it.seconds?.let { a -> kotlin.math.abs(a - b) } ?: Int.MAX_VALUE }
+            } ?: continue
             hit++
             val n = s.trackNumber ?: continue
             numbered++
@@ -317,14 +334,29 @@ object AlbumReference {
     /** Apple Music's catalogue (Japan's store first, then the US one). */
     private fun itunes(album: String, artist: String?): List<Reference> {
         val out = ArrayList<Reference>()
-        for (country in listOf("JP", "US")) {
-            val q = listOfNotNull(album, artist).joinToString(" ")
+        // The store's search wants most words to be in its title: worded another way
+        // ("Pokémon … Theme Song" / "TV Anime "Pokemon" Theme song collection"), it is asked
+        // again without accents and marks, then by the title's most telling words alone.
+        val plain = java.text.Normalizer.normalize(album, java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "")
+            .replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim()
+        val telling = plain.split(' ').filter { it.isNotBlank() }.let { w ->
+            val years = w.filter { Regex("""(19|20)\d\d""").matches(it) }
+            (w.filter { it !in years && it.length >= 4 }.distinct().sortedByDescending { it.length }.take(3) + years).joinToString(" ")
+        }
+        val queries = listOf(album, plain, telling).filter { it.isNotBlank() }.distinct()
+        val seen = HashSet<Long>()
+        for (country in listOf("JP", "US")) for (term in queries) {
+            val q = listOfNotNull(term, artist).joinToString(" ")
             val body = get("https://itunes.apple.com/search?term=${enc(q)}&entity=album&limit=10&country=$country") ?: continue
             val results = runCatching { JSONObject(body).optJSONArray("results") }.getOrNull() ?: continue
+            if (results.length() == 0) continue
+            var any = false
             for (i in 0 until results.length()) {
                 val r = results.optJSONObject(i) ?: continue
                 if (!sameTitle(album, r.optString("collectionName"))) continue
                 val id = r.optLong("collectionId").takeIf { it > 0 } ?: continue
+                any = true
+                if (!seen.add(id)) continue
                 val list = get("https://itunes.apple.com/lookup?id=$id&entity=song&country=$country") ?: continue
                 val items = runCatching { JSONObject(list).optJSONArray("results") }.getOrNull() ?: continue
                 val tracks = (0 until items.length()).mapNotNull { items.optJSONObject(it) }
@@ -334,7 +366,8 @@ object AlbumReference {
                 val art = r.optString("artworkUrl100").takeIf { it.isNotBlank() }?.replace(Regex("""/\d+x\d+bb\."""), "/1200x1200bb.")
                 if (tracks.isNotEmpty()) out += Reference("Apple Music", tracks, art)
             }
-            // Both stores asked: the best-fitting list is chosen by its track numbers.
+            // Found under this wording: no need for the looser ones in this store.
+            if (any) break
         }
         return out
     }
@@ -380,7 +413,10 @@ object AlbumReference {
             lastBrainz = System.currentTimeMillis()
             get(url)
         }
-        val q = "release:\"${album.replace("\"", "")}\"" + (artist?.let { " AND artist:\"${it.replace("\"", "")}\"" } ?: "")
+        // Its words, not the exact phrase: a catalogue's wording often differs a little.
+        val words = java.text.Normalizer.normalize(album, java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "")
+            .replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim().ifBlank { album.replace("\"", "") }
+        val q = "release:($words)" + (artist?.let { " AND artist:\"${it.replace("\"", "")}\"" } ?: "")
         val body = ask("https://musicbrainz.org/ws/2/release/?query=${enc(q)}&fmt=json&limit=5")
             ?: return emptyList()
         val releases = runCatching { JSONObject(body).optJSONArray("releases") }.getOrNull() ?: return emptyList()
