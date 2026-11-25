@@ -387,6 +387,8 @@ object OwnFileMatcher {
         val y = b?.let(::albumKey).orEmpty()
         if (x.isEmpty() || y.isEmpty()) return false
         if (x == y) return true
+        // BitChord Audio: a live release is never the studio one, however alike the names.
+        if (isLiveRelease(a!!) != isLiveRelease(b!!)) return false
         if (minOf(x.length, y.length) < 5 || !(x in y || y in x)) return false
         // BitChord Audio: one name inside another is the same album only when what is left
         // is an edition ("… (Deluxe Edition)", "… Remastered 2019", "… Disc 2") — not
@@ -413,6 +415,13 @@ object OwnFileMatcher {
         "the", "a", "an", "de", "of", "ep", "single", "reissue", "mono", "stereo", "hi", "res", "explicit", "clean",
         "digital", "japan", "japanese", "international", "import", "type", "regular", "first", "press",
     )
+
+    private val LIVE_RELEASE = Regex(
+        """(?i)\blive\b|\bconcert\b|\bunplugged\b|\ben (vivo|directo)\b|\btour\b|ライブ|ライヴ|コンサート|公演|演唱会""",
+    )
+
+    /** BitChord Audio: whether an album (or a track) name says it is a live recording. */
+    fun isLiveRelease(name: String): Boolean = LIVE_RELEASE.containsMatchIn(name)
 
     /** One letter apart, more or less: at least 85% alike as letters and digits. */
     fun nearSpelling(a: String, b: String): Boolean {

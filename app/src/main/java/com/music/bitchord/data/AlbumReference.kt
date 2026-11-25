@@ -232,7 +232,8 @@ object AlbumReference {
         null
     }
 
-    private fun sameTitle(a: String, b: String) = key(a) == key(b) || OwnFileMatcher.sameAlbum(a, b)
+    private fun sameTitle(a: String, b: String) =
+        OwnFileMatcher.isLiveRelease(a) == OwnFileMatcher.isLiveRelease(b) && (key(a) == key(b) || OwnFileMatcher.sameAlbum(a, b))
 
     /** Apple Music's catalogue (Japan's store first, then the US one). */
     private fun itunes(album: String, artist: String?): List<Reference> {

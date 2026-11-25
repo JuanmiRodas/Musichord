@@ -112,9 +112,16 @@ object OwnLibrary {
     /** Whether two album names are the same release, in either script. */
     fun sameAlbum(a: String, b: String): Boolean {
         if (OwnFileMatcher.sameAlbum(a, b)) return true
+        // BitChord Audio: beyond the strict match, only the same name read in another script
+        // (kanji / kana against its romaji) — never a live release for a studio one, nor two
+        // albums that merely share a word.
+        if (OwnFileMatcher.isLiveRelease(a) != OwnFileMatcher.isLiveRelease(b)) return false
+        val cjk = Regex("""[\p{IsHan}\p{IsHiragana}\p{IsKatakana}\p{IsHangul}]""")
+        if (cjk.containsMatchIn(a) == cjk.containsMatchIn(b)) return false
         val ka = keysOf(a).filter { it.length >= 4 }
         val kb = keysOf(b)
-        return ka.any { it in kb }
+        return ka.any { it in kb } &&
+            minOf(OwnFileMatcher.key(a).length, OwnFileMatcher.key(b).length) > 0
     }
 
     /**
