@@ -2184,4 +2184,5 @@
     <string name="lastfm_keys_footer">Needed to sign in and scrobble. Create a free API account at last.fm/api.</string>
     <string name="lastfm_keys_needed">First add the Last.fm API key and secret below.</string>
     <string name="service_keys_lastfm_keys">API key and secret</string>
+    <string name="album_disc">Disc %1$d</string>
 </resources>

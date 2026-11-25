@@ -2203,4 +2203,5 @@
     <string name="lastfm_keys_footer">Necesaria para iniciar sesión y hacer scrobbling. Crea una cuenta de API gratuita en last.fm/api.</string>
     <string name="lastfm_keys_needed">Primero añade abajo la clave y el secreto de la API de Last.fm.</string>
     <string name="service_keys_lastfm_keys">Clave y secreto de la API</string>
+    <string name="album_disc">Disco %1$d</string>
 </resources>

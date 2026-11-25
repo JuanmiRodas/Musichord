@@ -791,6 +791,8 @@ object InnertubeParser {
             isExplicit = renderer.hasExplicitBadge(),
             // Extract the "Remove from history" feedback token from the row's menu, if present.
             feedbackToken = extractFeedbackToken(renderer),
+            // BitChord Audio: an album row's own number (it starts again at 1 on each disc).
+            trackNumber = renderer.o("index").runs().trim().toIntOrNull(),
         )
     }
 

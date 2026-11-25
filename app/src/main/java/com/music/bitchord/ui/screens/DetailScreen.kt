@@ -396,6 +396,16 @@ fun DetailScreen(
         val byTag = rawSongs.useTrackTags()
         rawSongs.withIndex().associate { (i, s) -> s.videoId to ((if (byTag) s.trackNumber else null) ?: (i + 1)) }
     }
+    // BitChord Audio: an album of several discs, each disc's first track — where the
+    // numbers start again at 1. Only when there are at least two discs.
+    val discStarts = remember(rawSongs) {
+        val starts = LinkedHashMap<String, Int>()
+        var disc = 0
+        rawSongs.forEachIndexed { i, s ->
+            if (i == 0 || s.trackNumber == 1) { disc++; starts[s.videoId] = disc }
+        }
+        if (disc >= 2 && rawSongs.first().trackNumber == 1) starts else emptyMap()
+    }
     val isArtist = page.type == BrowseType.ARTIST
     // Whether the top release card's album is already saved isn't on the shelf
     // item; it is read off the album once, as soon as the card is known.
@@ -872,6 +882,17 @@ fun DetailScreen(
                     ) { position, entry ->
                         val song = entry.value
                         val isCurrent = isCurrentRow(song)
+                        // BitChord Audio: "Disc 2" above the first track of each disc.
+                        Column {
+                        if (numbered && query.isBlank()) discStarts[song.videoId]?.let { disc ->
+                            Text(
+                                text = stringResource(R.string.album_disc, disc),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.onBackground,
+                                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = if (disc == 1) 4.dp else 22.dp, bottom = 6.dp),
+                            )
+                        }
                         SongRow(
                             song = if (numbered) {
                                 song
@@ -913,6 +934,7 @@ fun DetailScreen(
                                 thickness = 0.5.dp,
                                 color = palette.divider,
                             )
+                        }
                         }
                     }
                 }
