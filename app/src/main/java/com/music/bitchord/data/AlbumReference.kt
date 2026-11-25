@@ -38,6 +38,8 @@ object AlbumReference {
     private const val UA = "BitChordAudio/1.0 (https://github.com/JuanmiRodas/Musichord)"
     private const val TTL_MS = 30L * 24 * 3600 * 1000
     const val MISSING = "missing:"
+    /** Lists kept before this were picked too loosely (a concert video's for its CD): asked again. */
+    private const val VERSION = 2
 
     data class Track(val disc: Int, val number: Int, val title: String, val seconds: Int?)
     data class Reference(val source: String, val tracks: List<Track>)
@@ -48,6 +50,7 @@ object AlbumReference {
     }
     private val http by lazy { Http.client.newBuilder().callTimeout(12, TimeUnit.SECONDS).build() }
     private val brainz = Mutex()
+    private val TALK = Regex("""(?i)^\s*(mc|talk|トーク|ＭＣ)\b|^\s*mc\s*[-#]?\s*\d*\s*$""")
     @Volatile private var lastBrainz = 0L
 
     fun init(context: Context) {
@@ -186,17 +189,35 @@ object AlbumReference {
         return (words(t.title) + kt).any { it in (words(s.title) + ks) }
     }
 
-    /** Whether [ref] is this album: most of your songs (and at least one) are on it. */
-    private fun fits(ref: Reference, songs: List<Song>): Boolean {
-        if (ref.tracks.isEmpty()) return false
-        val hit = songs.count { s -> ref.tracks.any { matches(it, s) } }
-        return hit >= 1 && hit * 10 >= songs.size * 6
+    /**
+     * How well [ref] is this album, or null when it isn't: most of your songs (and at least
+     * one) are on it, and where your files carry track numbers, they are at those numbers on
+     * it — a concert video's list (talks, encores) or another edition puts them elsewhere.
+     */
+    private fun score(ref: Reference, songs: List<Song>): Int? {
+        if (ref.tracks.isEmpty()) return null
+        var hit = 0
+        var placed = 0
+        var numbered = 0
+        for (s in songs) {
+            val t = ref.tracks.firstOrNull { matches(it, s) } ?: continue
+            hit++
+            val n = s.trackNumber ?: continue
+            numbered++
+            if (n == t.number) placed++
+        }
+        if (hit == 0 || hit * 10 < songs.size * 6) return null
+        if (numbered >= 2 && placed * 10 < numbered * 7) return null
+        // Most placed, then most found, then the list closest in size to what you have.
+        return placed * 10_000 + hit * 100 - minOf(99, kotlin.math.abs(ref.tracks.size - songs.size))
     }
+
+    private fun fits(ref: Reference, songs: List<Song>) = score(ref, songs) != null
 
     // ── The catalogues ──
 
     private fun cached(album: String): Reference? {
-        val o = synchronized(cache) { cache.optJSONObject(key(album)) } ?: return null
+        val o = synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf { it.optInt("v") == VERSION } ?: return null
         val a = o.optJSONArray("t")?.takeIf { it.length() > 0 } ?: return null
         return Reference(o.optString("s"), (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
             Track(it.optInt("d", 1), it.optInt("n"), it.optString("t"), it.optInt("l").takeIf { l -> l > 0 })
@@ -204,8 +225,8 @@ object AlbumReference {
     }
 
     private fun keep(album: String, ref: Reference?) {
-        val o = JSONObject().put("at", System.currentTimeMillis()).put("s", ref?.source.orEmpty())
-        synchronized(cache) { cache.optJSONObject(key(album))?.optJSONObject("p") }?.let { o.put("p", it) }
+        val o = JSONObject().put("at", System.currentTimeMillis()).put("s", ref?.source.orEmpty()).put("v", VERSION)
+        synchronized(cache) { cache.optJSONObject(key(album))?.takeIf { it.optInt("v") == VERSION }?.optJSONObject("p") }?.let { o.put("p", it) }
         o.put("t", JSONArray().apply {
             ref?.tracks?.forEach { put(JSONObject().put("d", it.disc).put("n", it.number).put("t", it.title).put("l", it.seconds ?: 0)) }
         })
@@ -217,19 +238,24 @@ object AlbumReference {
     suspend fun find(album: String, artist: String?, songs: List<Song>): Reference? = withContext(Dispatchers.IO) {
         // A list found is kept for good; a miss is asked again after a month.
         synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf {
-            (it.optJSONArray("t")?.length() ?: 0) > 0 || System.currentTimeMillis() - it.optLong("at") < TTL_MS
+            it.optInt("v") == VERSION && ((it.optJSONArray("t")?.length() ?: 0) > 0 || System.currentTimeMillis() - it.optLong("at") < TTL_MS)
         }?.let {
             return@withContext cached(album)?.takeIf { r -> fits(r, songs) }
         }
-        val tries = listOf<suspend () -> List<Reference>>(
-            { itunes(album, artist) },
-            { vgmdb(album) },
-            { musicBrainz(album, artist) },
-            { discogs(album, artist) },
-        )
-        for (t in tries) {
-            val found = runCatching { t() }.getOrDefault(emptyList()).firstOrNull { fits(it, songs) }
-            if (found != null) { keep(album, found); return@withContext found }
+        // Every catalogue asked (at once), and the list that fits your songs best taken.
+        val all = kotlinx.coroutines.coroutineScope {
+            listOf(
+                async { runCatching { itunes(album, artist) }.getOrDefault(emptyList()) },
+                async { runCatching { vgmdb(album) }.getOrDefault(emptyList()) },
+                async { runCatching { musicBrainz(album, artist) }.getOrDefault(emptyList()) },
+                async { runCatching { discogs(album, artist) }.getOrDefault(emptyList()) },
+            ).flatMap { it.await() }
+        }
+        val best = all.mapNotNull { r -> score(r, songs)?.let { r to it } }.maxByOrNull { it.second }?.first
+        if (best != null) {
+            TrackLog.d(TAG, "album '$album': ${all.size} lists found, ${best.source}'s fits best (${best.tracks.size} tracks)")
+            keep(album, best)
+            return@withContext best
         }
         TrackLog.d(TAG, "album '$album': no catalogue lists it")
         keep(album, null)
@@ -363,7 +389,9 @@ object AlbumReference {
     suspend fun findPlayable(missing: Song): Song? = withContext(Dispatchers.IO) {
         val albumKey = key(missing.albumName.orEmpty())
         val trackKey = missing.videoId.removePrefix(MISSING).substringAfter(':')
-        synchronized(cache) { cache.optJSONObject(albumKey)?.optJSONObject("p")?.optJSONObject(trackKey) }?.let { p ->
+        // A talk between songs ("MC", "トーク") is no song to find elsewhere.
+        if (TALK.containsMatchIn(missing.title)) return@withContext null
+        synchronized(cache) { cache.optJSONObject(albumKey)?.takeIf { it.optInt("v") == VERSION }?.optJSONObject("p")?.optJSONObject(trackKey) }?.let { p ->
             return@withContext missing.copy(videoId = p.optString("v"), title = p.optString("t", missing.title), artist = p.optString("a", missing.artist))
         }
         val q = "${missing.title} ${missing.artist}".trim()
@@ -371,14 +399,22 @@ object AlbumReference {
         val keys = OwnFileMatcher.allKeys(missing.title) + key(missing.title)
         val hits = YtMusicRepository.search(q, SearchFilter.SONGS).getOrNull().orEmpty()
             .mapNotNull { (it as? SearchResult.Track)?.song }
+        // The same artist; and for a live album, a live recording of it — a studio cut is
+        // another track, and a same-titled song by someone else is not this one.
+        val live = OwnFileMatcher.isLiveRelease(missing.albumName.orEmpty())
         hits.firstOrNull { s ->
             val k = OwnFileMatcher.allKeys(s.title) + key(s.title)
-            k.any { it.isNotEmpty() && it in keys } && (want == null || secondsOf(s)?.let { kotlin.math.abs(it - want) <= 6 } != false)
+            k.any { it.isNotEmpty() && it in keys } &&
+                OwnFileMatcher.sameArtist(missing.artist, s.artist) &&
+                (want == null || secondsOf(s)?.let { kotlin.math.abs(it - want) <= 6 } != false) &&
+                (!live || OwnFileMatcher.isLiveRelease(s.title) || OwnFileMatcher.isLiveRelease(s.albumName.orEmpty()) ||
+                    OwnFileMatcher.sameAlbum(missing.albumName, s.albumName))
         }.also { found ->
             TrackLog.d(TAG, "missing '${missing.title}': " + (found?.let { s -> "plays from YouTube Music (${s.videoId})" } ?: "nowhere found"))
             if (found != null) {
                 synchronized(cache) {
-                    val entry = cache.optJSONObject(albumKey) ?: JSONObject().also { cache.put(albumKey, it) }
+                    val entry = cache.optJSONObject(albumKey)?.takeIf { it.optInt("v") == VERSION }
+                        ?: JSONObject().put("v", VERSION).put("at", 0L).also { cache.put(albumKey, it) }
                     val p = entry.optJSONObject("p") ?: JSONObject().also { entry.put("p", it) }
                     p.put(trackKey, JSONObject().put("v", found.videoId).put("t", found.title).put("a", found.artist))
                 }
