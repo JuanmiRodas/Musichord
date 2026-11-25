@@ -55,8 +55,15 @@ object PcloudAlbums {
         val albums = results.mapNotNull { (it as? com.music.bitchord.data.model.SearchResult.Browse)?.item }
         val hit = albums.firstOrNull { OwnFileMatcher.sameAlbum(album, it.title) && it.subtitle.contains(artist, ignoreCase = true) }
             ?: albums.firstOrNull { OwnFileMatcher.sameAlbum(album, it.title) && OwnFileMatcher.sameArtist(song.artist, it.subtitle.substringAfterLast(" • ")) }
-        TrackLog.d("BitChord", "album of '${song.title}': '$album' on YouTube Music " + (hit?.let { "→ ${it.title}" } ?: "not found (${albums.size} albums)"))
-        return hit?.browseId
+        // A compilation is billed to many artists (or "Various"): its name alone, strictly.
+        val compiled = hit ?: if (com.music.bitchord.data.OwnLibrary.isCompilationName(album)) {
+            com.music.bitchord.data.YtMusicRepository.search(album, com.music.bitchord.data.model.SearchFilter.ALBUMS)
+                .getOrNull().orEmpty().mapNotNull { (it as? com.music.bitchord.data.model.SearchResult.Browse)?.item }
+                .firstOrNull { OwnFileMatcher.key(it.title) == OwnFileMatcher.key(album) }
+        } else null
+        TrackLog.d("BitChord", "album of '${song.title}': '$album' on YouTube Music " +
+            (compiled?.let { "→ ${it.title}" + if (hit == null) " (compilation, by name)" else "" } ?: "not found (${albums.size} albums)"))
+        return compiled?.browseId
     }
 
     fun open(id: String, song: Song) {

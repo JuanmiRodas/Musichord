@@ -132,6 +132,40 @@ object OwnLibrary {
     }
 
     private const val OWN_ALBUM = "own:album:"
+    private const val ALL_ARTISTS = "*"
+    private const val VARIOUS = "Varios artistas"
+
+    /**
+     * BitChord Audio: whether [name] reads as a compilation's — a long, particular title
+     * ("Pokémon TV Anime Theme Song BEST OF BEST OF BEST 1997-2023") or one with a
+     * compilation word in it — so songs of several artists under it are one album. A short
+     * common title ("Greatest Hits", "Love") stays each artist's own.
+     */
+    fun isCompilationName(name: String): Boolean {
+        val key = OwnFileMatcher.key(name)
+        if (key.length >= 20) return true
+        return COMPILATION.containsMatchIn(name) && key.length >= 12
+    }
+
+    private val COMPILATION = Regex(
+        """(?i)\b(best|theme songs?|anthology|collection|compilation|soundtrack|o\.?s\.?t|various|tribute|anniversary|songbook)\b|ベスト|主題歌|コレクション|サウンドトラック|オムニバス|トリビュート""",
+    )
+
+    /** All your songs (pCloud and uploads) of compilation [name] — when several artists share it. */
+    private val compilationCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, List<Song>>>()
+
+    fun compilationSongs(name: String): List<Song> {
+        if (!isCompilationName(name)) return emptyList()
+        val pool = WebDavRepository.library() + _uploads.value
+        val k = OwnFileMatcher.key(name)
+        compilationCache[k]?.takeIf { it.first == pool.size }?.let { return it.second }
+        val songs = pool.filter { s -> OwnFileMatcher.sameAlbum(name, s.albumName) }
+        val artists = songs.map { OwnFileMatcher.key(it.artist.split(PARTS).first()) }.distinct()
+        val out = if (artists.size >= 2) songs.sortedWith(compareBy({ it.trackNumber ?: Int.MAX_VALUE }, { it.title.lowercase() })) else emptyList()
+        if (compilationCache.size > 2_000) compilationCache.clear()
+        compilationCache[k] = pool.size to out
+        return out
+    }
     private const val SEP = "\u0001"
 
     /**
@@ -150,6 +184,8 @@ object OwnLibrary {
      * by name in any script, or null when no song of yours is on it.
      */
     fun albumPageFor(artist: String, album: String): String? {
+        // A compilation (one album, many artists) is one page, whoever sings the song.
+        if (compilationSongs(album).isNotEmpty()) return OWN_ALBUM + ALL_ARTISTS + SEP + album
         val songs = songsBy(artist).filter { s -> s.albumName?.let { sameAlbum(album, it) } == true }
         if (songs.isEmpty()) return null
         return pageOf(songs.first().albumName ?: album, songs)
@@ -161,7 +197,8 @@ object OwnLibrary {
     fun albumSongs(browseId: String): List<Song>? {
         if (!isOwnAlbum(browseId)) return null
         val (artist, name) = browseId.removePrefix(OWN_ALBUM).split(SEP, limit = 2).let { it.getOrNull(0).orEmpty() to it.getOrNull(1).orEmpty() }
-        val all = songsBy(artist).filter { s -> s.albumName?.let { sameAlbum(name, it) } == true }
+        val all = if (artist == ALL_ARTISTS) compilationSongs(name)
+        else songsBy(artist).filter { s -> s.albumName?.let { sameAlbum(name, it) } == true }
         val picked = ArrayList<Song>()
         for (s in all.sortedByDescending { runCatching { OwnFileMatcher.qualityRank(it) }.getOrDefault(0) + if (isPcloud(it)) 1 else 0 }) {
             if (picked.none { sameSong(it, s) }) picked += s
@@ -201,12 +238,21 @@ object OwnLibrary {
         val pool = (WebDavRepository.library() + _uploads.value).filter { !it.albumName.isNullOrBlank() }
         if (pool.isEmpty()) return shelves
         val shown = shelves.flatMap { it.items }.map { it.title }
-        val albums = pool.groupBy { it.albumName!!.trim() + "|" + OwnFileMatcher.key(it.artist.split(PARTS).first()) }
+        // A compilation's songs are one album, whoever sings each.
+        val compilations = pool.groupBy { OwnFileMatcher.key(it.albumName!!.trim()) }
+            .filter { (_, t) -> isCompilationName(t.first().albumName!!) && t.map { OwnFileMatcher.key(it.artist.split(PARTS).first()) }.distinct().size >= 2 }
+            .keys
+        val albums = pool.groupBy {
+            val k = OwnFileMatcher.key(it.albumName!!.trim())
+            if (k in compilations) "*|$k" else it.albumName!!.trim() + "|" + OwnFileMatcher.key(it.artist.split(PARTS).first())
+        }
             .values.mapNotNull { tracks ->
                 val name = tracks.first().albumName!!.trim()
                 if (shown.any { sameAlbum(it, name) }) return@mapNotNull null
-                val id = pageOf(name, tracks) ?: return@mapNotNull null
-                ShelfItem(name, "$CLOUD " + tracks.first().artist.split(PARTS).first(), tracks.firstNotNullOfOrNull { it.thumbnailUrl }, null, id)
+                val compilation = OwnFileMatcher.key(name) in compilations
+                val id = (if (compilation) OWN_ALBUM + ALL_ARTISTS + SEP + name else pageOf(name, tracks)) ?: return@mapNotNull null
+                val by = if (compilation) VARIOUS else tracks.first().artist.split(PARTS).first()
+                ShelfItem(name, "$CLOUD $by", tracks.firstNotNullOfOrNull { it.thumbnailUrl }, null, id)
             }.sortedBy { it.subtitle.lowercase() + it.title.lowercase() }
         val artists = WebDavRepository.library().mapNotNull { s -> WebDavRepository.artistFolderOf(s.videoId) ?: s.artist.split(PARTS).firstOrNull() }
             .map { it.trim() }.filter { it.isNotEmpty() }
