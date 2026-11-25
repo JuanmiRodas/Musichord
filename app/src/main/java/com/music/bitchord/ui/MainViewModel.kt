@@ -4074,13 +4074,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val artistName = shown.firstOrNull()?.artist ?: (credit ?: subtitle).substringBefore(" • ").substringBefore(",")
                     val albumName = (name ?: title).trim()
                     if (artistName.isNotBlank() && albumName.isNotBlank()) {
+                        // Only this very release (strict name: an edition at most — never the live
+                        // album or another that starts alike), never a live take of a studio album,
+                        // and nothing the page already has under another spelling.
+                        val liveAlbum = LIVE_WORD.containsMatchIn(albumName)
                         val own = com.music.bitchord.data.OwnLibrary.songsBy(artistName)
-                            .filter { s -> s.albumName?.let { com.music.bitchord.data.OwnLibrary.sameAlbum(albumName, it) } == true }
+                            .filter { s -> com.music.bitchord.data.sources.OwnFileMatcher.sameAlbum(albumName, s.albumName) }
+                            .filter { s -> liveAlbum || !LIVE_WORD.containsMatchIn(s.title) }
                         val missing = ArrayList<Song>()
                         for (o in own) {
-                            if (shown.none { com.music.bitchord.data.OwnLibrary.sameSong(it, o) } &&
-                                missing.none { com.music.bitchord.data.OwnLibrary.sameSong(it, o) }
-                            ) missing += o
+                            if (shown.none { sameTrack(it, o) } && missing.none { sameTrack(it, o) }) missing += o
                         }
                         if (missing.isNotEmpty()) {
                             com.music.bitchord.data.TrackLog.d("BitChord", "album '$albumName': ${missing.size} of your songs YouTube Music doesn't list here, added")
@@ -4939,6 +4942,7 @@ internal suspend fun <T : Any> retryingOrNull(waitsMs: LongArray, attempt: suspe
         attempt()?.let { return it }
     }
     return null
+
 }
 
 /**
@@ -4952,3 +4956,19 @@ internal fun lyricsLookupKey(
     order: List<LyricsSource>,
     prioritizeSyllableSync: Boolean,
 ): List<Any> = listOf(videoId, sources, order, prioritizeSyllableSync)
+
+    // BitChord Audio: for adding your own songs to an album page.
+private val LIVE_WORD = Regex("""(?i)\blive\b|ライブ|\bconcert\b|\bin concert\b""")
+
+    /** The same track: same song by its titles in any script, or a shared title word and the same length (±3 s). */
+private fun sameTrack(a: Song, b: Song): Boolean {
+        if (com.music.bitchord.data.OwnLibrary.sameSong(a, b)) return true
+        fun secs(s: Song) = s.durationText?.split(':')?.mapNotNull { it.trim().toIntOrNull() }?.fold(0) { acc, p -> acc * 60 + p }
+        val da = secs(a) ?: return false
+        val db = secs(b) ?: return false
+        if (kotlin.math.abs(da - db) > 3) return false
+        fun words(t: String) = t.lowercase().split(Regex("""[^\p{L}\p{N}]+""")).filter { it.length >= 3 }.toSet()
+        val wa = words(a.title) + com.music.bitchord.data.sources.OwnFileMatcher.allKeys(a.title)
+        val wb = words(b.title) + com.music.bitchord.data.sources.OwnFileMatcher.allKeys(b.title)
+        return wa.any { it in wb }
+    }

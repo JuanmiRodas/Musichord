@@ -73,8 +73,10 @@ object PcloudAlbums {
 
     /** YouTube Music's album page already known for [song] (no look-up). */
     fun knownYouTubeAlbum(song: Song): String? {
-        song.albumId?.takeIf { it.startsWith("MPREb") }?.let { return it }
-        val album = song.albumName?.takeIf { it.isNotBlank() } ?: return ytAlbums["song|" + song.videoId]?.takeIf { it != NONE }
+        // The album named on the song decides (a live album isn't its studio album, whatever
+        // id a matched copy carries); the id alone only for a song with no album name.
+        val album = song.albumName?.takeIf { it.isNotBlank() }
+            ?: return song.albumId?.takeIf { it.startsWith("MPREb") } ?: ytAlbums["song|" + song.videoId]?.takeIf { it != NONE }
         return ytAlbums[albumKey(song.artist, album)]?.takeIf { it != NONE }
     }
 
