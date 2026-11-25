@@ -347,24 +347,31 @@ object AlbumReference {
         val seen = HashSet<Long>()
         for (country in listOf("JP", "US")) for (term in queries) {
             val q = listOfNotNull(term, artist).joinToString(" ")
-            val body = get("https://itunes.apple.com/search?term=${enc(q)}&entity=album&limit=10&country=$country") ?: continue
+            // In English: Japan's store otherwise names it in Japanese only ("ポケモンTVアニメ主題歌
+            // BEST OF…"), which no romaji-tagged file's album name can be told to be.
+            val body = get("https://itunes.apple.com/search?term=${enc(q)}&entity=album&limit=10&country=$country&lang=en_us") ?: continue
             val results = runCatching { JSONObject(body).optJSONArray("results") }.getOrNull() ?: continue
             if (results.length() == 0) continue
             var any = false
             for (i in 0 until results.length()) {
                 val r = results.optJSONObject(i) ?: continue
-                if (!sameTitle(album, r.optString("collectionName"))) continue
+                if (!sameTitle(album, r.optString("collectionName")) && !sameTitle(album, r.optString("collectionCensoredName"))) continue
                 val id = r.optLong("collectionId").takeIf { it > 0 } ?: continue
                 any = true
                 if (!seen.add(id)) continue
-                val list = get("https://itunes.apple.com/lookup?id=$id&entity=song&country=$country") ?: continue
-                val items = runCatching { JSONObject(list).optJSONArray("results") }.getOrNull() ?: continue
-                val tracks = (0 until items.length()).mapNotNull { items.optJSONObject(it) }
-                    .filter { it.optString("wrapperType") == "track" }
-                    .map { Track(it.optInt("discNumber", 1), it.optInt("trackNumber"), it.optString("trackName"), (it.optLong("trackTimeMillis") / 1000).toInt().takeIf { s -> s > 0 }, it.optString("artistName").takeIf { a -> a.isNotBlank() }) }
-                    .sortedWith(compareBy({ it.disc }, { it.number }))
                 val art = r.optString("artworkUrl100").takeIf { it.isNotBlank() }?.replace(Regex("""/\d+x\d+bb\."""), "/1200x1200bb.")
-                if (tracks.isNotEmpty()) out += Reference("Apple Music", tracks, art)
+                // Every track (the store stops at 50 unless told more), named both ways — its own
+                // language and English — and whichever fits your files better is taken.
+                for (lang in listOf("", "&lang=en_us")) {
+                    val list = get("https://itunes.apple.com/lookup?id=$id&entity=song&limit=300&country=$country$lang") ?: continue
+                    val items = runCatching { JSONObject(list).optJSONArray("results") }.getOrNull() ?: continue
+                    val tracks = (0 until items.length()).mapNotNull { items.optJSONObject(it) }
+                        .filter { it.optString("wrapperType") == "track" }
+                        .map { Track(it.optInt("discNumber", 1), it.optInt("trackNumber"), it.optString("trackName"), (it.optLong("trackTimeMillis") / 1000).toInt().takeIf { s -> s > 0 }, it.optString("artistName").takeIf { a -> a.isNotBlank() }) }
+                        .sortedWith(compareBy({ it.disc }, { it.number }))
+                    if (tracks.isNotEmpty()) out += Reference("Apple Music", tracks, art)
+                    if (country != "JP") break
+                }
             }
             // Found under this wording: no need for the looser ones in this store.
             if (any) break
