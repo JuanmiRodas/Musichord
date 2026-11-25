@@ -2075,7 +2075,8 @@ private fun BitChordApp(
      * shut, the current track carries on — so the count is said out loud, the
      * same way a batch download is.
      */
-    val queueSongs: (List<Song>, Boolean) -> Unit = { songs, next ->
+    val queueSongs: (List<Song>, Boolean) -> Unit = { all, next ->
+        val songs = all.filterNot { com.music.bitchord.data.AlbumReference.isMissing(it) }
         if (songs.isNotEmpty()) {
             scope.launch {
                 if (refusedByHost()) return@launch

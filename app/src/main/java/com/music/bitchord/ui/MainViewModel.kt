@@ -4266,7 +4266,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         // BitChord Audio: an album of yours (pCloud and your YouTube Music uploads joined).
         com.music.bitchord.data.OwnLibrary.albumSongs(browseId)?.let { songs ->
-            return nonEmpty(songs) { text(R.string.no_tracks_here) }
+            // With the album's whole list from the catalogues when one has it: the songs
+            // you lack greyed in their places.
+            val name = com.music.bitchord.data.OwnLibrary.albumNameOf(browseId)
+            val full = if (name != null) runCatching { com.music.bitchord.data.AlbumReference.complete(name, songs) }.getOrDefault(songs) else songs
+            return nonEmpty(full) { text(R.string.no_tracks_here) }
         }
         // BitChord Audio: an artist page's "Liked songs".
         com.music.bitchord.data.LikedByArtist.parse(browseId)?.let { (artistId, name) ->
@@ -4295,7 +4299,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val library = com.music.bitchord.data.webdav.WebDavRepository.library()
                     .ifEmpty { com.music.bitchord.data.webdav.WebDavRepository.saved().orEmpty() }
                 if (library.isNotEmpty()) {
-                    return nonEmpty(LocalGroups.songsOf(browseId, library)) { text(R.string.no_tracks_here) }
+                    val songs = LocalGroups.songsOf(browseId, library)
+                    val name = LocalGroups.albumNameOf(browseId)
+                    val full = if (name != null) runCatching { com.music.bitchord.data.AlbumReference.complete(name, songs) }.getOrDefault(songs) else songs
+                    return nonEmpty(full) { text(R.string.no_tracks_here) }
                 }
             }
             return when (val folder = localPageState(folderId)) {

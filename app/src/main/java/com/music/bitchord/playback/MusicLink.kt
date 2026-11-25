@@ -105,6 +105,11 @@ object MusicLink {
      * next one, which is the shared song starting over on the first
      * configuration change.
      */
+    /** BitChord Audio: a request from inside the app (a missing album track, found to play). */
+    fun request(request: LinkRequest) {
+        _pending.value = request
+    }
+
     fun handled() {
         _pending.value = null
     }

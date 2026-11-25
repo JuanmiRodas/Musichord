@@ -94,6 +94,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -396,6 +398,8 @@ fun DetailScreen(
         val byTag = rawSongs.useTrackTags()
         rawSongs.withIndex().associate { (i, s) -> s.videoId to ((if (byTag) s.trackNumber else null) ?: (i + 1)) }
     }
+    val missingScope = rememberCoroutineScope()
+    val missingContext = androidx.compose.ui.platform.LocalContext.current
     // BitChord Audio: an album of several discs, each disc's first track — where the
     // numbers start again at 1. Only when there are at least two discs.
     val discStarts = remember(rawSongs) {
@@ -883,7 +887,7 @@ fun DetailScreen(
                         val song = entry.value
                         val isCurrent = isCurrentRow(song)
                         // BitChord Audio: "Disc 2" above the first track of each disc.
-                        Column {
+                        Column(Modifier.graphicsLayer { alpha = if (com.music.bitchord.data.AlbumReference.isMissing(song)) 0.42f else 1f }) {
                         if (numbered && query.isBlank()) discStarts[song.videoId]?.let { disc ->
                             Text(
                                 text = stringResource(R.string.album_disc, disc),
@@ -901,7 +905,19 @@ fun DetailScreen(
                             },
                             selected = picking && song.videoId in ReleaseSelection.selected,
                             onClick = {
-                                if (picking) ReleaseSelection.toggle(song) else onSongClick(queue, position)
+                                when {
+                                    picking -> ReleaseSelection.toggle(song)
+                                    // BitChord Audio: a track you lack — found somewhere to play, if it can be.
+                                    com.music.bitchord.data.AlbumReference.isMissing(song) -> missingScope.launch {
+                                        val found = com.music.bitchord.data.AlbumReference.findPlayable(song)
+                                        if (found != null) {
+                                            com.music.bitchord.playback.MusicLink.request(com.music.bitchord.playback.LinkRequest.Track(found.videoId))
+                                        } else {
+                                            android.widget.Toast.makeText(missingContext, missingContext.getString(R.string.missing_track_not_found, song.title), android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                    else -> onSongClick(queue, position)
+                                }
                             },
                             onLongPress = { if (picking) ReleaseSelection.toggle(song) else onSongLongPress(song) },
                             onSwipeToQueue = { onSongSwipe(song) },

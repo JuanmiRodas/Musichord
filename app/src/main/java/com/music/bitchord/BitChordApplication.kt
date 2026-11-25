@@ -272,6 +272,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         // one to hand — see SpotifyToken's doc for why.
         SpotifyToken.init(this)
         com.music.bitchord.data.canvas.ArtistImages.init(this)
+        com.music.bitchord.data.AlbumReference.init(this)
         com.music.bitchord.data.video.VkVideo.init(this)
         // A sideloaded update is just a new APK over the old one, so app data —
         // including whatever the old build left in the image cache — survives

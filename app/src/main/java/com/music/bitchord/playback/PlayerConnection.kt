@@ -153,6 +153,14 @@ fun MediaController.toggleShuffle() {
 }
 
 /** Starts an album/playlist through the service-owned bounded context window. */
+/** BitChord Audio: [this] without an album's greyed (missing) tracks, and where [start] lands then. */
+internal fun List<Song>.withoutMissing(start: Int): Pair<List<Song>, Int> {
+    if (none { com.music.bitchord.data.AlbumReference.isMissing(it) }) return this to start
+    val kept = filterNot { com.music.bitchord.data.AlbumReference.isMissing(it) }
+    val at = take(start.coerceIn(0, size)).count { !com.music.bitchord.data.AlbumReference.isMissing(it) }
+    return kept to at.coerceAtMost((kept.size - 1).coerceAtLeast(0))
+}
+
 suspend fun MediaController.playBoundedContext(
     songs: List<Song>,
     startIndex: Int,
@@ -160,6 +168,11 @@ suspend fun MediaController.playBoundedContext(
     continuationToken: String?,
     shuffle: Boolean = QueueShuffle.enabled.value,
 ) {
+    val (playable, from) = songs.withoutMissing(startIndex)
+    if (playable.size != songs.size) {
+        if (playable.isNotEmpty()) playBoundedContext(playable, from, source, continuationToken, shuffle)
+        return
+    }
     val token = BoundedContextRequests.put(
         BoundedContextRequests.Request(
             songs = songs,
@@ -1047,6 +1060,11 @@ fun mediaIdIn(uri: Uri): String? = if (uri.authority == "source") {
  */
 suspend fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
     if (songs.isEmpty()) return
+    val (playable, from) = songs.withoutMissing(startIndex)
+    if (playable.size != songs.size) {
+        if (playable.isNotEmpty()) playSongs(playable, from)
+        return
+    }
     sendCustomCommand(
         SessionCommand(ACTION_CLEAR_BOUNDED_CONTEXT, Bundle.EMPTY),
         Bundle.EMPTY,

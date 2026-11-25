@@ -193,6 +193,10 @@ object OwnLibrary {
 
     fun isOwnAlbum(browseId: String) = browseId.startsWith(OWN_ALBUM)
 
+    /** BitChord Audio: the album name of your album page [browseId]. */
+    fun albumNameOf(browseId: String): String? =
+        browseId.takeIf { isOwnAlbum(it) }?.removePrefix(OWN_ALBUM)?.split(SEP, limit = 2)?.getOrNull(1)
+
     /** The songs of your album page [browseId]: pCloud and uploads joined, the best copy of each. */
     fun albumSongs(browseId: String): List<Song>? {
         if (!isOwnAlbum(browseId)) return null

@@ -92,6 +92,9 @@ object LocalGroups {
 
     fun isArtist(browseId: String?): Boolean = parse(browseId)?.kind == ARTIST
 
+    /** BitChord Audio: the album name of an album grouping, or null. */
+    fun albumNameOf(browseId: String?): String? = parse(browseId)?.takeIf { it.kind == ALBUM }?.name
+
     fun isDirectory(browseId: String?): Boolean = parse(browseId)?.kind == FOLDER
 
     /** The rows of [folderSongs] the grouping [browseId] names, in the order its page lists them. */
