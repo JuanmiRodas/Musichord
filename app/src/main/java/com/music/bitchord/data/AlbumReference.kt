@@ -39,7 +39,7 @@ object AlbumReference {
     private const val TTL_MS = 3L * 24 * 3600 * 1000
     const val MISSING = "missing:"
     /** Lists kept before this were picked too loosely (a concert video's for its CD): asked again. */
-    private const val VERSION = 4
+    private const val VERSION = 5
 
     data class Track(val disc: Int, val number: Int, val title: String, val seconds: Int?, val artist: String? = null, val videoId: String? = null)
     data class Reference(val source: String, val tracks: List<Track>, val cover: String? = null)
@@ -338,6 +338,25 @@ object AlbumReference {
         null
     }
 
+    /**
+     * Worth reading its list: the same title, or one in another script or wording that shares
+     * its years, or several words ("ポケモンTVアニメ主題歌 BEST OF BEST OF BEST 1997-2023" for
+     * "Pokémon TV Anime Theme Song BEST OF…"). The list itself then decides: it is taken only
+     * if your songs are on it, at their numbers.
+     */
+    private fun nearTitle(a: String, b: String): Boolean {
+        if (sameTitle(a, b)) return true
+        if (OwnFileMatcher.isLiveRelease(a) != OwnFileMatcher.isLiveRelease(b)) return false
+        val years = Regex("""\b(19|20)\d\d\b""")
+        val ya = years.findAll(a).map { it.value }.toSet()
+        val yb = years.findAll(b).map { it.value }.toSet()
+        if (ya != yb) return false
+        fun toks(t: String) = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD)
+            .replace(Regex("""\p{M}+"""), "").lowercase().split(Regex("""[^\p{L}\p{N}]+""")).filter { it.length >= 3 && !years.matches(it) }.toSet()
+        val shared = (toks(a) intersect toks(b)).size
+        return if (ya.isNotEmpty()) shared >= 1 else shared >= 3
+    }
+
     private fun sameTitle(a: String, b: String): Boolean {
         if (OwnFileMatcher.isLiveRelease(a) != OwnFileMatcher.isLiveRelease(b)) return false
         if (key(a) == key(b) || OwnFileMatcher.sameAlbum(a, b)) return true
@@ -375,7 +394,7 @@ object AlbumReference {
         val q = listOfNotNull(album, artist).joinToString(" ")
         val albums = YtMusicRepository.search(q, SearchFilter.ALBUMS).getOrNull().orEmpty()
             .mapNotNull { (it as? SearchResult.Browse)?.item }
-            .filter { it.browseId.startsWith("MPREb") && sameTitle(album, it.title) }
+            .filter { it.browseId.startsWith("MPREb") && nearTitle(album, it.title) }
             .filter { a -> artist == null || OwnFileMatcher.sameArtist(artist, a.subtitle.substringAfterLast(" • ")) || a.subtitle.contains(artist, ignoreCase = true) }
         val out = ArrayList<Reference>()
         for (a in albums.take(2)) {
@@ -400,7 +419,10 @@ object AlbumReference {
             val years = w.filter { Regex("""(19|20)\d\d""").matches(it) }
             (w.filter { it !in years && it.length >= 4 }.distinct().sortedByDescending { it.length }.take(3) + years).joinToString(" ")
         }
-        val queries = listOf(album, plain, telling).filter { it.isNotBlank() }.distinct()
+        // …and by its second half alone: a Japanese title's English part ("BEST OF BEST OF BEST
+        // 1997 2023") is often all a store's own-language name shares with yours.
+        val tail = plain.split(' ').filter { it.isNotBlank() }.let { w -> if (w.size >= 4) w.drop(w.size / 2).joinToString(" ") else "" }
+        val queries = listOf(album, plain, telling, tail).filter { it.isNotBlank() }.distinct()
         val seen = HashSet<Long>()
         for (country in listOf("JP", "US")) for (term in queries) {
             val q = listOfNotNull(term, artist).joinToString(" ")
@@ -408,11 +430,12 @@ object AlbumReference {
             // BEST OF…"), which no romaji-tagged file's album name can be told to be.
             val body = get("https://itunes.apple.com/search?term=${enc(q)}&entity=album&limit=10&country=$country&lang=en_us") ?: continue
             val results = runCatching { JSONObject(body).optJSONArray("results") }.getOrNull() ?: continue
+            TrackLog.d(TAG, "Apple Music $country '$term': ${results.length()} albums")
             if (results.length() == 0) continue
             var any = false
             for (i in 0 until results.length()) {
                 val r = results.optJSONObject(i) ?: continue
-                if (!sameTitle(album, r.optString("collectionName")) && !sameTitle(album, r.optString("collectionCensoredName"))) continue
+                if (!nearTitle(album, r.optString("collectionName")) && !nearTitle(album, r.optString("collectionCensoredName"))) continue
                 val id = r.optLong("collectionId").takeIf { it > 0 } ?: continue
                 any = true
                 if (!seen.add(id)) continue
@@ -445,7 +468,7 @@ object AlbumReference {
             val a = albums.optJSONObject(i) ?: continue
             val titles = a.optJSONObject("titles")
             val names = listOfNotNull(titles?.optString("en"), titles?.optString("ja"), titles?.optString("ja-latn")).filter { it.isNotBlank() }
-            if (names.none { sameTitle(album, it) }) continue
+            if (names.none { nearTitle(album, it) }) continue
             val link = a.optString("link").takeIf { it.isNotBlank() } ?: continue
             val page = get("https://vgmdb.info/$link?format=json") ?: continue
             val pageJson = runCatching { JSONObject(page) }.getOrNull() ?: continue
@@ -487,7 +510,7 @@ object AlbumReference {
         val out = ArrayList<Reference>()
         for (i in 0 until minOf(releases.length(), 3)) {
             val r = releases.optJSONObject(i) ?: continue
-            if (!sameTitle(album, r.optString("title"))) continue
+            if (!nearTitle(album, r.optString("title"))) continue
             val page = ask("https://musicbrainz.org/ws/2/release/${r.optString("id")}?inc=recordings+artist-credits&fmt=json") ?: continue
             val rel = runCatching { JSONObject(page) }.getOrNull() ?: continue
             val media = rel.optJSONArray("media") ?: continue
@@ -517,7 +540,7 @@ object AlbumReference {
         for (i in 0 until minOf(results.length(), 3)) {
             val r = results.optJSONObject(i) ?: continue
             val title = r.optString("title").substringAfter(" - ")
-            if (!sameTitle(album, title)) continue
+            if (!nearTitle(album, title)) continue
             val page = get("https://api.discogs.com/releases/${r.optLong("id")}?token=${enc(token)}") ?: continue
             val rel = runCatching { JSONObject(page) }.getOrNull() ?: continue
             val list = rel.optJSONArray("tracklist") ?: continue
