@@ -201,6 +201,10 @@ object Builder {
                 // A Japanese name is in Japanese (not "L'Arc乣en乣Ciel", a Latin name misread).
                 val east = all.filter { CJK.containsMatchIn(it.key) && it.key.count { c -> c in 'A'..'Z' || c in 'a'..'z' } < 3 }.maxByOrNull { it.value }?.key
                 val roma = if (lat == null && east != null) Romaji.of(east) else null
+                // As YouTube Music writes it: in Latin letters as it is ("ANRI"); in Japanese, its romaji first.
+                if (east != null && Words.plain(lat.orEmpty()) !in LATIN_ONLY) YtMusicNames.of(lat, east)?.let { y ->
+                    return@getOrPut if (!CJK.containsMatchIn(y)) y else "${lat ?: roma ?: y} ($y)".takeIf { lat != null || roma != null } ?: y
+                }
                 when { lat != null && east != null && Words.plain(lat) !in LATIN_ONLY -> "$lat ($east)"; lat != null -> lat; roma != null -> "$roma ($east)"; else -> east ?: Words.nfc(name).trim() }
             }
         }
@@ -1143,16 +1147,16 @@ object Builder {
         twinTracks.forEach { d -> d.p.copies.forEach { skipped += it.track to "repetida (la misma pista del mismo álbum con otro nombre)" } }
         val placedDrafts = merged.filter { it !in twinTracks }
         // Editions of one album ("Emotion", "Emotion (10th Anniversary Edition)"): the year it first came out, for the edition kept.
-        fun familyOf(a: String) = Words.plain(a.replace(Regex("\\s*[(\\[（【].*$"), "")
+        fun editionOf(a: String) = Words.plain(a.replace(Regex("\\s*[(\\[（【].*$"), "")
             .replace(Regex("(?i)\\s+-\\s*\\d*(st|nd|rd|th)?\\s*(deluxe|expanded|anniversary|special|complete|super).*$"), ""))
         val familyYear by lazy {
             val m = HashMap<Pair<String, String>, String>()
             for (d in placedDrafts) {
                 if (d.album.isEmpty()) continue
-                val fam = familyOf(d.album)
+                val fam = editionOf(d.album)
                 for (c in d.p.copies) {
                     val y = c.id.year?.takeIf { Regex("^(19|20)\\d{2}$").matches(it) } ?: continue
-                    if (familyOf(c.id.album) != fam) continue
+                    if (editionOf(c.id.album) != fam) continue
                     val key = d.folder.lowercase() to fam
                     if (m[key] == null || y < m[key]!!) m[key] = y
                 }
@@ -1189,7 +1193,7 @@ object Builder {
             val id = p.chosen.id
             val k = d.folder.lowercase() to albumKey(d.album)
             val album = if (d.album.isEmpty()) "" else albumShown[k] ?: d.album
-            val year = if (album.isEmpty() || d.flat) (p.best.id.year ?: id.year) else listOfNotNull(familyYear[d.folder.lowercase() to familyOf(album)], albumYear[k]).filter { Regex("^\\d{4}$").matches(it) }.minOrNull() ?: albumYear[k]
+            val year = if (album.isEmpty() || d.flat) (p.best.id.year ?: id.year) else listOfNotNull(familyYear[d.folder.lowercase() to editionOf(album)], albumYear[k]).filter { Regex("^\\d{4}$").matches(it) }.minOrNull() ?: albumYear[k]
             // A collection's name with an edition is no singer ("Operación triunfo 1a ed").
             fun noSinger(a: String) = d.series != null && (Words.plain(a) == Words.plain(d.series) ||
                 Words.plain(a).startsWith(Words.plain(d.series)) && Regex("(?iu)\\b\\d+\\s*(a|er|ª|º|st|nd|rd|th)?\\s*(ed|edici[oó]n|disco|edition)\\b").containsMatchIn(a))
@@ -1361,6 +1365,10 @@ object Builder {
         Live.phase = "buscando nombres en romaji y openings/endings de las series"; Live.write()
         val r = runCatching { Romaji.fill(japaneseOnly) }.getOrDefault(0)
         val t = runCatching { Themes.fill(series) }.getOrDefault(0)
+        // Japanese artists' names as YouTube Music writes them.
+        val yt = runCatching {
+            YtMusicNames.fill(plan.copy.flatMap { listOf(it.albumArtist, it.artist) }.filter { it.isNotBlank() }.distinct().mapNotNull { YtMusicNames.split(it) })
+        }.getOrDefault(0)
         val a = runCatching { AlbumNames.fill(plan.japaneseAlbums) }.getOrDefault(0) + runCatching { AlbumYears.fill(plan.yearless) }.getOrDefault(0)
         val c = if (!Layout.compilationsFirst) 0 else runCatching {
             // Artists with three albums or more, biggest first; and the best-ofs already here (Pokémon's "BEST OF BEST OF BEST").
@@ -1393,7 +1401,7 @@ object Builder {
                 .groupBy { (i, _) -> i.albumArtist.ifBlank { i.artist } }.filter { it.value.map { p -> p.first.album }.distinct().size >= 3 }.keys)
         }.getOrDefault(0)
         runCatching { Fanart.fill(rel2.filter { (i, r) -> !r.startsWith("Otros artistas/") && i.grouping == null }.groupBy { it.first.albumArtist.ifBlank { it.first.artist } }.filter { it.value.size >= 5 }.keys) }
-        val found = if (Live.stop) 0 else r + t + a + c + sp + ac + lf + dg
+        val found = if (Live.stop) 0 else r + t + a + c + sp + ac + lf + dg + yt
         if (found > 0) plan = plan(sources, tracks, targetRoot)
         return plan
     }

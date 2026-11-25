@@ -272,3 +272,78 @@ object Fingerprint {
     /** At or above: the same recording (measured: same recording 0.97+, live/acoustic version ≈ 0.58, another song ≈ 0.50). */
     const val SAME = 0.80
 }
+
+/**
+ * Artists' names as YouTube Music writes them (its search, as the phone's player sees them), for the Japanese ones: a name it
+ * writes in Latin letters ("ANRI", "L'Arc~en~Ciel") is kept as it is; one it writes in Japanese gets the romaji in front
+ * ("Ayumi Hamasaki (浜崎あゆみ)"). Kept in `<app data>/ytmusic-artists.json`; "" means looked up and not found.
+ */
+object YtMusicNames {
+    private val file get() = File(Store.dir, "ytmusic-artists.json")
+    private val cache: MutableMap<String, String> by lazy {
+        runCatching { JSONObject(file.readText()).let { o -> o.keySet().associateWith { o.getString(it) }.toMutableMap() } }.getOrDefault(HashMap())
+    }
+    private val CJK = Regex("[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}]")
+    // The Japanese name says who it is; only without one, the Latin name.
+    private fun key(lat: String?, east: String?) = east?.let { Words.nfc(it).trim() } ?: ("|" + Words.plain(lat.orEmpty()))
+
+    /** YouTube Music's name for this artist, if looked up and found. */
+    @Synchronized fun of(lat: String?, east: String?): String? = cache[key(lat, east)]?.ifBlank { null }
+
+    /** "Anri (杏里)" → ("Anri", "杏里"); "宇多田ヒカル" → (null, "宇多田ヒカル"). */
+    fun split(name: String): Pair<String?, String?>? {
+        val n = Words.nfc(name).trim()
+        Regex("^(.+?)\\s*\\((.+)\\)$").find(n)?.let { m -> if (CJK.containsMatchIn(m.groupValues[2]) && !CJK.containsMatchIn(m.groupValues[1])) return m.groupValues[1].trim() to m.groupValues[2].trim() }
+        return if (CJK.containsMatchIn(n) && n.count { it in 'A'..'Z' || it in 'a'..'z' } < 3) null to n else null
+    }
+
+    private fun search(q: String): List<String> {
+        val body = JSONObject().put("context", JSONObject().put("client", JSONObject().put("clientName", "WEB_REMIX").put("clientVersion", "1.20260707.12.00").put("hl", "en").put("gl", "JP")))
+            .put("query", q).put("params", "EgWKAQIgAWoKEAkQChAFEAMQBA==") // artists only
+        val c = URL("https://music.youtube.com/youtubei/v1/search?prettyPrint=false").openConnection() as HttpURLConnection
+        c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15000; c.readTimeout = 20000
+        c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Origin", "https://music.youtube.com")
+        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+        c.outputStream.use { it.write(body.toString().toByteArray()) }
+        val o = JSONObject(c.inputStream.bufferedReader().readText())
+        val out = ArrayList<String>()
+        fun walk(x: Any?) {
+            when (x) {
+                is JSONObject -> {
+                    x.optJSONObject("musicResponsiveListItemRenderer")?.let { r ->
+                        r.optJSONArray("flexColumns")?.optJSONObject(0)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                            ?.optJSONObject("text")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")?.takeIf { it.isNotBlank() }?.let { out += it }
+                        return
+                    }
+                    for (k in x.keySet()) walk(x.get(k))
+                }
+                is JSONArray -> for (i in 0 until x.length()) walk(x.get(i))
+            }
+        }
+        walk(o)
+        return out
+    }
+
+    /** Looks up the names not yet asked about; returns how many were found. */
+    fun fill(names: Collection<Pair<String?, String?>>, minutes: Int = 6): Int {
+        val todo = names.filter { (l, e) -> (l != null || e != null) && synchronized(this) { !cache.containsKey(key(l, e)) } }.distinctBy { key(it.first, it.second) }
+        if (todo.isEmpty()) return 0
+        val until = System.currentTimeMillis() + minutes * 60_000L
+        var found = 0
+        Live.total = todo.size; Live.done.set(0)
+        for ((lat, east) in todo) {
+            if (Live.stop || System.currentTimeMillis() > until) break
+            Live.current = "YouTube Music: " + (east ?: lat); Live.done.incrementAndGet(); Live.write()
+            val romaji = east?.let { Romaji.of(it) }
+            fun fits(r: String) = Words.nfc(r).trim() == east || (lat != null && Words.plain(r) == Words.plain(lat)) ||
+                (romaji != null && Words.plain(r) == Words.plain(romaji)) || (east != null && Words.nfc(r).contains(east))
+            val hit = runCatching { (east?.let { search(it) }.orEmpty().take(3).firstOrNull(::fits) ?: lat?.let { search(it) }.orEmpty().take(3).firstOrNull(::fits)) }
+                .onFailure { if (it is java.io.IOException) Thread.sleep(2000) }.getOrNull()
+            synchronized(this) { cache[key(lat, east)] = hit.orEmpty() }
+            if (hit != null) found++
+            Thread.sleep(300)
+        }
+        synchronized(this) { runCatching { file.writeText(JSONObject(cache as Map<*, *>).toString(1)) } }
+        return found
+    }
+}
