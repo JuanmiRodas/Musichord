@@ -73,7 +73,10 @@ object CastController {
     }
 
     private val sessionListener = object : SessionManagerListener<CastSession> {
-        override fun onSessionStarting(session: CastSession) = update { it.copy(connecting = true) }
+        override fun onSessionStarting(session: CastSession) {
+            com.music.bitchord.data.TrackLog.d(TAG, "cast: connecting to ${session.castDevice?.friendlyName}")
+            update { it.copy(connecting = true) }
+        }
 
         override fun onSessionStarted(session: CastSession, sessionId: String) =
             began(session, asked = false)
@@ -394,6 +397,24 @@ object CastController {
                 com.music.bitchord.data.TrackLog.d(TAG, "cast: one tap to ${route.name}")
                 update { it.copy(connecting = true) }
                 router.selectRoute(route)
+                // The speaker was asked; if no session has come of it in 20 s
+                // (it once hung for good, silently), it is said so, here and
+                // in the log, and the button stops showing "connecting".
+                val asked = route.name.toString()
+                main.postDelayed({
+                    val s = castContext?.sessionManager?.currentCastSession
+                    if (s?.isConnected == true) return@postDelayed
+                    com.music.bitchord.data.TrackLog.w(
+                        TAG,
+                        "cast: one tap to $asked: no session after 20 s (" +
+                            (if (s == null) "none started" else "still connecting") +
+                            "; route selected: ${router.selectedRoute.name})",
+                    )
+                    update { it.copy(connecting = false) }
+                    appContext?.let { c ->
+                        android.widget.Toast.makeText(c, c.getString(com.music.bitchord.R.string.cast_recent_no_answer, asked), android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }, 20_000)
                 return true
             }
             if (tryCast()) return@post

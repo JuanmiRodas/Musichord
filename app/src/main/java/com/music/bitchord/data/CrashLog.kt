@@ -41,6 +41,7 @@ import java.util.Locale
  */
 object CrashLog {
 
+    private const val TAG = "CrashLog"
     private const val PREFS = "bitchord_crash_log"
     private const val KEEP = 20
 
@@ -134,14 +135,32 @@ object CrashLog {
         val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 10)
             .filter { it.timestamp > last }
         val previousLog = File(d, "session-previous.log").takeIf { it.isFile }?.readText().orEmpty()
-        val worth = setOf(
-            ApplicationExitInfo.REASON_CRASH,
-            ApplicationExitInfo.REASON_CRASH_NATIVE,
-            ApplicationExitInfo.REASON_ANR,
-            ApplicationExitInfo.REASON_LOW_MEMORY,
-            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
-            ApplicationExitInfo.REASON_INITIALIZATION_FAILURE,
-        )
+        // Every way the last runs ended goes into this run's log, so a cut-off
+        // log says who ended it (the system's battery manager, a swipe from
+        // recents, a freeze) — not only the crashes.
+        for (e in exits.sortedBy { it.timestamp }) {
+            if (e.reason == ApplicationExitInfo.REASON_EXIT_SELF) continue
+            TrackLog.w(
+                TAG,
+                "previous run ended ${Date(e.timestamp)}: ${reasonName(e.reason)}" +
+                    " · importance ${e.importance} · memory ${e.pss / 1024} MB" +
+                    (e.description?.let { " · Android says: $it" } ?: ""),
+            )
+        }
+        // A report of its own for those that weren't asked for: crashes, and
+        // the system ending it (which cut a cast to the speakers mid-song).
+        val worth = buildSet {
+            add(ApplicationExitInfo.REASON_CRASH)
+            add(ApplicationExitInfo.REASON_CRASH_NATIVE)
+            add(ApplicationExitInfo.REASON_ANR)
+            add(ApplicationExitInfo.REASON_LOW_MEMORY)
+            add(ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE)
+            add(ApplicationExitInfo.REASON_INITIALIZATION_FAILURE)
+            add(ApplicationExitInfo.REASON_SIGNALED)
+            add(ApplicationExitInfo.REASON_OTHER)
+            add(ApplicationExitInfo.REASON_DEPENDENCY_DIED)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(ApplicationExitInfo.REASON_FREEZER)
+        }
         for (e in exits.filter { it.reason in worth }) {
             val trace = runCatching { e.traceInputStream?.bufferedReader()?.use { it.readText() } }.getOrNull()
             val text = buildString {
@@ -167,6 +186,14 @@ object CrashLog {
         ApplicationExitInfo.REASON_LOW_MEMORY -> "low-memory"
         ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "excessive-resources"
         ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "start-failure"
+        ApplicationExitInfo.REASON_SIGNALED -> "killed-by-signal"
+        ApplicationExitInfo.REASON_OTHER -> "killed-by-system"
+        ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "dependency-died"
+        ApplicationExitInfo.REASON_USER_REQUESTED -> "user-requested"
+        ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "permission-change"
+        ApplicationExitInfo.REASON_PACKAGE_UPDATED -> "app-updated"
+        ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE -> "package-state-change"
+        ApplicationExitInfo.REASON_FREEZER -> "frozen"
         else -> "reason-$r"
     }
 

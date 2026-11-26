@@ -1611,6 +1611,7 @@
     <string name="cast_recent_to">Enviar a %1$s</string>
     <string name="cast_recent_stop">Volver a este teléfono</string>
     <string name="cast_recent_not_found">%1$s no está disponible ahora</string>
+    <string name="cast_recent_no_answer">%1$s no ha respondido. Vuelve a intentarlo</string>
     <string name="log_upload_title">Enviar el registro a GitHub</string>
     <string name="log_upload_off">Desactivado · el registro se sigue guardando aquí y en pCloud</string>
     <string name="log_upload_help">Cada dos minutos el registro de la app (y cualquier informe de cierre) se escribe en un repositorio privado tuyo, para poder revisar los problemas sin enviar archivos. Usa un token de acceso detallado solo para ese repositorio, con permiso Contents: lectura y escritura.</string>
