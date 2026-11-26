@@ -19,7 +19,8 @@ Biblioteca/.bitchord-library/catalog/
 ├── artists-index.json        # Índice ligero de los ~196 artistas con carpeta propia + proyectos relacionados
 ├── artists/<slug>.json       # Página fusionada de cada artista (YTM + Biblioteca, álbumes híbridos, completitud, aportes a anime)
 ├── anime-index.json          # Índice ligero de las 59 series/franquicias de anime y videojuegos en tu biblioteca
-└── anime/<slug>.json         # Página completa por serie (Openings, Endings, Películas, Otras, Álbumes, OST, Personajes/Seiyuu, ES/EN/CA)
+├── anime/<slug>.json         # Página completa por serie (hero + Openings, Endings, Películas, Otras, Álbumes, OST, Personajes, ES/EN/CA)
+└── assets/anime/<slug>/      # Base de datos local en pCloud: logo.svg (o logo.png transparente), background.jpg (Stremio Metahub HD) y poster.jpg
 ```
 
 ---
@@ -89,6 +90,39 @@ Cada una de las 59 series en tu biblioteca tiene su propia página virtual con e
 - **`soundtracks`**: bandas sonoras enlazadas a la página de sus compositores (`composers[].artistSlug`).
 - **`characterSongs`**: canciones de personajes con campos separados `character` y `seiyuu` (CV).
 - **`localizedVersions`**: canciones en **español (`es`)**, **catalán (`ca`)** e **inglés (`en`)**, enlazadas mediante `originalWorkId` a su tema original japonés en `works-versions.json`.
+
+### Cabecera visual `hero` (misma estructura que `AppleArtistArt` en páginas de artista)
+
+Cada `anime/<slug>.json` incluye un bloque `hero` compatible 1:1 con `AppleArtistArt` (`heroUrl`, `logoUrl`, `logoAspect`, `colors`, vídeo en bucle) más rutas locales en pCloud dentro de `assets/anime/<slug>/`:
+
+```json
+"hero": {
+  "imdbId": "tt0290223",
+  "backgroundFile": "assets/anime/inuyasha/background.jpg",
+  "backgroundSource": "Stremio Metahub (tt0290223)",
+  "heroUrl": "https://images.metahub.space/background/large/tt0290223/img",
+  "posterFile": "assets/anime/inuyasha/poster.jpg",
+  "logoFile": "assets/anime/inuyasha/logo.svg",
+  "logoFormat": "svg",
+  "logoAspect": 2.41,
+  "colors": { "hex": "#e44335", "background": -16777216, "accent": -1817803, "keyColor": -1817803 },
+  "videoRotation": { "mode": "random_no_repeat", "mute": true, "loop": true, "minResolution": "720p", "preferCreditless": true },
+  "videos": [
+    {
+      "videoId": "WZEUE9h4-gI",
+      "title": "Inuyasha - Opening 1 [Full HD | Creditless | 1080p 60fps]",
+      "durationSec": 90,
+      "resolutionHint": "1080p",
+      "isCreditless": true,
+      "openingNo": 1,
+      "startWindowSec": [19, 58]
+    }
+  ]
+}
+```
+
+- **Base de datos en pCloud (`assets/anime/<slug>/`)**: prioriza **SVG vectorial** (`logo.svg`) y cae a **PNG transparente oficial de Stremio Metahub** (`logo.png`); el fondo principal (`background.jpg`) proviene de **Stremio Metahub** (mismo CDN que Stremio: `images.metahub.space`) con respaldo de AniList HD.
+- **Rotación de vídeo de portada**: cada vez que el usuario abre la página de una serie, BitChord elige al azar un vídeo distinto del pool `hero.videos[]` (filtrados a `≥ 720p`, `creditless`, sin subtítulos ni karaoke, duración 55–135 s) y arranca en un segundo aleatorio dentro de `startWindowSec: [minSec, maxSec]` (parte central limpia del opening, evitando créditos/títulos iniciales) silenciado y en bucle, con `backgroundFile` como fondo instantáneo mientras carga y `logoFile` superpuesto arriba.
 
 ---
 
