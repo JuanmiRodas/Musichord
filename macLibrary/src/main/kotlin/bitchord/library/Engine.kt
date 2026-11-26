@@ -583,6 +583,15 @@ object Engine {
             }
         }
         manifest.save(publish); covers.save(publishCovers); Scanner.saveIndex()
+        // Publish romanizations.json & anime-catalog.json into .bitchord-library/ so BitChord (phone/future) can use them too.
+        runCatching {
+            listOf(Romanizer.cacheFile to "romanizations.json", AnimeCatalog.cacheFile to "anime-catalog.json").forEach { (src, name) ->
+                if (src.isFile && src.length() > 10) {
+                    val tmpC = File(temp, "$name-" + java.util.UUID.randomUUID() + ".json")
+                    try { src.copyTo(tmpC, true); lib.put(tmpC, ".bitchord-library/$name") } finally { tmpC.delete() }
+                }
+            }
+        }
         // What would be better at 320 (AAC under 290 kbps, MP3 under 320, false 320s, Opus): a list for the phone,
         // which can download those songs at 320 into Music/BitChord — the next build swaps them in by itself.
         runCatching {
