@@ -39,9 +39,16 @@ object AlbumReference {
     private const val TTL_MS = 3L * 24 * 3600 * 1000
     const val MISSING = "missing:"
     /** Lists kept before this were picked too loosely (a concert video's for its CD): asked again. */
-    private const val VERSION = 6
+    private const val VERSION = 7
 
-    data class Track(val disc: Int, val number: Int, val title: String, val seconds: Int?, val artist: String? = null, val videoId: String? = null)
+    data class Track(
+        val disc: Int, val number: Int, val title: String, val seconds: Int?, val artist: String? = null, val videoId: String? = null,
+        /** The names other catalogues give this track and its artist (English, romaji, Japanese). */
+        val aka: List<String> = emptyList(), val akaArtists: List<String> = emptyList(),
+    ) {
+        val names: List<String> get() = (listOf(title) + aka).distinct()
+        val artists: List<String> get() = (listOfNotNull(artist) + akaArtists).distinct()
+    }
     data class Reference(val source: String, val tracks: List<Track>, val cover: String? = null)
 
     @Volatile private var file: File? = null
@@ -51,6 +58,8 @@ object AlbumReference {
     private val http by lazy { Http.client.newBuilder().callTimeout(12, TimeUnit.SECONDS).build() }
     private val brainz = Mutex()
     private val running = HashMap<String, kotlinx.coroutines.Deferred<Reference?>>()
+    /** An English r that katakana doesn't sound ("spurt" → スパート supaato, "master" → masutaa). */
+    private val SILENT_R = Regex("""(?<=[aeiou])r(?![aeiouy])""")
     private val CJK = Regex("""[\p{IsHan}\p{IsHiragana}\p{IsKatakana}\p{IsHangul}]""")
     private val TALK = Regex("""(?i)^\s*(mc|talk|トーク|ＭＣ)\b|^\s*mc\s*[-#]?\s*\d*\s*$""")
     @Volatile private var lastBrainz = 0L
@@ -170,19 +179,26 @@ object AlbumReference {
                 (saved + com.music.bitchord.data.webdav.WebDavRepository.library() + LikedMusicCache.likedSongs.value).filter { it.videoId !in ids && !OwnFileMatcher.isLiveRelease(it.albumName.orEmpty()) }
             }
         }
-        fun sameSong(t: Track, s: Song): Boolean {
-            val a = t.seconds ?: return false
-            val b = secondsOf(s) ?: return false
-            if (kotlin.math.abs(a - b) > 6) return false
-            val by = t.artist ?: artist ?: return false
-            return artistNear(by, s.artist) && matches(t, s)
-        }
         val used = HashSet<String>()
         val linked = HashMap<Track, Song>()
+        // Every listed track against every song of yours that could be it, best pairs first: a
+        // song goes to the track it fits best, not to the first that will have it. Your songs
+        // kept elsewhere only when surely that recording (its artist, or its very name within 3 s).
+        val byLength = elsewhere.groupBy { secondsOf(it) }
+        val pairs = ArrayList<Triple<Track, Song, Int>>()
         for (t in ref.tracks) {
-            val mine = closest(t, left.filter { matches(t, it) })
-                ?: elsewhere.firstOrNull { it.videoId !in used && sameSong(t, it) }?.also { used += it.videoId }
-            if (mine != null) { left.remove(mine); linked[t] = mine }
+            for (s in left) fit(t, s)?.let { pairs += Triple(t, s, it + 5) }
+            val sec = t.seconds ?: continue
+            for (x in (sec - 6)..(sec + 6)) for (s in byLength[x].orEmpty()) {
+                val f = fit(t, s) ?: continue
+                if (f >= 140 || (f >= 90 && kotlin.math.abs(sec - x) <= 3)) pairs += Triple(t, s, f)
+            }
+        }
+        val taken = HashSet<String>()
+        for ((t, s, _) in pairs.sortedByDescending { it.third }) {
+            if (t in linked || s.videoId in taken) continue
+            linked[t] = s; taken += s.videoId
+            if (!left.remove(s)) used += s.videoId
         }
         // By context: a listed track still unlinked, and one of yours (here or kept elsewhere)
         // by the very same artist credit, the same length (±3 s), that no other unlinked track could be —
@@ -193,17 +209,16 @@ object AlbumReference {
             fun near(t: Track, s: Song): Boolean {
                 val a = t.seconds ?: return false
                 val b = secondsOf(s) ?: return false
-                val by = t.artist ?: artist ?: return false
-                return kotlin.math.abs(a - b) <= 3 && strictArtist(by, s.artist)
+                val by = t.artists.ifEmpty { listOfNotNull(artist) }
+                return kotlin.math.abs(a - b) <= 3 && by.any { strictArtist(it, s.artist) }
             }
             for (t in open) {
-                val cands = (left + elsewhere.filter { it.videoId !in used }).filter { near(t, it) }.distinctBy { it.videoId }
+                val cands = (left + elsewhere.filter { it.videoId !in taken }).filter { near(t, it) }.distinctBy { it.videoId }
                 val one = cands.singleOrNull() ?: continue
                 if (open.count { it !in linked && near(it, one) } != 1) continue
                 // Not one whose name is another listed track's.
-                if (ref.tracks.any { o -> o != t && (keysOf(o.title).any { it.isNotEmpty() && it in keysOf(one.title) } ||
-                        variants(o.title).any { x -> variants(one.title).any { y -> soundsAlike(x, y) } }) }) continue
-                linked[t] = one
+                if (ref.tracks.any { o -> o != t && o.names.any { sameName(it, one.title) } }) continue
+                linked[t] = one; taken += one.videoId
                 if (!left.remove(one)) used += one.videoId
                 TrackLog.d(TAG, "album '$album': '${t.title}' taken to be your '${one.title}' (same artist and length)")
             }
@@ -216,7 +231,9 @@ object AlbumReference {
                 out += Song(
                     videoId = MISSING + key(album) + ":" + t.disc + ":" + t.number,
                     title = t.title,
-                    artist = t.artist ?: artist ?: "",
+                    // The singer as a person's name where a catalogue gives one, not a role's credit.
+                    artist = t.artists.firstOrNull { !CJK.containsMatchIn(it) && !Regex("""\bCV\b""").containsMatchIn(it) && '(' !in it }
+                        ?: t.artist ?: artist ?: "",
                     thumbnailUrl = cover,
                     albumName = album,
                     durationText = t.seconds?.let { "%d:%02d".format(it / 60, it % 60) },
@@ -296,7 +313,7 @@ object AlbumReference {
 
     private fun skeletonOf(t: String): String {
         var x = latin(t)
-        x = x.replace(Regex("""[^a-z0-9]"""), "")
+        x = x.replace(Regex("""[^a-z0-9]"""), "").replace(SILENT_R, "")
             .replace("ch", "\u0001").replace("ck", "k").replace('c', 'k').replace("\u0001", "ch")
             .replace("ph", "f").replace('l', 'r').replace('v', 'b').replace(Regex("""m(?=[bpm])"""), "n")
             .replace(Regex("""(?<=[a-z])h"""), "").replace(Regex("""[aeiouy]"""), "")
@@ -313,7 +330,7 @@ object AlbumReference {
 
     /** As heard, vowels kept: arora for both アローラ and "Alola". */
     private fun sounds(t: String): String = latin(t).replace(Regex("""[^a-z0-9]"""), "")
-        .replace('l', 'r').replace("ck", "k").replace('c', 'k').replace('v', 'b')
+        .replace(SILENT_R, "").replace('l', 'r').replace("ck", "k").replace('c', 'k').replace('v', 'b')
         .replace(Regex("""ou|oo"""), "o").replace(Regex("""(.)\1+"""), "$1")
 
     private fun soundsAlike(x: String, y: String): Boolean {
@@ -346,32 +363,36 @@ object AlbumReference {
         else candidates.minByOrNull { s -> secondsOf(s)?.let { kotlin.math.abs(it - t.seconds) } ?: Int.MAX_VALUE }
 
     /** One of yours is this listed track: the title in any script, or a shared word and the same length (±3 s). */
-    private fun matches(t: Track, s: Song): Boolean {
-        val kt = keysOf(t.title)
-        val ks = keysOf(s.title)
-        // A listed artist (a compilation's songs each have theirs) must be this one's — when the
-        // two can be compared at all (a Japanese store's bare 松本梨香 can't be told from Rica
-        // Matsumoto here; "Matsumoto rika (松本梨香)" can).
-        if (!t.artist.isNullOrBlank() && comparable(t.artist, s.artist) && !artistNear(t.artist, s.artist)) return false
+    private fun matches(t: Track, s: Song): Boolean = fit(t, s) != null
+
+    /**
+     * How surely your [s] is the listed [t] — null when it isn't. Its name first (any of the
+     * names the catalogues give it, as written or as it sounds); then its artist, which may
+     * differ in a credit ("Ookido hakase (CV: …)" for the singer) only when the length is the
+     * same within 3 s — and which picks between two takes of one song ("Mezase Pokémon
+     * Master" by Rica Matsumoto and by Whiteberry); then its length.
+     */
+    private fun fit(t: Track, s: Song): Int? {
         val a = t.seconds
         val b = secondsOf(s)
-        // Same title, other recording: a live take against the studio cut runs a different
-        // length — not this track.
-        if (a != null && b != null && kotlin.math.abs(a - b) > 20) return false
-        if (kt.any { it.isNotEmpty() && it in ks }) return true
-        if (a == null || b == null) return false
-        // Romanised one way and spelled another ("Mezase pokemommasutaa" / "Mezase Pokémon
-        // Master"): the same sounds, by the same artist, within 6 s.
-        if (kotlin.math.abs(a - b) <= 6 && !t.artist.isNullOrBlank() && artistNear(t.artist, s.artist) &&
-            variants(t.title).any { x -> variants(s.title).any { y -> soundsAlike(x, y) } }
-        ) return true
-        // Named in another script (a Japanese store's アローラ!! for your "Alola!!"): the same
-        // length to the second or two, by the same artist, is it.
-        if (CJK.containsMatchIn(t.title) != CJK.containsMatchIn(s.title) && kotlin.math.abs(a - b) <= 2 &&
-            !t.artist.isNullOrBlank() && (OwnFileMatcher.sameArtist(t.artist, s.artist) || com.music.bitchord.data.sources.ArtistLinks.linked(t.artist, s.artist))
-        ) return true
-        if (kotlin.math.abs(a - b) > 3) return false
-        return (words(t.title) + kt).any { it in (words(s.title) + ks) }
+        val d = if (a != null && b != null) kotlin.math.abs(a - b) else null
+        // Same title, other recording: a live take against the studio cut runs a different length.
+        if (d != null && d > 20) return null
+        val ks = keysOf(s.title)
+        val exact = t.names.any { n -> keysOf(n).any { it.isNotEmpty() && it in ks } }
+        val sound = !exact && d != null && d <= 6 && t.names.any { n -> variants(n).any { x -> variants(s.title).any { y -> soundsAlike(x, y) } } }
+        val word = !exact && !sound && d != null && d <= 3 && t.names.any { n -> (words(n) + keysOf(n)).any { it in (words(s.title) + ks) } }
+        val by = t.artists
+        val artistOk = by.any { artistNear(it, s.artist) }
+        val artistOff = !artistOk && by.any { comparable(it, s.artist) }
+        // Named only in another script, nothing else to go on: the same artist, within 2 s.
+        val script = !exact && !sound && !word && d != null && d <= 2 && artistOk &&
+            t.names.any { CJK.containsMatchIn(it) } != CJK.containsMatchIn(s.title)
+        var score = when { exact -> 100; sound -> 80; word -> 60; script -> 40; else -> return null }
+        if (artistOk) score += 50
+        else if (artistOff) { if (d == null || d > 3) return null; score -= 30 }
+        if (sound && !artistOk && (d == null || d > 3)) return null
+        return score - 2 * (d ?: 5)
     }
 
     /**
@@ -418,7 +439,8 @@ object AlbumReference {
         val o = synchronized(cache) { cache.optJSONObject(key(album)) }?.takeIf { it.optInt("v") == VERSION } ?: return null
         val a = o.optJSONArray("t")?.takeIf { it.length() > 0 } ?: return null
         return Reference(o.optString("s"), (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
-            Track(it.optInt("d", 1), it.optInt("n"), it.optString("t"), it.optInt("l").takeIf { l -> l > 0 }, it.optString("a").takeIf { x -> x.isNotBlank() }, it.optString("y").takeIf { x -> x.isNotBlank() })
+            Track(it.optInt("d", 1), it.optInt("n"), it.optString("t"), it.optInt("l").takeIf { l -> l > 0 }, it.optString("a").takeIf { x -> x.isNotBlank() }, it.optString("y").takeIf { x -> x.isNotBlank() },
+                it.optString("k").split('\u0001').filter { x -> x.isNotBlank() }, it.optString("ka").split('\u0001').filter { x -> x.isNotBlank() })
         }, o.optString("c").takeIf { it.isNotBlank() })
     }
 
@@ -432,7 +454,8 @@ object AlbumReference {
         ref?.cover?.let { o.put("c", it) }
         synchronized(cache) { cache.optJSONObject(key(album))?.takeIf { it.optInt("v") == VERSION }?.optJSONObject("p") }?.let { o.put("p", it) }
         o.put("t", JSONArray().apply {
-            ref?.tracks?.forEach { put(JSONObject().put("d", it.disc).put("n", it.number).put("t", it.title).put("l", it.seconds ?: 0).also { t -> it.artist?.let { a -> t.put("a", a) }; it.videoId?.let { v -> t.put("y", v) } }) }
+            ref?.tracks?.forEach { put(JSONObject().put("d", it.disc).put("n", it.number).put("t", it.title).put("l", it.seconds ?: 0).also { t -> it.artist?.let { a -> t.put("a", a) }; it.videoId?.let { v -> t.put("y", v) }
+                if (it.aka.isNotEmpty()) t.put("k", it.aka.joinToString("\u0001")); if (it.akaArtists.isNotEmpty()) t.put("ka", it.akaArtists.joinToString("\u0001")) }) }
         })
         synchronized(cache) { cache.put(key(album), o) }
         save()
@@ -479,13 +502,45 @@ object AlbumReference {
         val best = all.mapNotNull { r -> score(r, songs)?.let { r to it } }.maxByOrNull { it.second }?.first
         if (best != null) {
             TrackLog.d(TAG, "album '$album': ${all.size} lists found, ${best.source}'s fits best (${best.tracks.size} tracks)")
-            keep(album, best)
-            return@withContext best
+            val named = withNames(best, yt + all)
+            keep(album, named)
+            return@withContext named
         }
         TrackLog.d(TAG, "album '$album': no catalogue lists it")
         keep(album, null)
         null
     }
+
+    /**
+     * The list with every other catalogue's names for its tracks: the same track in another list
+     * (named alike, or at the same place and length) lends its title and artist — Apple's English
+     * "Battle Frontier" and "Alola!!" beside Spotify's "Batoru furontia (バトルフロンティア)".
+     */
+    private fun withNames(best: Reference, lists: List<Reference>): Reference {
+        val others = lists.filter { it !== best }
+        if (others.isEmpty()) return best
+        val tracks = best.tracks.mapIndexed { i, t ->
+            val aka = LinkedHashSet<String>(); val akaBy = LinkedHashSet<String>()
+            for (r in others) {
+                val u = r.tracks.firstOrNull { u -> u.disc == t.disc && u.number == t.number && closeLength(t, u, 3) }
+                    ?: r.tracks.firstOrNull { u -> closeLength(t, u, 3) && t.names.any { x -> u.names.any { y -> sameName(x, y) } } }
+                    ?: r.tracks.withIndex().firstOrNull { (j, u) -> kotlin.math.abs(j - i) <= 2 && closeLength(t, u, 1) }?.value
+                    ?: continue
+                u.names.forEach { if (it != t.title) aka += it }
+                u.artists.forEach { if (it != t.artist) akaBy += it }
+            }
+            if (aka.isEmpty() && akaBy.isEmpty()) t else t.copy(aka = aka.toList(), akaArtists = akaBy.toList())
+        }
+        return best.copy(tracks = tracks)
+    }
+
+    private fun closeLength(a: Track, b: Track, within: Int): Boolean {
+        val x = a.seconds ?: return false
+        val y = b.seconds ?: return false
+        return kotlin.math.abs(x - y) <= within
+    }
+
+    private fun sameName(x: String, y: String) = keysOf(x).any { it.isNotEmpty() && it in keysOf(y) } || soundsAlike(x, y)
 
     /**
      * Worth reading its list: the same title, or one in another script or wording that shares
