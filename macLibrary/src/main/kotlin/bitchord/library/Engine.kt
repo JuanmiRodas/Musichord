@@ -474,6 +474,31 @@ object Engine {
             record.writeText(org.json.JSONArray(now.keys.toList()).toString())
             ops.log("app", "track lists for singles and compilations: $written written, ${before.count { it !in now }} removed")
         }
+        // Covers and scans copied alongside singles, compilations and One Piece Discografía (copied to a temp file first so read-only sources are never touched).
+        if (!Live.stop && plan.sidecarFiles.isNotEmpty()) runCatching {
+            val recordF = File(Live.dir, "sidecar-files.json")
+            val beforeF = runCatching { org.json.JSONArray(recordF.readText()).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrDefault(emptyList()).toSet()
+            val nowF = plan.sidecarFiles.mapKeys { rel(it.key) }
+            var copiedImg = 0
+            Live.phase = "copiando portadas y scans de singles/recopilatorios"; Live.total = nowF.size; Live.done.set(0)
+            for ((r, srcPath) in nowF) {
+                if (Live.stop) break
+                Live.done.incrementAndGet()
+                if (r in beforeF && lib.exists(r)) continue
+                val src = File(srcPath)
+                if (!src.isFile) continue
+                val tmpI = File(temp, "scan-" + java.util.UUID.randomUUID() + "." + src.extension.ifBlank { "jpg" })
+                try {
+                    src.copyTo(tmpI, overwrite = true)
+                    if (lib.put(tmpI, r) == null) copiedImg++
+                } finally { tmpI.delete() }
+                if (Live.done.get() % 25 == 0) Live.write()
+            }
+            val removedImg = beforeF.filter { it !in nowF }
+            removedImg.forEach { lib.deletePath(it) }
+            recordF.writeText(org.json.JSONArray(nowF.keys.toList()).toString())
+            ops.log("app", "sidecar covers/scans: $copiedImg copied, ${removedImg.size} removed")
+        }
         // Reconcile built.json against actual live files so stale/ghost entries never accumulate.
         if (!Live.stop) {
             val liveKeys = lib.currentKeys()

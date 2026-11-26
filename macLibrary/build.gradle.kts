@@ -31,6 +31,7 @@ val versionDir = layout.buildDirectory.dir("generated/version")
 val writeVersion by tasks.registering {
     val v = libVersion
     val out = versionDir
+    inputs.property("version", v)
     outputs.dir(out)
     doLast { out.get().file("bitchord-library-version.txt").asFile.apply { parentFile.mkdirs(); writeText(v) } }
 }

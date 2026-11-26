@@ -236,9 +236,38 @@ object Fanart {
  * it sounds the same — never another version that happens to share its name and length.
  */
 object Fingerprint {
+    private val cacheFile get() = File(Store.dir, "fingerprints.json")
     private val cache = java.util.concurrent.ConcurrentHashMap<String, IntArray>()
+    @Volatile private var loaded = false
+    @Volatile private var dirty = 0
+
+    @Synchronized private fun ensureLoaded() {
+        if (loaded) return
+        loaded = true
+        runCatching {
+            if (!cacheFile.isFile) return
+            val o = JSONObject(cacheFile.readText())
+            for (k in o.keySet()) {
+                val arr = o.optString(k).split(',').mapNotNull { it.toIntOrNull() }.toIntArray()
+                if (arr.size >= 30) cache[k] = arr
+            }
+        }
+    }
+
+    @Synchronized fun save() {
+        if (dirty == 0) return
+        dirty = 0
+        runCatching {
+            val o = JSONObject()
+            cache.forEach { (k, v) -> o.put(k, v.joinToString(",")) }
+            val tmp = File(cacheFile.parentFile, "fingerprints-" + java.util.UUID.randomUUID() + ".tmp")
+            tmp.writeText(o.toString())
+            java.nio.file.Files.move(tmp.toPath(), cacheFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        }
+    }
 
     private fun of(path: String): IntArray? {
+        ensureLoaded()
         val f = File(path)
         if (!f.isFile) return null
         val k = Words.nfc(path) + "|" + f.length()
@@ -249,6 +278,7 @@ object Fingerprint {
         val ints = out.trim().split(',').mapNotNull { it.trim().toLongOrNull()?.toInt() }.toIntArray()
         if (ints.size < 30) return null
         cache[k] = ints
+        if (++dirty >= 100) save()
         return ints
     }
 
@@ -273,6 +303,8 @@ object Fingerprint {
     fun same(a: String, b: String): Boolean? = similarity(a, b)?.let { it >= SAME }
     /** At or above: the same recording (measured: same recording 0.97+, live/acoustic version ≈ 0.58, another song ≈ 0.50). */
     const val SAME = 0.80
+    /** Strict threshold for deduplicating distinct versions/covers in large discographies like One Piece. */
+    const val STRICT = 0.85
 }
 
 /**
@@ -281,7 +313,7 @@ object Fingerprint {
  * ("Ayumi Hamasaki (浜崎あゆみ)"). Kept in `<app data>/ytmusic-artists.json`; "" means looked up and not found.
  */
 object YtMusicNames {
-    private const val CACHE_VERSION = "ja2"
+    private const val CACHE_VERSION = "ja3"
     private val file get() = File(Store.dir, "ytmusic-artists.json")
     private val cache: MutableMap<String, String> by lazy {
         runCatching {
@@ -358,7 +390,7 @@ object YtMusicNames {
             val romaji = east?.let { Romaji.of(it) }
             fun fits(r: String) = validResult(r, lat, east) && (
                 Words.nfc(r).trim() == east || (lat != null && Words.plain(r) == Words.plain(lat)) ||
-                (romaji != null && Words.plain(r) == Words.plain(romaji)) || (east != null && Words.nfc(r).contains(east))
+                (romaji != null && Words.plain(r) == Words.plain(romaji))
             )
             var ok = false
             val hit = runCatching {

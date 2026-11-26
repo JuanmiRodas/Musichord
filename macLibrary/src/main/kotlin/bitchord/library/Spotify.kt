@@ -80,20 +80,32 @@ object Spotify {
     fun album(artist: String, title: String): Album? {
         val who = artist.substringBefore(" (").trim()
         val jp = Regex("\\(([^)]*[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}][^)]*)\\)").find(artist)?.groupValues?.get(1)?.trim()
-        val base = title.replace(Regex("\\s*[(\\[].*$"), "").trim().ifBlank { title }
-        val queries = listOfNotNull(
-            jp?.let { "JP" to it },
-            "JP" to who,
-            "ES" to who,
-        )
-        for ((market, qArtist) in queries) {
-            val q = URLEncoder.encode("album:$base artist:$qArtist", "UTF-8")
+        val stripOrdinal = Regex("^\\d+(?:st|nd|rd|th)\\s*[-–:]\\s*", RegexOption.IGNORE_CASE)
+        val rawBase = title.replace(Regex("\\s*[(\\[].*$"), "").trim().ifBlank { title }
+        val base = stripOrdinal.replace(rawBase, "").trim().ifBlank { rawBase }
+        val jpTitle = Regex("[(（]([^)）]*[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}][^)）]*)[)）]").find(title)?.groupValues?.get(1)
+            ?.let { stripOrdinal.replace(it.trim(), "").trim() }?.takeIf { it.isNotBlank() }
+        val queries = buildList {
+            if (jpTitle != null) {
+                if (jp != null) add(Triple("JP", jp, jpTitle))
+                add(Triple("JP", who, jpTitle))
+            }
+            if (jp != null) add(Triple("JP", jp, base))
+            add(Triple("JP", who, base))
+            add(Triple("ES", who, base))
+        }.distinct()
+        for ((market, qArtist, qTitle) in queries) {
+            val q = URLEncoder.encode("album:$qTitle artist:$qArtist", "UTF-8")
             val items = get("search?q=$q&type=album&market=$market&limit=10")?.optJSONObject("albums")?.optJSONArray("items") ?: continue
             val hit = (0 until items.length()).map { items.getJSONObject(it) }.firstOrNull { a ->
                 val aName = a.optString("name")
                 val names = a.optJSONArray("artists")?.let { x -> (0 until x.length()).map { x.getJSONObject(it).optString("name") } }.orEmpty()
-                val titleOk = validAlbumMatch(title, aName) &&
-                    (Builder.albumKey(aName) == Builder.albumKey(title) || Words.plain(aName).startsWith(Words.plain(base)) && Words.plain(base).length >= 4)
+                val titleOk = validAlbumMatch(title, aName) && (
+                    Builder.albumKey(aName) == Builder.albumKey(title) ||
+                    Builder.albumKey(aName) == Builder.albumKey(qTitle) ||
+                    (Words.plain(qTitle).length >= 3 && Words.plain(aName).startsWith(Words.plain(qTitle))) ||
+                    (Words.plain(base).length >= 4 && Words.plain(aName).startsWith(Words.plain(base)))
+                )
                 val artistOk = names.any { n ->
                     Words.plain(n) == Words.plain(qArtist) || Words.plain(n) == Words.plain(who) ||
                     (jp != null && Words.plain(n) == Words.plain(jp)) ||
@@ -127,7 +139,15 @@ object Spotify {
     fun check(albums: Collection<Pair<String, String>>, minutes: Int = 5): Int {
         if (!ready) return 0
         val o = runCatching { JSONObject(checks.readText()) }.getOrDefault(JSONObject())
-        val todo = albums.distinctBy { key(it.first, it.second) }.filter { !o.has(key(it.first, it.second)) }
+        val hasBilingualOrOrd = Regex("[(（][^)]*[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}]|^\\d+(?:st|nd|rd|th)\\s*[-–:]", RegexOption.IGNORE_CASE)
+        val todo = albums.distinctBy { key(it.first, it.second) }.filter { (ar, ti) ->
+            val k = key(ar, ti)
+            if (!o.has(k)) true
+            else {
+                val prev = o.optJSONObject(k)
+                prev != null && !prev.optBoolean("found") && prev.optInt("v", 1) < 2 && hasBilingualOrOrd.containsMatchIn(ti)
+            }
+        }
         val until = System.currentTimeMillis() + minutes * 60_000L
         Live.phase = "comprobando álbumes en Spotify"; Live.total = todo.size; Live.done.set(0)
         var found = 0
@@ -135,7 +155,7 @@ object Spotify {
             if (Live.stop || System.currentTimeMillis() > until) break
             Live.current = "$artist — $title"; Live.done.incrementAndGet(); Live.write()
             val a = runCatching { album(artist, title) }.getOrNull()
-            o.put(key(artist, title), if (a == null) JSONObject().put("found", false) else JSONObject().put("found", true).put("id", a.id).put("name", a.name)
+            o.put(key(artist, title), if (a == null) JSONObject().put("found", false).put("v", 2) else JSONObject().put("found", true).put("v", 2).put("id", a.id).put("name", a.name)
                 .put("year", a.year ?: "").put("tracks", JSONArray(a.tracks)).put("cover", a.cover ?: "").put("market", a.market))
             if (a != null) found++
             if (Live.done.get() % 25 == 0) runCatching { checks.writeText(o.toString()) }
