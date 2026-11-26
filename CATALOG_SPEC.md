@@ -12,15 +12,19 @@ Todo vive en `Biblioteca/.bitchord-library/catalog/` para que BitChord (móvil) 
 
 ```text
 Biblioteca/.bitchord-library/catalog/
-├── manifest.json             # Versión de esquema, fecha, estadísticas globales y mapa de rutas
-├── name-index.json           # Índice invertido O(1): alias / soundKey / autoRomaji / UC... / MPREb_... / videoId → entidad
-├── works-versions.json       # Grafo de versiones por obra (Original JP ⇄ TV Size ⇄ Live ⇄ Acoustic ⇄ Remix ⇄ Remaster ⇄ ES/EN)
+├── manifest.json             # Versión de esquema (v2), fecha, estadísticas globales y mapa de rutas
+├── name-index.json           # Índice invertido O(1): alias / soundKey / autoRomaji (ja, romaji, en, es-ES, es-419, fr) / UC… / MPREb_… / videoId → entidad
+├── works-versions.json       # Grafo de versiones por obra (Original JP ⇄ TV Size ⇄ Live ⇄ Acoustic ⇄ Remix ⇄ Remaster ⇄ ES/EN/CA)
 ├── yuki-kajiura.json         # Hub especial del universo Yuki Kajiura (canta-per-me.net + YTM + Biblioteca)
 ├── artists-index.json        # Índice ligero de los ~196 artistas con carpeta propia + proyectos relacionados
-├── artists/<slug>.json       # Página fusionada de cada artista (YTM + Biblioteca, álbumes híbridos, completitud, aportes a anime)
-├── anime-index.json          # Índice ligero de las 59 series/franquicias de anime y videojuegos en tu biblioteca
-├── anime/<slug>.json         # Página completa por serie (hero + Openings, Endings, Películas, Otras, Álbumes, OST, Personajes, ES/EN/CA)
-└── assets/anime/<slug>/      # Base de datos local en pCloud: logo.svg (o logo.png transparente), background.jpg (Stremio Metahub HD) y poster.jpg
+├── artists/<slug>.json       # Página fusionada de cada artista (YTM + Biblioteca, álbumes híbridos, completitud, UUIDs BITCHORD_ID)
+├── anime-index.json          # Índice ligero de las ~295 franquicias de anime (59 en tu biblioteca + ~236 explorar Top MAL/AniList + clásicos ES/LatAm/FR + Ghibli/Shinkai)
+├── anime/<slug>.json         # Página completa por franquicia (hero Wi-Fi-only + 6 idiomas + enlaces YTM + estanterías paralelas)
+├── games-index.json          # Índice ligero de las 48 sagas principales de videojuegos (Nintendo, Square Enix, Capcom, Sega/Atlus, Bandai Namco, Konami, Falcom, Indies)
+├── games/<slug>.json         # Página de 2 niveles: Franquicia → entries[] (cada juego, ej. Final Fantasy I–XVI) → ytmAlbums[] + ytPlaylists[] + fallbackQuery anti-DMCA
+└── assets/
+    ├── anime/<slug>/         # Base de datos en pCloud optimizada (≤1280px): logo.svg / logo.png transparente, background.jpg (Stremio Metahub / AniList), poster.jpg
+    └── games/<slug>/         # Base de datos en pCloud optimizada (≤1280px): logo.svg / logo.png transparente (Wikidata/Wikimedia), background.jpg HD
 ```
 
 ---
@@ -121,8 +125,20 @@ Cada `anime/<slug>.json` incluye un bloque `hero` compatible 1:1 con `AppleArtis
 }
 ```
 
-- **Base de datos en pCloud (`assets/anime/<slug>/`)**: prioriza **SVG vectorial** (`logo.svg`) y cae a **PNG transparente oficial de Stremio Metahub** (`logo.png`); el fondo principal (`background.jpg`) proviene de **Stremio Metahub** (mismo CDN que Stremio: `images.metahub.space`) con respaldo de AniList HD.
-- **Rotación de vídeo de portada**: cada vez que el usuario abre la página de una serie, BitChord elige al azar un vídeo distinto del pool `hero.videos[]` (filtrados a `≥ 720p`, `creditless`, sin subtítulos ni karaoke, duración 55–135 s) y arranca en un segundo aleatorio dentro de `startWindowSec: [minSec, maxSec]` (parte central limpia del opening, evitando créditos/títulos iniciales) silenciado y en bucle, con `backgroundFile` como fondo instantáneo mientras carga y `logoFile` superpuesto arriba.
+- **Base de datos en pCloud (`assets/anime/<slug>/` y `assets/games/<slug>/`)**: prioriza **SVG vectorial** (`logo.svg`) y cae a **PNG transparente oficial de Stremio Metahub / Wikimedia** (`logo.png`); los fondos (`background.jpg`) se optimizan a máx. `1280 px` JPEG calidad `82%` para carga instantánea en móvil.
+- **Rotación de vídeo de portada (Wi-Fi vs Datos)**: `hero.videoRotation` incluye `"mute": true`, `"loop": true`, `"wifiOnly": true` y `"cellularFallback": "background_image"` — en **datos móviles** muestra solo la imagen de fondo + logo (cero gasto de datos), y en **Wi-Fi** reproduce en silencio un vídeo distinto del pool `hero.videos[]` (`≥ 720p`, `creditless`, sin subtítulos ni karaoke) arrancando en un segundo aleatorio dentro de `startWindowSec: [minSec, maxSec]`.
+
+---
+
+## 5B. Páginas por franquicia de videojuegos (`games/<slug>.json`)
+
+Estructura en **2 niveles** (`Franquicia → Juego → Colección de álbumes`), cubriendo **48 sagas** (Nintendo, Square Enix, Capcom, Sega/Atlus, Bandai Namco, Konami, Falcom, FromSoftware e Indies) y **223 juegos**:
+
+- Cada entrada en `entries[]` (ej. *Final Fantasy VII*, *Final Fantasy VII Remake*, *Final Fantasy X*, *Ocarina of Time*, *Breath of the Wild*) agrupa:
+  - **`ytmAlbums[]`**: álbumes oficiales de YouTube Music (`MPREb_...`), clasificados por `kind` (`ost`, `piano`, `orchestral`, `arranged`).
+  - **`ytPlaylists[]`**: playlists completas de YouTube (`VLPL…`), clave para franquicias de **Nintendo** sin OST oficial en YouTube Music.
+  - **`fallbackQuery`**: consulta estructurada anti-DMCA para que BitChord recupere automáticamente una subida alternativa si algún día Nintendo retira una playlist.
+- Incluye `names` en 6 idiomas (`ja`, `romaji` + `autoRomaji`, `en`, `es`, `fr`), `composers[]` y cabecera `hero` con logo SVG/PNG, fondo 1280px y tráilers/intros HD silenciados solo en Wi-Fi.
 
 ---
 
