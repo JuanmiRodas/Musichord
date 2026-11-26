@@ -221,10 +221,12 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
     private val folders = java.util.concurrent.ConcurrentHashMap<String, Long>() // rel (one form, lower case) → folder id
     private val folderNames = java.util.concurrent.ConcurrentHashMap<String, String>() // rel (one form, lower case) → its name as pCloud has it
     private val files = java.util.concurrent.ConcurrentHashMap<String, LibFile>()
+    /** Every non-hidden file on pCloud (audio + .txt/.m3u/.alias/covers), NFC rel → LibFile, so NFD/NFC sidecar twins are caught and removed. */
+    private val allFiles = java.util.concurrent.ConcurrentHashMap<String, LibFile>()
     private val dupes = java.util.concurrent.CopyOnWriteArrayList<LibFile>()
 
     override fun list(): Map<String, LibFile> {
-        files.clear(); folders.clear(); folderNames.clear(); dupes.clear()
+        files.clear(); allFiles.clear(); folders.clear(); folderNames.clear(); dupes.clear()
         val o = api.call("listfolder", mapOf("path" to remoteRoot, "recursive" to "1")).getJSONObject("metadata")
         folders[""] = o.getLong("folderid")
         fun walk(m: JSONObject, rel: String) {
@@ -235,16 +237,24 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
                 if (n.startsWith(".")) continue
                 val r = if (rel.isEmpty()) n else "$rel/$n"
                 if (x.optBoolean("isfolder")) { folders.putIfAbsent(nfc(r).lowercase(), x.getLong("folderid")); folderNames.putIfAbsent(nfc(r).lowercase(), n); walk(x, r) }
-                else if (n.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) {
+                else {
                     val key = nfc(r)
                     val lf = LibFile(key, r, x.optLong("size"), x.getLong("fileid"))
-                    val prev = files[key]
-                    if (prev == null) files[key] = lf
-                    else {
-                        // Two files in pCloud differing only in Unicode form (NFD vs NFC): keep the NFC (or newer fileid) one, mark the twin for removal.
-                        val keepNew = (lf.actual == key && prev.actual != key) || (lf.actual == prev.actual && (lf.id ?: 0L) > (prev.id ?: 0L)) ||
-                            (lf.actual != key && prev.actual != key && (lf.id ?: 0L) > (prev.id ?: 0L))
-                        if (keepNew) { dupes += prev; files[key] = lf } else dupes += lf
+                    val isAudio = n.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY
+                    val prevAll = allFiles[key]
+                    if (prevAll == null) {
+                        allFiles[key] = lf
+                        if (isAudio) files[key] = lf
+                    } else {
+                        // Two files in pCloud differing only in Unicode form (NFD vs NFC) — applies to audio AND sidecars (.txt, .m3u, .alias, covers)!
+                        val keepNew = (lf.actual == key && prevAll.actual != key) || (lf.actual == prevAll.actual && (lf.id ?: 0L) > (prevAll.id ?: 0L)) ||
+                            (lf.actual != key && prevAll.actual != key && (lf.id ?: 0L) > (prevAll.id ?: 0L))
+                        if (keepNew) {
+                            dupes += prevAll; allFiles[key] = lf
+                            if (isAudio) files[key] = lf
+                        } else {
+                            dupes += lf
+                        }
                     }
                 }
             }
@@ -279,15 +289,28 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
         val k = nfc(toRel)
         val to = folder(k.substringBeforeLast('/', ""))
         api.call("renamefile", mapOf("fileid" to from.id.toString(), "tofolderid" to to.toString(), "toname" to k.substringAfterLast('/')))
-        files.remove(from.rel); files[k] = from.copy(rel = k, actual = k); null
+        val moved = from.copy(rel = k, actual = k)
+        files.remove(from.rel); files[k] = moved
+        allFiles.remove(from.rel); allFiles[k] = moved; null
     }.getOrElse { it.message ?: it.javaClass.simpleName }
 
     override fun delete(f: LibFile): String? = runCatching {
         api.call("deletefile", mapOf("fileid" to f.id.toString()))
         if (files[f.rel]?.id == f.id) files.remove(f.rel)
+        if (allFiles[f.rel]?.id == f.id) allFiles.remove(f.rel)
         null
     }.getOrElse { it.message }
-    override fun deletePath(rel: String): String? = runCatching { api.call("deletefile", mapOf("path" to "$remoteRoot/${nfc(rel)}")); null }.getOrElse { it.message }
+    override fun deletePath(rel: String): String? = runCatching {
+        val k = nfc(rel)
+        val existing = allFiles[k] ?: allFiles.values.firstOrNull { it.rel.equals(k, ignoreCase = true) }
+        if (existing?.id != null) {
+            api.call("deletefile", mapOf("fileid" to existing.id.toString()))
+            allFiles.remove(existing.rel); files.remove(existing.rel)
+        } else {
+            api.call("deletefile", mapOf("path" to "$remoteRoot/$k"))
+        }
+        null
+    }.getOrElse { it.message }
 
     override fun moveOut(from: LibFile, outRel: String): String? = runCatching {
         var parent = remoteRoot.substringBeforeLast('/').ifEmpty { "" }
@@ -313,21 +336,23 @@ class PCloudLib(private val api: PCloudApi, private val mountRoot: String) : Lib
             api.call("renamefile", mapOf("fileid" to newId.toString(), "tofolderid" to dir.toString(), "toname" to name))
             local.delete(); return@runCatching null
         }
-        val prev = files[k] ?: files.values.firstOrNull { it.rel.equals(k, ignoreCase = true) }
+        val prev = allFiles[k] ?: allFiles.values.firstOrNull { it.rel.equals(k, ignoreCase = true) }
         val m = api.upload(dir, name, local).getJSONArray("metadata").getJSONObject(0)
         val newId = m.getLong("fileid")
-        // If an older file existed in NFD or different casing, pCloud kept both (different fileid): remove the stale twin.
+        // If an older file existed in NFD or different casing (audio OR sidecar .txt/.m3u), pCloud kept both (different fileid): remove the stale twin.
         if (prev != null && prev.id != null && prev.id != newId) {
             runCatching { api.call("deletefile", mapOf("fileid" to prev.id.toString())) }
-            if (prev.rel != k) files.remove(prev.rel)
+            if (prev.rel != k) { allFiles.remove(prev.rel); files.remove(prev.rel) }
         }
-        if (k.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) files[k] = LibFile(k, k, m.optLong("size"), newId)
+        val stored = LibFile(k, k, m.optLong("size"), newId)
+        allFiles[k] = stored
+        if (k.substringAfterLast('.').lowercase() in Builder.Formats.LIBRARY) files[k] = stored
         local.delete(); null
     }.getOrElse { it.message ?: it.javaClass.simpleName }
 
     override fun local(f: LibFile): File? = File(mountRoot, f.actual).takeIf { Scanner.get(it.path) != null }
 
-    override fun exists(rel: String) = files.containsKey(nfc(rel)) || files.keys.any { it.equals(nfc(rel), ignoreCase = true) }
+    override fun exists(rel: String) = allFiles.containsKey(nfc(rel)) || allFiles.keys.any { it.equals(nfc(rel), ignoreCase = true) }
 
     override fun tidy() {
         val o = runCatching { api.call("listfolder", mapOf("path" to remoteRoot, "recursive" to "1")).getJSONObject("metadata") }.getOrNull() ?: return

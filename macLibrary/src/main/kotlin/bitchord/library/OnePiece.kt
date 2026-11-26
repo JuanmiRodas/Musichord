@@ -22,6 +22,7 @@ object OnePiece {
         val sidecarFiles: Map<String, String>,
         val skipped: List<Pair<Track, String>>,
         val keyOf: Map<String, String>,
+        val aliases: Map<String, String> = emptyMap(),
     )
 
     private val IMG_EXT = setOf("jpg", "jpeg", "png", "webp")
@@ -429,9 +430,11 @@ object OnePiece {
             )
         }
 
-        // 3. Build .m3u + .txt sidecars AND copy covers/scans for EVERY folder in One Piece/Discografía/.
+        // 3. Build .m3u + .txt sidecars, macOS Finder aliases, AND copy covers/scans for EVERY folder in One Piece/Discografía/.
         val sidecars = LinkedHashMap<String, String>()
         val sidecarFiles = LinkedHashMap<String, String>()
+        val aliases = LinkedHashMap<String, String>()
+        val itemByCluster = items.associateBy { it.key.removePrefix("onepiece|").toInt() }
 
         for ((relDir, list) in ostTracksByRelDir) {
             val cleanRelDir = relDir.split('/').filter { it.isNotEmpty() }.joinToString("/") { clean(it) }
@@ -446,6 +449,7 @@ object OnePiece {
             if (elsewhere > 0 && resolved.isNotEmpty()) {
                 val dirPath = java.nio.file.Paths.get(home)
                 val folderTitle = relDir.substringAfterLast('/')
+                val multiDisc = resolved.map { (t, _, _) -> discNoOf(t) ?: 1 }.toSet().size > 1
                 val m3u = buildString {
                     append("#EXTM3U\n#PLAYLIST:").append(Words.nfc(folderTitle)).append("\n")
                     for ((t, _, tgt) in resolved) {
@@ -457,11 +461,23 @@ object OnePiece {
                 val txt = buildString {
                     append(Words.nfc(folderTitle)).append("\n\n")
                     append("Para ahorrar espacio sin duplicar canciones, las pistas repetidas o movidas a Openings / Endings / Películas se guardan una sola vez en su ubicación principal:\n\n")
-                    for ((t, _, tgt) in resolved) {
+                    for ((t, cid, tgt) in resolved) {
                         val no = trackNoOf(t)?.toString()?.padStart(2, '0')
                         val where = Words.nfc(tgt).substringBeforeLast('/')
                         append(if (no != null) "$no. " else "· ").append(Words.nfc(titleOf(t)))
                         append(if (where == home) "  (aquí)" else "  → ${where.removePrefix(Words.nfc(targetRoot)).trimStart('/')}").append('\n')
+                        if (where != home) {
+                            val prim = itemByCluster[cid]
+                            val numStr = trackNoOf(t)?.let { n -> (discNoOf(t)?.takeIf { multiDisc && it > 1 }?.let { "$it-" } ?: "") + n.toString().padStart(2, '0') }
+                            val aliasStem = listOfNotNull(
+                                numStr,
+                                titleOf(t),
+                                (prim?.artist ?: artistOf(t)).ifBlank { null },
+                                prim?.album?.ifBlank { null },
+                                prim?.year?.ifBlank { null },
+                            ).joinToString(" - ") { clean(it) }
+                            aliases.putIfAbsent(Words.nfc("$home/$aliasStem.alias"), Words.nfc(tgt))
+                        }
                     }
                 }
                 sidecars[Words.nfc("$home/${Builder.SIDECAR_M3U}")] = m3u
@@ -478,6 +494,6 @@ object OnePiece {
             sidecarFiles[Words.nfc("$targetRoot/One Piece/Discografía/$cleanRel")] = img.path
         }
 
-        return Result(items, sidecars, sidecarFiles, skipped, keyOf)
+        return Result(items, sidecars, sidecarFiles, skipped, keyOf, aliases)
     }
 }

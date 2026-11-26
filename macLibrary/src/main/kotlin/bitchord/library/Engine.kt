@@ -103,20 +103,50 @@ class Manifest(root: String) {
         entries.values.mapNotNull { it.artist?.substringBefore(",")?.trim() }.filter { it.isNotBlank() }.distinct().forEach { a -> Fanart.of(a)?.let { o.put(a, it) } }
     }
 
-    @Synchronized fun json(): String = JSONObject().put("version", 2).put("updated", System.currentTimeMillis()).put("artists", artistsJson())
-        .put("files", JSONObject().apply {
+    @Synchronized fun json(): String {
+        val albumsMap = LinkedHashMap<String, MutableList<Pair<Pair<String, Entry>, Builder.Release>>>()
+        val filesObj = JSONObject().apply {
             entries.forEach { (k, e) ->
                 put(k, JSONObject().put("id", e.id).put("source", e.source).put("copies", JSONArray(e.copies)).put("seconds", e.seconds ?: JSONObject.NULL)
                     .put("title", e.title ?: JSONObject.NULL).put("artist", e.artist ?: JSONObject.NULL).put("album", e.album ?: JSONObject.NULL)
                     .put("written", e.written).put("cover", e.cover ?: JSONObject.NULL)
-                    // The albums it is on (LIBRARY_LINK.md): the phone lists the song in each, with that album's cover.
-                    .put("releases", JSONArray(e.releases.map { r ->
-                        JSONObject().put("album", r.album).put("artist", r.artist).put("year", r.year ?: JSONObject.NULL).put("track", r.no ?: JSONObject.NULL)
-                            .put("disc", r.disc ?: JSONObject.NULL).put("cover", coverOf?.invoke(r.folder) ?: JSONObject.NULL)
+                    // All releases where this song appeared (releases[0] is always the primary original release holding the physical file).
+                    .put("releases", JSONArray(e.releases.mapIndexed { idx, r ->
+                        val relFolder = r.libraryFolder.ifBlank { if (idx == 0) k.substringBeforeLast('/', "") else "" }
+                        if (relFolder.isNotBlank() && r.album.isNotBlank()) {
+                            albumsMap.getOrPut(relFolder) { ArrayList() }.add((k to e) to r)
+                        }
+                        JSONObject().put("album", r.album).put("artist", r.artist).put("year", r.year ?: JSONObject.NULL)
+                            .put("track", r.no ?: JSONObject.NULL).put("disc", r.disc ?: JSONObject.NULL)
+                            .put("title", r.trackTitle.ifBlank { e.title.orEmpty() })
+                            .put("folder", relFolder.ifBlank { JSONObject.NULL })
+                            .put("primary", idx == 0)
+                            .put("cover", coverOf?.invoke(r.folder) ?: JSONObject.NULL)
                     })))
             }
-        })
-        .put("moves", JSONArray(moves)).put("removed", JSONArray(removed)).toString()
+        }
+        // Per-album/single/compilation folder index for future BitChord: lets the app open any folder with its own cover & full tracklist (real + linked).
+        val albumsObj = JSONObject().apply {
+            albumsMap.forEach { (folder, list) ->
+                val r0 = list.first().second
+                val sorted = list.sortedWith(compareBy({ it.second.disc ?: 1 }, { it.second.no ?: 999 }, { it.second.trackTitle.ifBlank { it.first.second.title.orEmpty() }.lowercase() }))
+                val coverFile = list.firstNotNullOfOrNull { (_, r) -> coverOf?.invoke(r.folder) }
+                put(folder, JSONObject()
+                    .put("album", r0.album).put("artist", r0.artist).put("year", r0.year ?: JSONObject.NULL)
+                    .put("cover", coverFile ?: JSONObject.NULL)
+                    .put("tracks", JSONArray(sorted.map { (ke, r) ->
+                        val (fileRel, e) = ke
+                        JSONObject().put("id", e.id).put("file", fileRel)
+                            .put("title", r.trackTitle.ifBlank { e.title.orEmpty() })
+                            .put("track", r.no ?: JSONObject.NULL).put("disc", r.disc ?: JSONObject.NULL)
+                            .put("primary", fileRel.substringBeforeLast('/', "") == folder)
+                    })))
+            }
+        }
+        return JSONObject().put("version", 2).put("updated", System.currentTimeMillis()).put("artists", artistsJson())
+            .put("files", filesObj).put("albums", albumsObj)
+            .put("moves", JSONArray(moves)).put("removed", JSONArray(removed)).toString()
+    }
 
     /** Written on the Mac at once (a .tmp then renamed); [publish] puts it in the library too. */
     // One at a time: two saves sharing one .tmp left built.json cut in the middle (a renamed half-written file).
@@ -214,10 +244,9 @@ object Engine {
         val manifest = Manifest(root)
         val covers = Covers(root)
         manifest.coverOf = { f -> covers.known(f) }
-        // The cover of every album a song is on (its original album, the best-of it is kept in…), so the phone can
-        // show each album with its own picture: taken once per album folder, for at most five minutes per build.
+        // The cover of every album, single, and compilation folder (including alias-only folders), so BitChord has each release's own cover.
         run {
-            val folders = plan.copy.filter { it.releases.size > 1 }.flatMap { i -> i.releases.map { it.folder } }.distinct().filter { covers.known(it) == null }
+            val folders = plan.copy.flatMap { i -> i.releases.map { it.folder } }.filter { it.isNotBlank() }.distinct().filter { covers.known(it) == null }
             val until = System.currentTimeMillis() + 5 * 60_000
             Live.phase = "portadas de cada álbum"; Live.total = folders.size; Live.done.set(0)
             for (f in folders) { if (Live.stop || System.currentTimeMillis() > until) break; Live.current = f; Live.done.incrementAndGet(); Live.write(); runCatching { covers.forFolder(f) } }
@@ -498,6 +527,52 @@ object Engine {
             removedImg.forEach { lib.deletePath(it) }
             recordF.writeText(org.json.JSONArray(nowF.keys.toList()).toString())
             ops.log("app", "sidecar covers/scans: $copiedImg copied, ${removedImg.size} removed")
+        }
+        // macOS Finder Aliases for linked songs in albums, singles, compilations, and One Piece Discografía (0-space pointers on pCloud.fs / APFS).
+        if (!Live.stop && System.getProperty("os.name").lowercase().contains("mac")) runCatching {
+            val recordA = File(Live.dir, "aliases.json")
+            val beforeA = runCatching { org.json.JSONArray(recordA.readText()).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrDefault(emptyList()).toSet()
+            val nowA = plan.aliases.mapKeys { rel(it.key) }
+            val toCreate = org.json.JSONArray()
+            for ((r, targetAbs) in nowA) {
+                val aliasAbs = File(root, r).path
+                if (r in beforeA && File(aliasAbs).isFile) continue
+                toCreate.put(org.json.JSONObject().put("alias", aliasAbs).put("target", targetAbs))
+            }
+            var created = 0
+            if (toCreate.length() > 0) {
+                Live.phase = "creando alias de macOS (${toCreate.length()})"; Live.total = toCreate.length(); Live.done.set(0); Live.write(force = true)
+                val pairsFile = File(temp, "aliases-" + java.util.UUID.randomUUID() + ".json")
+                val scriptFile = File(temp, "mkalias-" + java.util.UUID.randomUUID() + ".js")
+                try {
+                    pairsFile.writeText(toCreate.toString())
+                    scriptFile.writeText("""
+                        ObjC.import('Foundation');
+                        var fm = $.NSFileManager.defaultManager;
+                        var raw = $.NSString.stringWithContentsOfFileEncodingError(${org.json.JSONObject.quote(pairsFile.path)}, $.NSUTF8StringEncoding, $());
+                        var arr = JSON.parse(ObjC.unwrap(raw));
+                        var okCount = 0;
+                        for (var i = 0; i < arr.length; i++) {
+                            var a = arr[i].alias, t = arr[i].target;
+                            if (!fm.fileExistsAtPath(t)) continue;
+                            var parent = $(a).stringByDeletingLastPathComponent;
+                            fm.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(parent, true, $(), $());
+                            var tUrl = $.NSURL.fileURLWithPath(t);
+                            var aUrl = $.NSURL.fileURLWithPath(a);
+                            var data = tUrl.bookmarkDataWithOptionsIncludingResourceValuesForKeysRelativeToURLError($.NSURLBookmarkCreationSuitableForBookmarkFile, $(), $(), $());
+                            if (data && !data.isNil() && $.NSURL.writeBookmarkDataToURLOptionsError(data, aUrl, 0, $())) okCount++;
+                        }
+                        console.log("OK:" + okCount);
+                    """.trimIndent())
+                    val (code, out) = Tools.run("osascript", "-l", "JavaScript", scriptFile.path, timeoutSec = 300)
+                    if (code == 0) created = Regex("OK:(\\d+)").find(out)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                } finally { pairsFile.delete(); scriptFile.delete() }
+            }
+            val removedA = beforeA.filter { it !in nowA }
+            removedA.forEach { r -> lib.deletePath(r); runCatching { File(root, r).delete() } }
+            val keptA = nowA.keys.filter { File(root, it).isFile }
+            recordA.writeText(org.json.JSONArray(keptA).toString())
+            ops.log("app", "macOS aliases: $created created, ${removedA.size} removed (${keptA.size}/${nowA.size} active)")
         }
         // Reconcile built.json against actual live files so stale/ghost entries never accumulate.
         if (!Live.stop) {

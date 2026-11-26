@@ -134,6 +134,11 @@ fun cli(args: Array<String>, inApp: Boolean = false) = runBlocking {
                 items.forEach { appendLine("\"${it.track.path}\",\"${it.target}\",\"${it.reason}\"") }
                 plan.skipped.forEach { (t, why) -> appendLine("\"${t.path}\",,\"$why\"") }
             })
+            File(ops.state, "build-aliases.csv").writeText(buildString {
+                appendLine("alias,destino_original")
+                plan.aliases.forEach { (a, t) -> appendLine("\"$a\",\"$t\"") }
+            })
+            println("Listas .m3u/.txt: ${plan.sidecars.size} · Portadas/Scans: ${plan.sidecarFiles.size} · Alias macOS: ${plan.aliases.size}")
             if (flag("dry-run")) {
                 items.take(30).forEach { println("${it.track.path.removePrefix(it.source.path)}\n  → ${it.target.removePrefix(root)}  [${it.reason}]") }
                 println("— Lista completa en ${File(ops.state, "build-plan.csv").path}")

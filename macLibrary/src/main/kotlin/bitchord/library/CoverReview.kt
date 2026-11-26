@@ -168,22 +168,38 @@ object CoverReview {
     fun run(root: String, plan: Builder.Plan, deadline: Long = Long.MAX_VALUE) {
         val covers = Covers(root)
         val old = load().associateBy { it.key }.toMutableMap()
-        val groups = plan.copy.groupBy(CoverChoice::keyOf)
+        // Cover proposals for every primary album/single AND every linked release folder (singles, studio albums, compilations with aliases).
+        data class ReleaseGroup(val key: String, val album: String, val artist: String, val folder: String, val year: String?, val items: MutableList<Builder.Item>, val srcCoverDir: String?)
+        val groupsMap = LinkedHashMap<String, ReleaseGroup>()
+        for (i in plan.copy) {
+            val k = CoverChoice.keyOf(i)
+            val relDir = File(i.target).parent.removePrefix(root).trimStart('/')
+            groupsMap.getOrPut(k) { ReleaseGroup(k, i.album, i.albumArtist.ifBlank { i.artist }, relDir, i.year, ArrayList(), i.cover) }.items += i
+            for (r in i.releases) {
+                if (r.album.isBlank() || r.libraryFolder.isBlank()) continue
+                val rk = "A|" + Builder.pkey(r.artist.ifBlank { i.albumArtist.ifBlank { i.artist } }) + "|" + Builder.albumKey(r.album)
+                if (rk == k) continue
+                val g = groupsMap.getOrPut(rk) { ReleaseGroup(rk, r.album, r.artist.ifBlank { i.albumArtist.ifBlank { i.artist } }, r.libraryFolder, r.year, ArrayList(), r.folder.ifBlank { null }) }
+                if (g.items.none { it.key == i.key }) g.items += i
+            }
+        }
+        val groups = groupsMap.values.sortedByDescending { it.items.size }
         Live.begin("Portadas", root); Live.total = groups.size
         var n = 0
-        for ((key, items) in groups.entries.sortedByDescending { it.value.size }) {
+        for (g in groups) {
+            val key = g.key; val items = g.items
             if (Live.stop || System.currentTimeMillis() > deadline) break
             Live.done.incrementAndGet()
             val prev = old[key]
             if (prev != null && prev.songs == items.size && prev.status != "sin propuesta") continue
             val i = items.first()
-            val album = i.album
-            val artist = i.albumArtist.ifBlank { i.artist }
+            val album = g.album
+            val artist = g.artist
             Live.current = "$artist — ${album.ifBlank { i.title }}"; Live.write()
-            val cur = runCatching { current(i, covers) }.getOrNull()
+            val cur = runCatching { g.srcCoverDir?.let { covers.forFolder(it) } ?: current(i, covers) }.getOrNull()
             val found = ArrayList<Candidate>()
             if (album.isNotBlank() && items.size >= 5) {
-                val a = AlbumArt.Album(File(i.target).parentFile, i.target.removePrefix(root).trimStart('/'), album, artist, i.year, items.mapNotNull { it.track.seconds }, i.target.removePrefix(root).trimStart('/').substringBefore('/'))
+                val a = AlbumArt.Album(File(root, g.folder), g.folder, album, artist, g.year ?: i.year, items.mapNotNull { it.track.seconds }, g.folder.substringBefore('/'))
                 for (src in listOf(AlbumArt::musicbrainz, AlbumArt::vgmdb)) {
                     runCatching { src(a) }.getOrDefault(emptyList()).filter { AlbumArt.sure(a, it) }.forEach { r ->
                         r.images.firstOrNull { (kind, _) -> kind.contains("front", true) || kind.contains("cover", true) }?.let { (_, url) -> found += Candidate(r.source, url, 96, r.title, null) }
@@ -193,8 +209,8 @@ object CoverReview {
             }
             // Spotify (Japan's catalogue, then Spain's): the same album with as many songs or more.
             if (album.isNotBlank()) Spotify.checked(artist, album)?.takeIf { it.optBoolean("found") && it.optString("cover").isNotBlank() }?.let { c ->
-                val n = c.optJSONArray("tracks")?.length() ?: 0
-                found += Candidate("Spotify", c.getString("cover"), if (n >= items.size) 94 else 80, c.optString("name"), null)
+                val cnt = c.optJSONArray("tracks")?.length() ?: 0
+                found += Candidate("Spotify", c.getString("cover"), if (cnt >= items.size) 94 else 80, c.optString("name"), null)
             }
             if (album.isNotBlank()) {
                 found += runCatching { deezer(album, artist, items.size) }.getOrDefault(emptyList())
@@ -209,7 +225,7 @@ object CoverReview {
                 cur != null && best.first().local?.let { same(File(it), cur) } == true -> "igual"
                 else -> "propuesta"
             }
-            old[key] = Proposal(key, album, artist, File(i.target).parent.removePrefix(root).trimStart('/'), items.size, cur?.path, best, status)
+            old[key] = Proposal(key, album, artist, g.folder, items.size, cur?.path, best, status)
             if (++n % 10 == 0) save(old.values.toList())
         }
         save(old.values.toList())
