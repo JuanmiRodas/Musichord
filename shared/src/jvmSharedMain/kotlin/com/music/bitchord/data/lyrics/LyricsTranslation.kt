@@ -12,6 +12,7 @@ import java.util.zip.GZIPOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -72,7 +73,11 @@ object LyricsTranslation {
     // repaired path after the app is updated.
     private const val CACHE_VERSION = 4
     private const val CACHE_DIRECTORY = "lyrics_translation_v3"
-    private const val MAX_CACHE_BYTES = 2L * 1024L * 1024L
+    // BitChord Audio: translations are kept, not cached — on the phone (its files, which Android
+    // doesn't clear) and in pCloud ([mirror]), so a song is never translated twice. 2 MB used to
+    // be the limit, which let go of the oldest after a few dozen songs; this is only a safety net
+    // (a translated song is a few KB).
+    private const val MAX_CACHE_BYTES = 256L * 1024L * 1024L
     private const val MAX_BATCH_CHARS = 3_500
     private const val MAX_PARALLEL_REQUESTS = 2
     private val NON_LATIN_TEXT = Regex("[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsHangul}\\p{IsCyrillic}\\p{IsArabic}\\p{IsThai}]")
@@ -106,6 +111,25 @@ object LyricsTranslation {
      */
     @Volatile
     var cacheDir: File? = null
+
+    /**
+     * BitChord Audio: a second home for the kept translations (pCloud on the phone): asked
+     * when this device hasn't one, and given each new one. Null: this device's copy only.
+     */
+    interface Mirror {
+        /** Fetches [name] into [into]; false if it isn't there (or can't be reached). */
+        suspend fun fetch(name: String, into: File): Boolean
+        /** Keeps [file] there as [name]. */
+        suspend fun send(name: String, file: File)
+    }
+
+    @Volatile
+    var mirror: Mirror? = null
+
+    private val mirrorScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    /** Where the kept translations are, for the mirror's catch-up. */
+    fun keptDirectory(): File? = cacheDir?.let { File(it, CACHE_DIRECTORY) }
     private val client by lazy {
         Http.client.newBuilder()
             .callTimeout(12, TimeUnit.SECONDS)
@@ -701,6 +725,35 @@ object LyricsTranslation {
     }
 
     private suspend fun readCache(key: String): CachedTranslation? =
+        readLocal(key) ?: fromMirror(key)
+
+    /** Not on this device: perhaps translated on another, or before a reinstall. */
+    private suspend fun fromMirror(key: String): CachedTranslation? {
+        val m = mirror ?: return null
+        val root = cacheDir ?: return null
+        return withContext(Dispatchers.IO) {
+            val directory = File(root, CACHE_DIRECTORY)
+            if (!directory.exists() && !directory.mkdirs()) return@withContext null
+            val temporary = File(directory, "$key.fetch")
+            val got = runCatching {
+                kotlinx.coroutines.withTimeoutOrNull(6_000) { m.fetch("$key.json.gz", temporary) } == true
+            }.getOrDefault(false)
+            if (!got || temporary.length() == 0L) {
+                temporary.delete()
+                return@withContext null
+            }
+            diskMutex.withLock {
+                val destination = File(directory, "$key.json.gz")
+                if (!temporary.renameTo(destination)) {
+                    temporary.copyTo(destination, overwrite = true)
+                    temporary.delete()
+                }
+            }
+            readLocal(key)
+        }
+    }
+
+    private suspend fun readLocal(key: String): CachedTranslation? =
         withContext(Dispatchers.IO) {
             diskMutex.withLock {
                 val root = cacheDir ?: return@withLock null
@@ -733,6 +786,8 @@ object LyricsTranslation {
                         temporary.delete()
                     }
                     trimCache(directory)
+                    // And a copy to the mirror, in the background.
+                    mirror?.let { m -> mirrorScope.launch { runCatching { m.send(destination.name, destination) } } }
                 }.onFailure { temporary.delete() }
             }
         }
