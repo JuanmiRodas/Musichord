@@ -44,6 +44,12 @@ object SettingsSync {
     private const val REMOTE_DIR = ".bitchord-audio"
     private const val REMOTE_FILE = "sync.json"
     private const val PENDING = "settings_sync_pending.json"
+    // BitChord Audio: the [FILES] go up one by one into this subfolder, streamed from disk,
+    // and only when they changed; sync.json lists them under "fileRefs". Inlined as text
+    // they grew with the library until one upload asked 21 MB more of a full memory and the
+    // app crashed — and a sync.json over 8 MB was never read back on the other device.
+    private const val REMOTE_FILES_DIR = "sync-files/"
+    private const val PENDING_FILES = "settings_sync_pending_files"
     private const val STATE_PREFS = "bitchord_audio_sync_state"
     private const val KEY_LAST_SEEN = "last_seen_saved_at"
     private const val UPLOAD_DEBOUNCE_MS = 20_000L
@@ -123,14 +129,27 @@ object SettingsSync {
                 }
                 edit.commit()
             }
+            // Older snapshots carry the files inline; newer ones name them, downloaded beside it.
             val files = snap.optJSONObject("files") ?: JSONObject()
             for (name in FILES) {
                 if (files.has(name)) File(context.filesDir, name).writeText(files.getString(name))
+            }
+            val refs = snap.optJSONObject("fileRefs")
+            if (refs != null) {
+                val pending = File(context.filesDir, PENDING_FILES)
+                for (name in FILES) {
+                    if (!refs.has(name)) continue
+                    val got = File(pending, name)
+                    if (!got.isFile) continue
+                    val dest = File(context.filesDir, name)
+                    if (!got.renameTo(dest)) got.copyTo(dest, overwrite = true)
+                }
             }
             state(context).edit().putLong(KEY_LAST_SEEN, snap.optLong("savedAt")).commit()
             TrackLog.d(TAG, "settings sync: applied the snapshot from ${snap.optString("device")}")
         }.onFailure { TrackLog.w(TAG, "settings sync: could not apply snapshot: ${it.message}") }
         f.delete()
+        File(context.filesDir, PENDING_FILES).deleteRecursively()
     }
 
     /** Fetches the folder's snapshot and starts uploading this phone's changes. Call after settings init. */
@@ -178,6 +197,19 @@ object SettingsSync {
         if (remoteSnap != null && remoteAt > lastSeen && remoteSnap.optString("device") != deviceId(context)) {
             // Newer than anything this phone has seen: it is applied on the
             // next launch, and this phone stays quiet until then.
+            // Its files come down now, straight to disk, to be put in place with it.
+            remoteSnap.optJSONObject("fileRefs")?.let { refs ->
+                val pending = File(context.filesDir, PENDING_FILES).apply { deleteRecursively(); mkdirs() }
+                for (name in FILES) {
+                    if (!refs.has(name)) continue
+                    val into = File(pending, name)
+                    WebDavClient.download(r.dirUrl + REMOTE_FILES_DIR + name, r.user, r.pass, into)
+                        .onFailure {
+                            into.delete()
+                            TrackLog.w(TAG, "settings sync: could not fetch $name: ${it.message}")
+                        }
+                }
+            }
             File(context.filesDir, PENDING).writeText(text)
             TrackLog.d(TAG, "settings sync: newer settings in pCloud; they apply on the next launch")
             return
@@ -190,9 +222,38 @@ object SettingsSync {
 
     private suspend fun upload(context: Context) {
         val r = remote() ?: return
-        val snap = snapshot(context)
-        val bytes = snap.toString().toByteArray(Charsets.UTF_8)
         WebDavClient.ensureCollection(r.dirUrl, r.user, r.pass)
+        // The files first, each streamed from a copy on disk, only those that changed.
+        val refs = JSONObject()
+        var dirReady = false
+        val st = state(context)
+        for (name in FILES) {
+            val f = File(context.filesDir, name)
+            if (!f.isFile) continue
+            val sig = "${f.length()}:${f.lastModified()}"
+            if (st.getString("file:$name", null) != sig) {
+                if (!dirReady) {
+                    WebDavClient.ensureCollection(r.dirUrl + REMOTE_FILES_DIR, r.user, r.pass)
+                    dirReady = true
+                }
+                val copy = File(context.cacheDir, "sync-up-$name")
+                val sent = runCatching {
+                    f.copyTo(copy, overwrite = true)
+                    copy.inputStream().use { input ->
+                        WebDavClient.putFile(r.dirUrl + REMOTE_FILES_DIR + name, input, copy.length(), "application/json", r.user, r.pass, overwrite = true).getOrThrow()
+                    }
+                }
+                copy.delete()
+                if (sent.isFailure) {
+                    TrackLog.w(TAG, "settings sync: upload of $name failed: ${sent.exceptionOrNull()?.message}")
+                    return
+                }
+                st.edit().putString("file:$name", sig).apply()
+            }
+            refs.put(name, sig)
+        }
+        val snap = snapshot(context).put("fileRefs", refs)
+        val bytes = snap.toString().toByteArray(Charsets.UTF_8)
         WebDavClient.putFile(
             r.fileUrl,
             bytes.inputStream(),
@@ -225,16 +286,11 @@ object SettingsSync {
             }
             prefs.put(name, values)
         }
-        val files = JSONObject()
-        for (name in FILES) {
-            val f = File(context.filesDir, name)
-            if (f.isFile) files.put(name, f.readText())
-        }
+        // The files themselves aren't put in here: [upload] sends them on their own.
         return JSONObject()
             .put("savedAt", System.currentTimeMillis())
             .put("device", deviceId(context))
             .put("prefs", prefs)
-            .put("files", files)
     }
 
     private fun state(context: Context) = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
