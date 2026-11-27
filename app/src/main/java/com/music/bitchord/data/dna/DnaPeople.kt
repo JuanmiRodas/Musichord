@@ -93,25 +93,24 @@ object DnaPeople {
     }
 
     fun load() {
-        val text = runCatching { file?.takeIf { it.isFile }?.readText() }.getOrNull() ?: return
-        runCatching {
-            val people = JSONObject(text).optJSONObject("people") ?: return
-            people.keys().forEach { k -> runCatching { cache[k] = fromJson(people.getJSONObject(k)) } }
-            _changes.value++
-        }
+        // BitChord Audio: read person by person, never the whole file as one text.
+        val f = file?.takeIf { it.isFile } ?: return
+        val before = com.music.bitchord.data.StreamJson.usedMb()
+        if (!com.music.bitchord.data.StreamJson.readEntries(f, "people", { k, o -> cache[k] = fromJson(o) })) return
+        _changes.value++
+        com.music.bitchord.data.TrackLog.d("DnaPeople", "song dna: ${cache.size} people known · file ${f.length() / 1024} KB · memory ${before} → ${com.music.bitchord.data.StreamJson.usedMb()} MB")
     }
 
     private fun scheduleSave() {
         if (saveJob?.isActive == true) return
         saveJob = scope.launch {
             delay(15_000)
-            val people = JSONObject()
-            cache.forEach { (k, v) -> people.put(k, toJson(v)) }
             runCatching {
                 val f = file ?: return@runCatching
-                val tmp = File(f.parentFile, "$FILE.tmp")
-                tmp.writeText(JSONObject().put("people", people).toString())
-                tmp.renameTo(f)
+                com.music.bitchord.data.StreamJson.writeEntries(
+                    f, JSONObject(), "people",
+                    cache.entries.asSequence().map { (k, v) -> k to toJson(v) },
+                )
             }
         }
     }

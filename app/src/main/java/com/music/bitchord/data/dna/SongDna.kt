@@ -206,29 +206,27 @@ object SongDna {
 
     /** Read again (after a restore from pCloud). */
     fun load() {
-        val text = runCatching { file?.takeIf { it.isFile }?.readText() }.getOrNull() ?: return
-        runCatching {
-            val root = JSONObject(text)
-            val songs = root.optJSONObject("songs") ?: return
-            songs.keys().forEach { k -> runCatching { cache[k] = fromJson(songs.getJSONObject(k)) } }
-            _changes.value++
-            TrackLog.d(TAG, "song dna: ${cache.size} songs known")
-        }
+        // BitChord Audio: read song by song, never the whole file as one text.
+        val f = file?.takeIf { it.isFile } ?: return
+        val before = com.music.bitchord.data.StreamJson.usedMb()
+        val ok = com.music.bitchord.data.StreamJson.readEntries(f, "songs", { k, o -> cache[k] = fromJson(o) })
+        if (!ok) return
+        _changes.value++
+        TrackLog.d(TAG, "song dna: ${cache.size} songs known · file ${f.length() / 1024} KB · memory ${before} → ${com.music.bitchord.data.StreamJson.usedMb()} MB")
     }
 
     private fun scheduleSave() {
         if (saveJob?.isActive == true) return
         saveJob = scope.launch {
             delay(15_000)
-            val songs = JSONObject()
-            cache.forEach { (k, v) -> songs.put(k, toJson(v)) }
-            val root = JSONObject().put("version", VERSION).put("songs", songs)
+            // Song by song: never all of them as one text in memory.
             runCatching {
                 val f = file ?: return@runCatching
-                val tmp = File(f.parentFile, "$FILE.tmp")
-                tmp.writeText(root.toString())
-                tmp.renameTo(f)
-            }
+                com.music.bitchord.data.StreamJson.writeEntries(
+                    f, JSONObject().put("version", VERSION), "songs",
+                    cache.entries.asSequence().map { (k, v) -> k to toJson(v) },
+                )
+            }.onFailure { TrackLog.w(TAG, "song dna: could not save: ${it.message}") }
         }
     }
 

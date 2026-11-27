@@ -88,6 +88,22 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
         }
         // BitChord Audio: night work steps aside while the app is in use.
         com.music.bitchord.data.BackgroundHours.init(this)
+        // BitChord Audio: the app's biggest stores, by size, in the log — what each costs in
+        // memory to read whole shows here (downloads and caches left out).
+        Thread {
+            runCatching {
+                val big = filesDir.listFiles().orEmpty()
+                    .filter { it.isFile && it.length() > 512 * 1024 }
+                    .sortedByDescending { it.length() }
+                    .take(12)
+                if (big.isNotEmpty()) {
+                    com.music.bitchord.data.TrackLog.d(
+                        "BitChord",
+                        "stores: " + big.joinToString(" · ") { "${it.name} ${it.length() / 1024} KB" },
+                    )
+                }
+            }
+        }.start()
         // BitChord Audio: settings synced from pCloud last session go in
         // before anything reads them.
         com.music.bitchord.data.sync.SettingsSync.applyPending(this)
