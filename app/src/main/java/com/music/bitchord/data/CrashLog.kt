@@ -132,12 +132,16 @@ object CrashLog {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val last = prefs.getLong("lastExit", 0L)
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 10)
+        var exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 10)
             .filter { it.timestamp > last }
         val previousLog = File(d, "session-previous.log").takeIf { it.isFile }?.readText().orEmpty()
         // Every way the last runs ended goes into this run's log, so a cut-off
         // log says who ended it (the system's battery manager, a swipe from
         // recents, a freeze) — not only the crashes.
+        // Only the app itself: a helper process of the hidden web view ("isolated not
+        // needed") being let go is Android tidying up, not the app ending.
+        val main = context.packageName
+        exits = exits.filter { it.processName == main }
         for (e in exits.sortedBy { it.timestamp }) {
             if (e.reason == ApplicationExitInfo.REASON_EXIT_SELF) continue
             TrackLog.w(

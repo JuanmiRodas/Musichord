@@ -486,11 +486,24 @@ object VideoMode {
     /** VK's videos that are [song]: its name in the title, about its length. */
     private suspend fun vkFor(song: Song): List<VideoRef> {
         val artist = song.artist.split(',').first().trim()
-        val hits = runCatching { VkVideo.search("${song.title} $artist") }.getOrDefault(emptyList())
-        val core = norm(song.title)
+        // BitChord Audio: under each name the song goes by, as YouTube's search is: the whole
+        // title ("ことのほかやわらかい - KOTONOHOKA YAWARAKAI (con KAORI, …)") is in no video's
+        // title, so all 19 VK found were left out while YouTube was refusing.
+        val (latinTitle, _) = com.music.bitchord.data.names.OfficialNames.searchNames(song.title, song.artist)
+        val names = (listOf(song.title) + com.music.bitchord.data.lyrics.LyricNames.cleanTitles(song.title) + listOfNotNull(latinTitle)).distinct()
+        val hits = runCatching { VkVideo.search("${names.getOrElse(1) { song.title }} $artist") }.getOrDefault(emptyList())
+            .ifEmpty { if (names.size > 1) runCatching { VkVideo.search("${song.title} $artist") }.getOrDefault(emptyList()) else emptyList() }
+        // And each side of a "日本語 - Romaji" title: a video carries one of them, rarely both.
+        val sides = names.flatMap { n -> n.split(Regex("\\s+[-–—/]\\s+")).takeIf { it.size > 1 }.orEmpty() }
+        val artistKey = norm(artist)
+        val cores = (names + sides).map(::norm).filter { it.length >= 2 && it != artistKey }.distinct()
+        fun words(x: String) = Normalizer.normalize(x, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
+            .split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.toSet()
         val length = song.durationMillis() / 1000
         return hits.filter { h ->
-            core.length >= 2 && core in norm(h.title) &&
+            val t = norm(h.title)
+            val w = words(h.title)
+            cores.any { c -> if (c.length >= 4) c in t else c in w } &&
                 (length <= 0 || h.durationSec <= 0 || kotlin.math.abs(h.durationSec - length) <= 40)
         }.take(3).map { VideoRef(VideoRef.Site.VK, it.id) }
             .also { if (it.isNotEmpty()) TrackLog.d(TAG, "video for '${song.title}': VK has ${it.size}") }
