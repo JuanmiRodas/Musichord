@@ -395,8 +395,7 @@ object OwnFileMatcher {
         // another album that starts the same ("Fiction" vs "FictionJunction 2010-2013 The BEST").
         val wa = albumWords(a!!)
         val wb = albumWords(b!!)
-        val cjk = Regex("""[\p{IsHan}\p{IsHiragana}\p{IsKatakana}\p{IsHangul}]""")
-        if (cjk.containsMatchIn(a) || cjk.containsMatchIn(b)) {
+        if (hasCjk(a) || hasCjk(b)) {
             return minOf(x.length, y.length).toDouble() / maxOf(x.length, y.length) >= 0.6
         }
         val (short, long) = if (wa.size <= wb.size) wa to wb else wb to wa
@@ -421,7 +420,26 @@ object OwnFileMatcher {
     )
 
     /** BitChord Audio: whether an album (or a track) name says it is a live recording. */
-    fun isLiveRelease(name: String): Boolean = LIVE_RELEASE.containsMatchIn(name)
+    fun isLiveRelease(name: String): Boolean {
+        liveMemo[name]?.let { return it }
+        if (liveMemo.size > 30_000) liveMemo.clear()
+        return LIVE_RELEASE.containsMatchIn(name).also { liveMemo[name] = it }
+    }
+
+    private val liveMemo = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    private val CJK = Regex("""[\p{IsHan}\p{IsHiragana}\p{IsKatakana}\p{IsHangul}]""")
+    private val cjkMemo = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    /**
+     * BitChord Audio: whether a name is written in kanji, kana or hangul — worked out once
+     * per name: the Library tab weighs every album of yours against every album it shows.
+     */
+    fun hasCjk(name: String): Boolean {
+        cjkMemo[name]?.let { return it }
+        if (cjkMemo.size > 30_000) cjkMemo.clear()
+        return CJK.containsMatchIn(name).also { cjkMemo[name] = it }
+    }
 
     /** One letter apart, more or less: at least 85% alike as letters and digits. */
     fun nearSpelling(a: String, b: String): Boolean {

@@ -1833,6 +1833,7 @@
     <string name="link_check_wait_wifi">Esperando Wi-Fi</string>
     <string name="link_check_wait_network">Esperando a la Wi-Fi %1$s</string>
     <string name="link_check_wait_hours">Esperando a su horario (%1$s–%2$s)</string>
+    <string name="link_check_wait_in_use">En pausa mientras usas la app</string>
     <string name="link_check_wait_charging">Esperando a que el móvil esté cargando</string>
     <string name="link_check_preparing">Preparando la lista…</string>
     <string name="link_check_done_at">Al día · última pasada %1$s</string>

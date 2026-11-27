@@ -1291,9 +1291,20 @@ object YtMusicRepository {
                     failure.message?.contains("403") == true ||
                     failure.message?.contains("rejected", true) == true
                 if (!rejected || Innertube.cookie == null) throw failure
+                // BitChord Audio: YouTube's "Sorry…" page is its rate limit, not a
+                // rotated cookie — asking again at once only makes the block last.
+                if (YouTubeLimit.isLimit(failure)) {
+                    YouTubeLimit.hit(label)
+                    throw failure
+                }
                 Log.w(TAG, "$label rejected; refreshing active session context once")
                 Innertube.refreshSessionScope()
-                block()
+                try {
+                    block()
+                } catch (again: Throwable) {
+                    if (YouTubeLimit.isLimit(again)) YouTubeLimit.hit(label)
+                    throw again
+                }
             }
                 // runCatching catches Throwable, cancellation included, which
                 // would turn "the user typed another letter" into a failed

@@ -71,6 +71,8 @@ object DnaPeople {
         val works: List<Work> = emptyList(),
         val links: List<SongDna.Link> = emptyList(),
         val failed: List<String> = emptyList(),
+        /** BitChord Audio: how many times in a row those sources were asked again and still didn't answer. */
+        val tries: Int = 0,
     )
 
     /** A song of your library the person is credited on, with their roles there. */
@@ -117,7 +119,15 @@ object DnaPeople {
     fun cached(name: String): Person? = cache[SongDna.personKey(name)]
 
     private fun fresh(p: Person) =
-        System.currentTimeMillis() - p.fetchedAt < if (p.failed.isNotEmpty()) FRESH_FAILED_MS else FRESH_MS
+        System.currentTimeMillis() - p.fetchedAt < if (p.failed.isNotEmpty()) retryAfter(p.tries) else FRESH_MS
+
+    /** BitChord Audio: a source that didn't answer is asked again after 2 days, a week, a month — then with the ordinary refresh. */
+    private fun retryAfter(tries: Int): Long = when (tries) {
+        0 -> FRESH_FAILED_MS
+        1 -> 7L * 24 * 60 * 60 * 1000
+        2 -> 30L * 24 * 60 * 60 * 1000
+        else -> FRESH_MS
+    }
 
     // ── In your library ────────────────────────────────────────────────────
 
@@ -152,12 +162,18 @@ object DnaPeople {
         val key = SongDna.personKey(credit.name)
         if (!force) cache[key]?.takeIf(::fresh)?.let { return it }
         inFlight[key]?.let { if (!force) return it.await() }
-        val job = scope.async { lookUp(credit, key) }
+        // BitChord Audio: known, but some sources didn't answer: only they are asked again.
+        val gaps = cache[key]?.takeIf { !force && it.failed.isNotEmpty() }
+        val job = scope.async { lookUp(credit, key, only = gaps?.failed?.toSet()) }
         inFlight[key] = job
         return try {
             job.await().also { p ->
                 val old = cache[key]
-                cache[key] = if (old != null && p.failed.isNotEmpty()) merged(old, p) else p
+                cache[key] = when {
+                    gaps != null && old != null -> filledIn(old, p)
+                    old != null && p.failed.isNotEmpty() -> merged(old, p)
+                    else -> p
+                }
                 _changes.value++
                 scheduleSave()
             }
@@ -165,6 +181,24 @@ object DnaPeople {
             inFlight.remove(key)
         }
     }
+
+    /** BitChord Audio: what the sources asked again found, added to what was known; what still didn't answer, later each time. */
+    private fun filledIn(old: Person, new: Person) = old.copy(
+        fetchedAt = new.fetchedAt,
+        image = old.image ?: new.image,
+        about = old.about ?: new.about,
+        aboutSource = if (old.about != null) old.aboutSource else new.aboutSource,
+        facts = old.facts.ifEmpty { new.facts },
+        ytBrowseId = old.ytBrowseId ?: new.ytBrowseId,
+        works = (old.works + new.works).distinctBy { norm(it.title) + "|" + it.role }.take(200),
+        links = (old.links + new.links).distinctBy { it.url },
+        failed = new.failed,
+        tries = when {
+            new.failed.isEmpty() -> 0
+            com.music.bitchord.data.YouTubeLimit.active() -> old.tries
+            else -> old.tries + 1
+        },
+    )
 
     private fun merged(old: Person, new: Person) = new.copy(
         image = new.image ?: old.image,
@@ -204,9 +238,11 @@ object DnaPeople {
         return n
     }
 
-    private suspend fun lookUp(c: SongDna.Credit, key: String): Person = coroutineScope {
+    private suspend fun lookUp(c: SongDna.Credit, key: String, only: Set<String>? = null): Person = coroutineScope {
         val failed = java.util.Collections.synchronizedList(ArrayList<String>())
         suspend fun <T> ask(name: String, limit: Long, block: suspend () -> T?): T? {
+            // Asking again only those that didn't answer: the rest is already known.
+            if (only != null && name !in only) return null
             var answered = false
             val r = withTimeoutOrNull(limit) {
                 runCatching { block() }.onSuccess { answered = true }
@@ -426,6 +462,7 @@ object DnaPeople {
         }))
         put("ln", JSONArray(p.links.map { JSONObject().put("l", it.label).put("u", it.url) }))
         put("fail", JSONArray(p.failed))
+        if (p.tries > 0) put("tr", p.tries)
     }
 
     private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).map { optString(it) }
@@ -448,6 +485,7 @@ object DnaPeople {
         },
         links = o.optJSONArray("ln").objects().map { SongDna.Link(it.optString("l"), it.optString("u")) },
         failed = o.optJSONArray("fail").strings(),
+        tries = o.optInt("tr"),
     )
 
     @Suppress("unused")

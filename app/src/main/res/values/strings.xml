@@ -1767,6 +1767,7 @@
     <string name="link_check_wait_wifi">Waiting for Wi-Fi</string>
     <string name="link_check_wait_network">Waiting for the Wi-Fi %1$s</string>
     <string name="link_check_wait_hours">Waiting for its hours (%1$s–%2$s)</string>
+    <string name="link_check_wait_in_use">Paused while you use the app</string>
     <string name="link_check_wait_charging">Waiting for the phone to charge</string>
     <string name="link_check_preparing">Getting the list ready…</string>
     <string name="link_check_done_at">Up to date · last run %1$s</string>

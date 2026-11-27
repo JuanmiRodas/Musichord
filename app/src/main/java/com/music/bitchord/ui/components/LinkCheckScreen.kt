@@ -107,6 +107,7 @@ private fun LinkCheckContent(onClose: () -> Unit) {
                     w is AudioCheck.Wait.Network -> stringResource(R.string.link_check_wait_network, w.names.joinToString(", "))
                     w is AudioCheck.Wait.Hours -> stringResource(R.string.link_check_wait_hours, "%02d:00".format(w.from), "%02d:00".format(w.to))
                     w is AudioCheck.Wait.Charging -> stringResource(R.string.link_check_wait_charging)
+                    w is AudioCheck.Wait.InUse -> stringResource(R.string.link_check_wait_in_use)
                     p.running && p.current != null -> stringResource(R.string.audio_check_running, p.done, p.total, p.current!!)
                     p.running -> stringResource(R.string.link_check_preparing)
                     p.lastRun > 0 -> stringResource(R.string.link_check_done_at, java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(p.lastRun)))

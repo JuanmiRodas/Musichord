@@ -116,8 +116,7 @@ object OwnLibrary {
         // (kanji / kana against its romaji) — never a live release for a studio one, nor two
         // albums that merely share a word.
         if (OwnFileMatcher.isLiveRelease(a) != OwnFileMatcher.isLiveRelease(b)) return false
-        val cjk = Regex("""[\p{IsHan}\p{IsHiragana}\p{IsKatakana}\p{IsHangul}]""")
-        if (cjk.containsMatchIn(a) == cjk.containsMatchIn(b)) return false
+        if (OwnFileMatcher.hasCjk(a) == OwnFileMatcher.hasCjk(b)) return false
         val ka = keysOf(a).filter { it.length >= 4 }
         val kb = keysOf(b)
         return ka.any { it in kb } &&
@@ -260,7 +259,8 @@ object OwnLibrary {
     fun mergeLibrary(shelves: List<HomeShelf>, albumsTitle: String, artistsTitle: String): List<HomeShelf> {
         val pool = (WebDavRepository.library() + _uploads.value).filter { !it.albumName.isNullOrBlank() }
         if (pool.isEmpty()) return shelves
-        val shown = shelves.flatMap { it.items }.map { it.title }
+        // Each name shown once: every album of yours is weighed against all of them.
+        val shown = shelves.flatMap { it.items }.map { it.title }.distinct()
         // A compilation's songs are one album, whoever sings each.
         val compilations = pool.groupBy { OwnFileMatcher.key(it.albumName!!.trim()) }
             .filter { (_, t) -> isCompilationName(t.first().albumName!!) && t.map { OwnFileMatcher.key(it.artist.split(PARTS).first()) }.distinct().size >= 2 }

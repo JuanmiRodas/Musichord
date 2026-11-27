@@ -80,6 +80,8 @@ object AudioCheck {
         data class Hours(val from: Int, val to: Int) : Wait
         data object Charging : Wait
         data object Paused : Wait
+        /** You are using the app (or YouTube is limiting requests): it carries on afterwards. */
+        data object InUse : Wait
     }
 
     /** When the check may run: any Wi-Fi by default; or the [wifiNames] given, between [fromHour] and [toHour], charging. */
@@ -177,6 +179,8 @@ object AudioCheck {
         val inHours = if (sc.fromHour == sc.toHour) true else if (sc.fromHour < sc.toHour) h in sc.fromHour until sc.toHour else h >= sc.fromHour || h < sc.toHour
         if (!inHours) return Wait.Hours(sc.fromHour, sc.toHour)
         if (sc.chargingOnly && !charging(context)) return Wait.Charging
+        // BitChord Audio: night work steps aside while you use the app, or while YouTube is limiting.
+        if (com.music.bitchord.data.BackgroundHours.inUse() || com.music.bitchord.data.YouTubeLimit.active()) return Wait.InUse
         return null
     }
 

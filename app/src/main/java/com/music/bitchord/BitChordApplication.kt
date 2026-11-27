@@ -86,6 +86,8 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory, Configu
                 }
             })
         }
+        // BitChord Audio: night work steps aside while the app is in use.
+        com.music.bitchord.data.BackgroundHours.init(this)
         // BitChord Audio: settings synced from pCloud last session go in
         // before anything reads them.
         com.music.bitchord.data.sync.SettingsSync.applyPending(this)

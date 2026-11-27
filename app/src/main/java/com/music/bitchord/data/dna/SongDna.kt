@@ -123,6 +123,8 @@ object SongDna {
         val sources: List<String> = emptyList(),
         /** Sources that didn't answer (network, timeout): asked again sooner, and nothing of theirs is lost. */
         val failed: List<String> = emptyList(),
+        /** BitChord Audio: how many times in a row those sources were asked again and still didn't answer. */
+        val tries: Int = 0,
     ) {
         val empty: Boolean
             get() = credits.isEmpty() && facts.isEmpty() && relations.isEmpty() && covers.isEmpty() && genres.isEmpty()
@@ -265,10 +267,22 @@ object SongDna {
         d.version == VERSION && timeFresh(d)
 
     private fun timeFresh(d: Dna): Boolean = System.currentTimeMillis() - d.fetchedAt < when {
-            d.failed.isNotEmpty() -> FRESH_FAILED_MS
+            d.failed.isNotEmpty() -> retryAfter(d.tries)
             d.empty -> FRESH_EMPTY_MS
             else -> FRESH_MS
         }
+
+    /**
+     * BitChord Audio: a source that didn't answer is asked again after 2 days, then a
+     * week, then a month — then only with the song's ordinary refresh, so a source
+     * that is gone or blocking doesn't bring the song back night after night.
+     */
+    private fun retryAfter(tries: Int): Long = when (tries) {
+        0 -> FRESH_FAILED_MS
+        1 -> 7L * 24 * 60 * 60 * 1000
+        2 -> 30L * 24 * 60 * 60 * 1000
+        else -> FRESH_MS
+    }
 
     /** [song]'s DNA: what is kept, or looked up now ([force]: looked up again anyway). */
     suspend fun get(song: Song, force: Boolean = false): Dna {
@@ -278,8 +292,11 @@ object SongDna {
         if (running != null && !force) return running.await()
         // Looked up before the Japanese / anime / game sources existed: only they are asked now.
         val older = cache[key]?.takeIf { !force && it.version == 2 && timeFresh(it) }
+        // BitChord Audio: known, but some sources didn't answer: only they are asked again.
+        val gaps = cache[key]?.takeIf { !force && older == null && it.version == VERSION && it.failed.isNotEmpty() }
         val job = scope.async {
             if (older != null) withJapan(song, older)
+            else if (gaps != null) filledIn(gaps, lookUp(song, key, only = gaps.failed.toSet(), old = gaps))
             else lookUp(song, key).let { new -> cache[key]?.let { old -> merged(old, new) } ?: new }
         }
         inFlight[key] = job
@@ -373,12 +390,14 @@ object SongDna {
         var catalog: String? = null
     }
 
-    private suspend fun lookUp(song: Song, key: String): Dna = coroutineScope {
+    private suspend fun lookUp(song: Song, key: String, only: Set<String>? = null, old: Dna? = null): Dna = coroutineScope {
         val titles = titles(song.title)
         val artist = firstArtist(song.artist)
         val seconds = secondsOf(song.durationText)
         val failed = java.util.Collections.synchronizedList(ArrayList<String>())
         suspend fun ask(name: String, limit: Long, block: suspend () -> Found?): Found? {
+            // Asking again only those that didn't answer: the rest is already known.
+            if (only != null && name !in only) return null
             var answered = false
             val r = withTimeoutOrNull(limit) {
                 runCatching { block() }
@@ -401,7 +420,7 @@ object SongDna {
             "TheAudioDB" to suspend { audioDb(titles, artist) },
             "AnimeThemes" to suspend { animeThemes(song) },
         ).map { (name, block) -> async(Dispatchers.IO) { ask(name, 15_000, block) } }.mapNotNull { it.await() }
-        val isrc = first.firstNotNullOfOrNull { it.isrc }
+        val isrc = first.firstNotNullOfOrNull { it.isrc } ?: old?.isrc
         // 2. MusicBrainz: by the ISRC when there is one (no guessing), else by name and length.
         val mb = ask("MusicBrainz", 45_000) { musicBrainz(titles, artist, isrc, seconds) }
         val found = first + listOfNotNull(mb)
@@ -507,6 +526,41 @@ object SongDna {
      * A new look-up on top of the last one: what a source said before is kept when it
      * didn't answer this time, so a bad night never makes a song's page poorer.
      */
+    /**
+     * BitChord Audio: what the sources asked again found, added to what was known — nothing
+     * known is lost; what still didn't answer is kept for later, a little later each time
+     * (not counted while YouTube is limiting requests: that is no answer about the song).
+     */
+    private fun filledIn(old: Dna, new: Dna): Dna {
+        fun <T> keep(a: List<T>, b: List<T>, n: Int, by: (T) -> Any) = (a + b).distinctBy(by).take(n)
+        return old.copy(
+            fetchedAt = new.fetchedAt,
+            version = VERSION,
+            album = old.album ?: new.album,
+            releaseDate = earliestDate(listOfNotNull(old.releaseDate, new.releaseDate)),
+            label = old.label ?: new.label,
+            catalog = old.catalog ?: new.catalog,
+            isrc = old.isrc ?: new.isrc,
+            bpm = old.bpm ?: new.bpm,
+            language = old.language ?: new.language,
+            genres = keep(old.genres, new.genres, 8) { it.lowercase() },
+            credits = mergeCredits(old.credits + new.credits),
+            facts = keep(old.facts, new.facts, 9) { it.text.take(60) },
+            covers = keep(old.covers, new.covers, 24) { it.url },
+            relations = keep(old.relations, new.relations, 60) { it.kind + it.title + it.artist },
+            uses = keep(old.uses, new.uses, 16) { it.lowercase() },
+            stats = new.stats + old.stats,
+            links = keep(old.links, new.links, 20) { it.url },
+            sources = (old.sources + new.sources).distinct(),
+            failed = new.failed,
+            tries = when {
+                new.failed.isEmpty() -> 0
+                com.music.bitchord.data.YouTubeLimit.active() -> old.tries
+                else -> old.tries + 1
+            },
+        )
+    }
+
     private fun merged(old: Dna, new: Dna): Dna {
         if (new.failed.isEmpty()) return new
         val lost = old.sources.filter { it in new.failed }
@@ -1133,6 +1187,7 @@ object SongDna {
         put("ln", JSONArray(d.links.map { JSONObject().put("l", it.label).put("u", it.url) }))
         put("src", JSONArray(d.sources))
         put("fail", JSONArray(d.failed))
+        if (d.tries > 0) put("tr", d.tries)
     }
 
     private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).map { optString(it) }
@@ -1175,6 +1230,7 @@ object SongDna {
         links = o.optJSONArray("ln").objects().map { Link(it.optString("l"), it.optString("u")) },
         sources = o.optJSONArray("src").strings(),
         failed = o.optJSONArray("fail").strings(),
+        tries = o.optInt("tr"),
     )
 
     /** Whether [song] is a file of yours (pCloud) — used by the page's "File" section. */
