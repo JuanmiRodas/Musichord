@@ -294,7 +294,9 @@ object SongDna {
         val older = cache[key]?.takeIf { !force && it.version == 2 && timeFresh(it) }
         // BitChord Audio: known, but some sources didn't answer: only they are asked again.
         val gaps = cache[key]?.takeIf { !force && older == null && it.version == VERSION && it.failed.isNotEmpty() }
-        val job = scope.async {
+        // The night's mark (if any) goes with the look-up, so its YouTube requests are paced.
+        val mark = kotlin.coroutines.coroutineContext[com.music.bitchord.data.YouTubeLimit.BackgroundKey] ?: kotlin.coroutines.EmptyCoroutineContext
+        val job = scope.async(mark) {
             if (older != null) withJapan(song, older)
             else if (gaps != null) filledIn(gaps, lookUp(song, key, only = gaps.failed.toSet(), old = gaps))
             else lookUp(song, key).let { new -> cache[key]?.let { old -> merged(old, new) } ?: new }
@@ -320,7 +322,8 @@ object SongDna {
      */
     fun fillAll() {
         if (filling?.isActive == true) return
-        filling = scope.launch {
+        // BitChord Audio: marked as the night's own work — its YouTube requests take turns.
+        filling = scope.launch(com.music.bitchord.data.YouTubeLimit.Background) {
             delay(120_000)
             while (true) {
                 BackgroundHours.await()

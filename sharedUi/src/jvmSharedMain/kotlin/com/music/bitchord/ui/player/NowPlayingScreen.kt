@@ -5884,7 +5884,13 @@ private val SongInfoTrim = androidx.compose.ui.text.style.LineHeightStyle(
 /** BitChord Audio: the album page a song's title and album open — looked up (whole album) as it shows. */
 @Composable
 private fun rememberAlbumPage(song: Song): String? {
-    val page by androidx.compose.runtime.produceState(PlayerPlatform.host.albumPageOf(song), song.videoId, song.albumName) {
+    // BitChord Audio: worked out away from the screen's thread, once per song. As produceState's
+    // first value it ran on every redraw of the player (three places), matching artist names
+    // through the whole library each time — the player stuttered on every song change.
+    val page by androidx.compose.runtime.produceState<String?>(null, song.videoId, song.albumName) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { PlayerPlatform.host.albumPageOf(song) }.getOrNull()
+        }
         value = runCatching { PlayerPlatform.host.albumPageResolved(song) }.getOrNull() ?: value
     }
     return page

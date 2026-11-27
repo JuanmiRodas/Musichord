@@ -5,6 +5,7 @@ import com.music.bitchord.data.OwnLibrary
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.sources.OwnFileMatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -48,10 +49,11 @@ object PcloudAlbums {
     suspend fun youTubeAlbumId(song: Song): String? {
         val album = song.albumName?.takeIf { it.isNotBlank() } ?: return null
         val artist = song.artist.substringBefore(',').trim()
+        // A search YouTube refused is thrown: "not asked" isn't "no album".
         val results = com.music.bitchord.data.YtMusicRepository.search(
             "$album $artist",
             com.music.bitchord.data.model.SearchFilter.ALBUMS,
-        ).getOrNull().orEmpty()
+        ).getOrThrow()
         val albums = results.mapNotNull { (it as? com.music.bitchord.data.model.SearchResult.Browse)?.item }
         val hit = albums.firstOrNull { OwnFileMatcher.sameAlbum(album, it.title) && it.subtitle.contains(artist, ignoreCase = true) }
             ?: albums.firstOrNull { OwnFileMatcher.sameAlbum(album, it.title) && OwnFileMatcher.sameArtist(song.artist, it.subtitle.substringAfterLast(" • ")) }
@@ -94,11 +96,30 @@ object PcloudAlbums {
      */
     suspend fun resolveYouTubeAlbum(song: Song): String? {
         knownYouTubeAlbum(song)?.let { return it }
+        // BitChord Audio: while YouTube is limiting requests it isn't asked at all; and the
+        // player's three places asking at once for a new song share one look-up.
+        if (com.music.bitchord.data.YouTubeLimit.active()) return null
+        val flight = (song.albumName?.takeIf { it.isNotBlank() }?.let { albumKey(song.artist, it) } ?: ("song|" + song.videoId))
+        resolving[flight]?.let { return runCatching { it.await() }.getOrNull() }
+        val job = scope.async { resolveOnce(song) }
+        resolving[flight] = job
+        return try {
+            runCatching { job.await() }.getOrNull()
+        } finally {
+            resolving.remove(flight)
+        }
+    }
+
+    private val resolving = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<String?>>()
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
+    private suspend fun resolveOnce(song: Song): String? {
         val album = song.albumName?.takeIf { it.isNotBlank() }
         if (album != null) {
             val key = albumKey(song.artist, album)
             if (ytAlbums[key] == NONE) return null
-            val id = runCatching { youTubeAlbumId(song) }.getOrNull()
+            // Kept as "none" only when YouTube answered; a refused search is asked again later.
+            val id = runCatching { youTubeAlbumId(song) }.getOrElse { return null }
             ytAlbums[key] = id ?: NONE
             return id
         }
@@ -106,9 +127,8 @@ object PcloudAlbums {
         if (ytAlbums[key] == NONE) return null
         val title = song.title.replace(Regex("""\s*[(\[].*?[)\]]"""), "").trim()
         val artist = song.artist.substringBefore(',').trim()
-        val hit = runCatching {
-            com.music.bitchord.data.YtMusicRepository.search("$title $artist", com.music.bitchord.data.model.SearchFilter.SONGS).getOrNull().orEmpty()
-        }.getOrDefault(emptyList()).mapNotNull { (it as? com.music.bitchord.data.model.SearchResult.Track)?.song }
+        val hit = com.music.bitchord.data.YtMusicRepository.search("$title $artist", com.music.bitchord.data.model.SearchFilter.SONGS)
+            .getOrElse { return null }.mapNotNull { (it as? com.music.bitchord.data.model.SearchResult.Track)?.song }
             .firstOrNull { s ->
                 s.albumId?.startsWith("MPREb") == true &&
                     s.title.lowercase().filter { it.isLetterOrDigit() } == title.lowercase().filter { it.isLetterOrDigit() } &&

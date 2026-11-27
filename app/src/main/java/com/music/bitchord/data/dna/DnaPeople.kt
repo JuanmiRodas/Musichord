@@ -158,13 +158,14 @@ object DnaPeople {
     // ── Looking a person up ────────────────────────────────────────────────
 
     /** [credit]'s page: what is kept, or looked up now. [ids]: every credit of theirs on the song. */
-    suspend fun get(credit: SongDna.Credit, force: Boolean = false): Person {
+    suspend fun get(credit: SongDna.Credit, force: Boolean = false, background: Boolean = false): Person {
         val key = SongDna.personKey(credit.name)
         if (!force) cache[key]?.takeIf(::fresh)?.let { return it }
         inFlight[key]?.let { if (!force) return it.await() }
         // BitChord Audio: known, but some sources didn't answer: only they are asked again.
         val gaps = cache[key]?.takeIf { !force && it.failed.isNotEmpty() }
-        val job = scope.async { lookUp(credit, key, only = gaps?.failed?.toSet()) }
+        val mark = kotlin.coroutines.coroutineContext[com.music.bitchord.data.YouTubeLimit.BackgroundKey] ?: kotlin.coroutines.EmptyCoroutineContext
+        val job = scope.async(mark) { lookUp(credit, key, only = gaps?.failed?.toSet(), withYouTube = !background) }
         inFlight[key] = job
         return try {
             job.await().also { p ->
@@ -231,14 +232,19 @@ object DnaPeople {
         var n = 0
         for (c in people.take(limit)) {
             if (!stillNight()) break
-            runCatching { withTimeoutOrNull(60_000) { get(c) } }
+            runCatching { withTimeoutOrNull(60_000) { get(c, background = true) } }
             n++
             delay(1_500)
         }
         return n
     }
 
-    private suspend fun lookUp(c: SongDna.Credit, key: String, only: Set<String>? = null): Person = coroutineScope {
+    /**
+     * [withYouTube]: YouTube Music only gives the person's photo and channel, which Genius,
+     * Discogs and MusicBrainz mostly give too — so the night's pass leaves it out (it was most
+     * of the night's YouTube traffic); a page you open asks it.
+     */
+    private suspend fun lookUp(c: SongDna.Credit, key: String, only: Set<String>? = null, withYouTube: Boolean = true): Person = coroutineScope {
         val failed = java.util.Collections.synchronizedList(ArrayList<String>())
         suspend fun <T> ask(name: String, limit: Long, block: suspend () -> T?): T? {
             // Asking again only those that didn't answer: the rest is already known.
@@ -251,7 +257,7 @@ object DnaPeople {
             if (!answered) failed += name
             return r
         }
-        val yt = async { ask("YouTube Music", 12_000) { youTube(c) } }
+        val yt = async { if (withYouTube) ask("YouTube Music", 12_000) { youTube(c) } else null }
         val genius = async { ask("Genius", 20_000) { genius(c) } }
         val discogs = async { ask("Discogs", 20_000) { discogs(c) } }
         val mb = async { ask("MusicBrainz", 40_000) { musicBrainz(c) } }

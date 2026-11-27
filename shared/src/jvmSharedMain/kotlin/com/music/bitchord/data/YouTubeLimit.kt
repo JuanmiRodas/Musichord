@@ -28,4 +28,30 @@ object YouTubeLimit {
 
     /** Whether background work should leave YouTube alone now. */
     fun active(): Boolean = System.currentTimeMillis() < until
+
+    /**
+     * Marks work that runs by itself (the night's jobs): its YouTube Music requests go one
+     * at a time, [GAP_MS] apart, so they never add up to what Google takes for a robot.
+     * What you ask for yourself carries no mark and is never held back.
+     */
+    object Background : kotlin.coroutines.AbstractCoroutineContextElement(BackgroundKey)
+
+    object BackgroundKey : kotlin.coroutines.CoroutineContext.Key<Background>
+
+    private const val GAP_MS = 4_000L
+    private val paceLock = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var lastBackground = 0L
+
+    /** Waits for background work's turn at YouTube (nothing for your own requests). */
+    suspend fun pace() {
+        if (kotlin.coroutines.coroutineContext[BackgroundKey] == null) return
+        paceLock.lock()
+        try {
+            val wait = lastBackground + GAP_MS - System.currentTimeMillis()
+            if (wait > 0) kotlinx.coroutines.delay(wait)
+            lastBackground = System.currentTimeMillis()
+        } finally {
+            paceLock.unlock()
+        }
+    }
 }

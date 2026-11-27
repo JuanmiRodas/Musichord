@@ -157,13 +157,27 @@ object OwnFileMatcher {
             .toSet()
 
     /** The same person or group, in any order of names or with a member list around it. */
-    fun sameArtist(a: String, b: String): Boolean {
-        // A name in kanji read as romaji words too: 森川美穂 = Miho Morikawa.
-        fun names(s: String) = s.split(ARTIST_SPLIT).flatMap { part ->
+    private val artistNamesMemo = java.util.concurrent.ConcurrentHashMap<String, List<Set<String>>>()
+
+    /**
+     * BitChord Audio: an artist credit's names as word sets (a kanji name read as romaji too),
+     * worked out once per credit — reading kanji takes the dictionary, and album pages and
+     * the player weigh one artist against every artist of the library.
+     */
+    private fun artistNames(s: String): List<Set<String>> {
+        artistNamesMemo[s]?.let { return it }
+        if (artistNamesMemo.size > 20_000) artistNamesMemo.clear()
+        val out = s.split(ARTIST_SPLIT).flatMap { part ->
             listOfNotNull(words(part), JapaneseReading.romajiWords(part))
         }.filter { it.isNotEmpty() }
-        val left = names(a)
-        val right = names(b)
+        artistNamesMemo[s] = out
+        return out
+    }
+
+    fun sameArtist(a: String, b: String): Boolean {
+        // A name in kanji read as romaji words too: 森川美穂 = Miho Morikawa.
+        val left = artistNames(a)
+        val right = artistNames(b)
         for (x in left) for (y in right) {
             if (x == y) return true
             val shorter = if (x.size <= y.size) x else y
